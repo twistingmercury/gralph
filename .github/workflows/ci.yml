@@ -74,6 +74,7 @@ jobs:
           path: .bin
           retention-days: 90
           if-no-files-found: error
+          include-hidden-files: true
 
       - name: Build summary
         if: always()
