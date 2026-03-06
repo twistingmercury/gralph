@@ -8,7 +8,7 @@ GOBIN := ${HOME}/go/bin
 GOOS :=  $(shell go env GOOS)
 GOARCH := $(shell go env GOARCH)
 
-LOCAL_BUILD := $(CURDIR)/.bin/${GOOS}/${GOARCH}
+LOCAL_BUILD := $(CURDIR)/.bin/local
 
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*##"; printf "\n\033[1mAvailable targets:\033[0m\n"} /^[a-zA-Z0-9_-]+:.*##/ { printf "  %-12s %s\n", $$1, $$2 }' $(MAKEFILE_LIST)

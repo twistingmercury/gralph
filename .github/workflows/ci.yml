@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - develop
+      - main
+  pull_request:
+    branches:
+      - develop
+      - main
+
+jobs:
+  build:
+    name: Docker Build & Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for version metadata
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Cache Docker layers
+        uses: actions/cache@v4
+        with:
+          path: /tmp/.buildx-cache
+          key: ${{ runner.os }}-buildx-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-buildx-
+
+      - name: Run Docker-first build
+        run: |
+          chmod +x build/build.sh
+          ./build/build.sh
+        env:
+          DOCKER_BUILDKIT: 1
+
+      - name: Verify binaries
+        run: |
+          echo "## Build Artifacts" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Architecture | OS | Binary | Size |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------------|----|---------:|-----:|" >> $GITHUB_STEP_SUMMARY
+
+          find .bin -type f -name 'gralph*' | while read -r binary; do
+            arch=$(echo "$binary" | cut -d'/' -f2)
+            os=$(echo "$binary" | cut -d'/' -f3)
+            size=$(du -h "$binary" | cut -f1)
+            echo "| $arch | $os | gralph | $size |" >> $GITHUB_STEP_SUMMARY
+          done
+
+          # Verify at least one binary exists
+          if [ ! -d ".bin" ] || [ -z "$(find .bin -type f -name 'gralph*')" ]; then
+            echo "::error::No binaries found in .bin/ directory"
+            exit 1
+          fi
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: gralph-binaries-${{ github.sha }}
+          path: .bin/
+          retention-days: 90
+          if-no-files-found: error
+
+      - name: Build summary
+        if: always()
+        run: |
+          echo "## Build Metadata" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit**: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch**: ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Trigger**: ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Runner**: ubuntu-latest" >> $GITHUB_STEP_SUMMARY
