@@ -1,23 +1,6 @@
 services:
-  api:
-    image: uuid_api:latest
-    container_name: uuid_api
-    ports:
-      - "8080:8080"
-    healthcheck:
-      test: ["CMD", "/uuid_api", "--health"]
-      interval: 2s
-      timeout: 5s
-      retries: 5
-
-
   tests:
     build:
       context: ..
       dockerfile: tests/e2e/Dockerfile
-    container_name: cli-e2e-tests
-    environment:
-      - API_URL=http://api:8080
-    depends_on:
-      api:
-        condition: service_healthy
+    container_name: gralph-e2e-tests

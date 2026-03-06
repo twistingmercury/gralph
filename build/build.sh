@@ -4,7 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJ_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-IMAGE_NAME="${IMAGE_NAME:-cli-build-example}"
+IMAGE_NAME="${IMAGE_NAME:-gralph}"
 IMAGE_TAG="${IMAGE_TAG:-latest}"
 OUTPUT_DIR="${OUTPUT_DIR:-${PROJ_ROOT}/.bin}"
 
@@ -35,7 +35,7 @@ e2e_tests(){
 
 main(){
     export_binaries
-    # e2e_tests
+    e2e_tests
 }
 
 main "$@"
