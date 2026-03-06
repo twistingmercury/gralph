@@ -59,6 +59,14 @@ jobs:
             exit 1
           fi
 
+          # Debug: List directory structure
+          echo "=== Debug: .bin directory contents ==="
+          ls -laR .bin/ || echo "ERROR: .bin/ not found"
+          echo "=== Debug: PWD ==="
+          pwd
+          echo "=== Debug: find results ==="
+          find .bin -type f
+
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
