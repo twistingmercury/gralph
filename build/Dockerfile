@@ -33,4 +33,4 @@ RUN CGO_ENABLED=0 GOARCH=arm64 GOOS=windows go build --ldflags "${LD_FLAGS}" -o 
 #---------------------------------------------------------------------
 FROM scratch AS export
 
-COPY --from=builder /.bin/ .
+COPY --from=builder /.bin/ .bin/
