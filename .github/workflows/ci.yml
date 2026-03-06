@@ -71,7 +71,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: gralph-binaries-${{ github.sha }}
-          path: .bin/**
+          path: .bin
           retention-days: 90
           if-no-files-found: error
 
