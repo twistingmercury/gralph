@@ -1,19 +1,19 @@
-FROM golang:1.25-alpine AS builder
+FROM golang:1.26-alpine AS runner
 
-ENV GOTOOLCHAIN=auto
+RUN apk add --no-cache git bash
 
-RUN apk add --no-cache curl bash
+# Copy the pre-built binary exported by build/Dockerfile into the container.
+# build/build.sh must run before docker compose up so the binary exists in .bin/.
+ARG GOARCH=amd64
+ARG GOOS=linux
+COPY .bin/${GOARCH}/${GOOS}/gralph /usr/local/bin/gralph
 
-WORKDIR /e2e
+# Copy the e2e test source only — no main module needed.
+WORKDIR /workspace/tests/e2e
+COPY tests/e2e/ .
 
-COPY tests/e2e/go.mod tests/e2e/go.sum ./
 RUN go mod download
 
-COPY .bin/amd64/linux/* /go/bin/
-COPY tests/e2e/cli_test.go ./
-COPY tests/e2e/test-runner.sh /test-runner.sh
+ENV GRALPH_BINARY=/usr/local/bin/gralph
 
-RUN chmod +x /test-runner.sh
-
-ENTRYPOINT ["/test-runner.sh"]
-
+CMD ["go", "test", "-v", "./..."]
