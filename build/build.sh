@@ -20,7 +20,7 @@ export_binaries(){
         --build-arg BUILD_DATE="${BUILD_DATE}" \
         --build-arg BUILD_COMMIT="${BUILD_COMMIT}" \
         --target export \
-        --output "${OUTPUT_DIR}" \
+        --output "type=local,dest=${OUTPUT_DIR}" \
         --tag "${IMAGE_NAME}:${IMAGE_TAG}" \
         "${PROJ_ROOT}"
 
