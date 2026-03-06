@@ -20,8 +20,6 @@ local: ## Performs only a local build of gralph
 	-o ${LOCAL_BUILD}/gralph \
 	./cmd/main
 
-build-local: local ## Alias used by e2e to ensure the local binary exists
-
 build: ## Performs a full build of gralph (Docker-based; use `make local` for a quick local binary)
 	./build/build.sh
 
@@ -34,5 +32,11 @@ uninstall: ## Uninstall gralph to $GOBIN
 test: ## Runs unit tests only (internal packages). Run `make e2e` for integration tests.
 	go test -v ./internal/...
 
-e2e: build-local ## Runs e2e integration tests locally against the built binary
+e2e: local ## Runs e2e integration tests locally against the built binary
 	cd tests/e2e && GRALPH_BINARY=${LOCAL_BUILD}/gralph go test -v .
+
+analyze: ## Run linters, formatters, security scanners, etc
+	goimports -w .
+	golangci-lint run
+	govulncheck ./cmd/... ./internal/...
+	gosec -quiet -exclude-dir=tests ./...

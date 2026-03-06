@@ -14,7 +14,7 @@ BUILD_COMMIT="${BUILD_COMMIT:-$(git -C "${PROJ_ROOT}" rev-parse --short HEAD 2>/
 
 export_binaries(){
     printf "\n=== exporting binaries ===\n"
-    docker build --rm --no-cache \
+    docker build --rm --no-cache --pull \
         --file "${SCRIPT_DIR}/Dockerfile" \
         --build-arg BUILD_VER="${BUILD_VER}" \
         --build-arg BUILD_DATE="${BUILD_DATE}" \

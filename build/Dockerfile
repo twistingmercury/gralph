@@ -1,7 +1,5 @@
 FROM ghcr.io/twistingmercury/golang-tooling:alpine AS builder
 
-RUN apk add --no-cache git bash
-
 ARG BUILD_VER
 ARG BUILD_DATE
 ARG BUILD_COMMIT
