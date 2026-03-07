@@ -75,7 +75,7 @@ Cycles should be ordered so earlier ones unblock later work.
 If a cycle takes more than one agent, split it into separate cycles.
 -->
 
-- [ ] **Cycle 1 - Parse migration file format and detect applied migrations**
+- [ ] **Cycle 1 - Parse migration file format and detect applied migrations**: Implement parser to discover migration files and read applied migrations from the database.
   - Agent: `go-software-engineer`
   - Files: `internal/migration/parser.go`, `internal/migration/parser_test.go`
   - Steps:
@@ -83,7 +83,7 @@ If a cycle takes more than one agent, split it into separate cycles.
     - Implement `ParseAppliedMigrations` to read the migrations table and extract applied version numbers.
     - Return errors on missing directories, non-numeric prefixes, or malformed migration files.
   - Verify: `go test ./internal/migration -run TestParse -v`
-  - Done: Parser correctly identifies available and applied migrations; no false positives on file names.
+  - Done: Calling parseAvailableMigrations on a migration directory with three `.up.sql` files returns an ordered list; calling parseAppliedMigrations on the migrations table returns only versions that have been executed. No false positives on non-numeric filenames.
 
 - [ ] **Cycle 2 - <short title>**: <one-sentence description of what this cycle delivers>.
   - Agent: <!-- one of: go-software-engineer, go-software-architect, devops-engineer, data-engineer, data-architect, api-architect, technical-writer, solutions-architect, bats-test-engineer, go-e2e-test-engineer -->
@@ -92,7 +92,7 @@ If a cycle takes more than one agent, split it into separate cycles.
     - <!-- atomic, grep-friendly action -->
     - <!-- atomic, grep-friendly action -->
   - Verify: <!-- runnable command, e.g. `go test ./internal/parser -v` — not a description -->
-  - Done: <!-- observable exit condition, not a restatement of steps -->
+  - Done: <!-- observable exit condition, not a restatement of steps. Example: "Parser returns an ordered list of pending migrations for a directory of numbered .up.sql files." -->
 
 ## Risks and Mitigations
 
@@ -104,11 +104,13 @@ or when the cycle is too large and gets stuck on unrelated problems.
 Include worked examples of Risk / Mitigation pairs.
 -->
 
-- Risk: Database errors in migration execution cause the loop to abort instead of cleanly reporting failure.
-  - Mitigation: Wrap executor in error handler that logs the failure and continues to next migration; exit non-zero only after all pending migrations are attempted.
+<!-- Replace these examples with risks specific to your project. -->
 
-- Risk: Dry-run mode is incomplete and loop cycles get stuck debugging whether a change actually happened.
-  - Mitigation: Implement dry-run as a parsed-but-not-executed path early in Cycle 2; verify in unit tests that dry-run queries the database but does not write.
+- *Risk: The `Done` condition for a cycle is too vague to evaluate, causing Claude to loop indefinitely without completing the item.*
+  - *Mitigation: Write `Done` as a concrete, observable state tied to the `Verify` command — not a restatement of intent.*
+
+- *Risk: Dry-run mode is incomplete and loop cycles get stuck debugging whether a change actually happened.*
+  - *Mitigation: Implement dry-run as a parsed-but-not-executed path early in Cycle 2; verify in unit tests that dry-run queries the database but does not write.*
 
 ## Definition of Done
 
