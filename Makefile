@@ -8,7 +8,7 @@ GOBIN := ${HOME}/go/bin
 GOOS :=  $(shell go env GOOS)
 GOARCH := $(shell go env GOARCH)
 
-LOCAL_BUILD := $(CURDIR)/.bin/${GOOS}/${GOARCH}
+LOCAL_BUILD := $(CURDIR)/.bin/local
 
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*##"; printf "\n\033[1mAvailable targets:\033[0m\n"} /^[a-zA-Z0-9_-]+:.*##/ { printf "  %-12s %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
@@ -19,8 +19,6 @@ local: ## Performs only a local build of gralph
 	--ldflags="-X 'github.com/twistingmercury/gralph/internal/version.version=${GIT_TAG}' -X 'github.com/twistingmercury/gralph/internal/version.buildDate=${BUILD_DATE}' -X 'github.com/twistingmercury/gralph/internal/version.gitCommit=${GIT_COMMIT}'" \
 	-o ${LOCAL_BUILD}/gralph \
 	./cmd/main
-
-build-local: local ## Alias used by e2e to ensure the local binary exists
 
 build: ## Performs a full build of gralph (Docker-based; use `make local` for a quick local binary)
 	./build/build.sh
@@ -34,5 +32,11 @@ uninstall: ## Uninstall gralph to $GOBIN
 test: ## Runs unit tests only (internal packages). Run `make e2e` for integration tests.
 	go test -v ./internal/...
 
-e2e: build-local ## Runs e2e integration tests locally against the built binary
+e2e: local ## Runs e2e integration tests locally against the built binary
 	cd tests/e2e && GRALPH_BINARY=${LOCAL_BUILD}/gralph go test -v .
+
+analyze: ## Run linters, formatters, security scanners, etc
+	goimports -w .
+	golangci-lint run
+	govulncheck ./cmd/... ./internal/...
+	gosec -quiet -exclude-dir=tests ./...
