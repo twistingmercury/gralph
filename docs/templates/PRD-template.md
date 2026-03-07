@@ -44,7 +44,6 @@ Be specific about features or components that will be included.
 - *Core schema migration runner and idempotency checks.*
 - *CLI flags for migration directory, database connection, and dry-run mode.*
 - *Migrations stored as `.up.sql` and `.down.sql` files with numeric prefixes.*
-- *Unit tests for parser, executor, and state tracking.*
 
 ### Out of scope
 
@@ -67,7 +66,6 @@ Include: architectural decisions, tooling choices, compatibility requirements, p
 - *Use only Go standard library for SQL driver integration; do not add new database dependencies.*
 - *Migration files are immutable once applied. Modifications require new migration files.*
 - *Prefer idempotence through schema-checking SQL over undo logic.*
-- *Keep migration execution deterministic and testable without live database in unit tests.*
 
 ## Implementation Plan
 
@@ -87,45 +85,14 @@ If a cycle takes more than one agent, split it into separate cycles.
   - Verify: `go test ./internal/migration -run TestParse -v`
   - Done: Parser correctly identifies available and applied migrations; no false positives on file names.
 
-- [ ] **Cycle 2 - Execute a single migration with idempotence checks**
-  - Agent: `go-software-engineer` <!-- Valid agents: go-software-engineer, go-software-architect, devops-engineer, data-engineer, data-architect, api-architect, technical-writer, solutions-architect, bats-test-engineer, go-e2e-test-engineer -->
-  - Files: `internal/migration/executor.go`, `internal/migration/executor_test.go`
+- [ ] **Cycle 2 - <short title>**: <one-sentence description of what this cycle delivers>.
+  - Agent: <!-- one of: go-software-engineer, go-software-architect, devops-engineer, data-engineer, data-architect, api-architect, technical-writer, solutions-architect, bats-test-engineer, go-e2e-test-engineer -->
+  - Files: <!-- list only files this cycle touches -->
   - Steps:
-    - Implement `ExecuteMigration` to run a single `.up.sql` file against a database connection.
-    - Check for existence of migrations tracking table before insert; idempotently create if missing.
-    - Record applied version, timestamp, and file hash to prevent duplicate runs.
-    - Propagate database errors as non-zero returns without crashing the caller.
-  - Verify: `go test ./internal/migration -run TestExecute -v`
-  - Done: Executing the same migration twice does not duplicate state; database errors are surfaced.
-
-- [ ] **Cycle 3 - CLI entrypoint and flag parsing**
-  - Files: `cmd/migration/main.go`, `cmd/migration/main.go` <!-- Files touched by this cycle only -->
-  - Steps:
-    - Define flags: `--db-url`, `--migration-dir`, `--dry-run`, `--version`.
-    - Validate required flags and database connection string format.
-    - Wire parser and executor to command entry point.
-  - Verify: `go run ./cmd/migration --help`
-  - Done: Help output lists all flags; invalid flags or missing database URL exit with clear error message.
-
-- [ ] **Cycle 4 - Loop over pending migrations and report progress**
-  - Files: `internal/migration/runner.go`, `internal/migration/runner_test.go`, `cmd/migration/main.go`
-  - Steps:
-    - Implement `Run` to iterate parsed migrations in order, skip applied ones, and execute pending ones.
-    - Track and report per-migration outcome: skipped, executed, failed.
-    - Respect `--dry-run` flag and report what would run without modifying the database.
-  - Verify: `go test ./internal/migration -run TestRunner -v`
-  - Done: Loop executes all pending migrations in order; dry-run mode changes nothing in the database.
-
-- [ ] **Cycle 5 - README and final validation**
-  - Agent: `technical-writer`
-  - Files: `README.md`
-  - Steps:
-    - Document CLI usage with examples for common workflows: initialize database, apply migrations, dry-run.
-    - Explain migration file naming convention and `.up.sql` / `.down.sql` pattern.
-    - Document migration table schema and idempotence guarantees.
-    - Verify usage examples match implemented flags.
-  - Verify: `go test ./...`
-  - Done: README covers all supported flags and patterns; build and tests pass.
+    - <!-- atomic, grep-friendly action -->
+    - <!-- atomic, grep-friendly action -->
+  - Verify: <!-- runnable command, e.g. `go test ./internal/parser -v` — not a description -->
+  - Done: <!-- observable exit condition, not a restatement of steps -->
 
 ## Risks and Mitigations
 
