@@ -1,12 +1,20 @@
 # Gralph
 
-> **Maturity Level**: Emerging - under active development
+> **Maturity Level**: Emerging — under active development, expect breaking changes
 
 ---
 
 Gralph drives "Ralph loops" against a PRD checklist using Claude Code. It runs
 `claude --print --dangerously-skip-permissions` in a loop, advancing through
 checklist items until all are complete or abandoned.
+
+## Table of Contents
+
+- [Usage](#usage)
+- [How it works](#how-it-works)
+- [Key Considerations](#key-considerations)
+- [Development Considerations](#development-considerations)
+- [Versioning](#versioning)
 
 ## Usage
 
@@ -54,14 +62,22 @@ Gralph writes structured log lines to stdout:
 
 ```
 [gralph] start max_attempts=<n>
-[gralph] item item="..." attempt=<n> max=<n>
+[gralph] attempt item="..." attempt=<n> max=<n>
 [gralph] invoke
+[gralph] invoke_failed err=<error>
 [gralph] check item="..."
 [gralph] completed item="..."
 [gralph] retry item="..." attempt=<n> max=<n>
 [gralph] abandoned item="..."
 [gralph] done
 ```
+
+## Key Considerations
+
+- **Runs outside Claude sessions**: gralph is a wrapper that launches Claude as a subprocess. Do not invoke it from within a running Claude session.
+- **`claude` must be on PATH**: gralph calls `claude --print --dangerously-skip-permissions` directly; the Claude CLI must be installed and accessible.
+- **PRD mutation is destructive**: gralph overwrites the PRD file in place when abandoning items (`- [~]`). Keep a copy or use version control.
+- **Non-zero Claude exits are retried**: a failed Claude invocation counts as one attempt and does not crash the loop.
 
 ## Development Considerations
 
@@ -95,6 +111,12 @@ go build \
 go test ./...
 ```
 
-### Versioning
+## Versioning
 
-This project uses semantic versioning. Release tags follow the `vMAJOR.MINOR.PATCH` format.
+This project follows [Semantic Versioning 2.0.0](https://semver.org/). Current version: `v0.1.0`.
+
+Version is determined from git tags:
+
+```bash
+git describe --tags --always
+```
