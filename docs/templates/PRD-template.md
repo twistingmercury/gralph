@@ -75,6 +75,9 @@ Cycles should be ordered so earlier ones unblock later work.
 If a cycle takes more than one agent, split it into separate cycles.
 -->
 
+<!--
+Example of a well-written cycle:
+
 - [ ] **Cycle 1 - Parse migration file format and detect applied migrations**: Implement parser to discover migration files and read applied migrations from the database.
   - Agent: `go-software-engineer`
   - Files: `internal/migration/parser.go`, `internal/migration/parser_test.go`
@@ -85,14 +88,24 @@ If a cycle takes more than one agent, split it into separate cycles.
   - Verify: `go test ./internal/migration -run TestParse -v`
   - Done: Calling parseAvailableMigrations on a migration directory with three `.up.sql` files returns an ordered list; calling parseAppliedMigrations on the migrations table returns only versions that have been executed. No false positives on non-numeric filenames.
 
-- [ ] **Cycle 2 - <short title>**: <one-sentence description of what this cycle delivers>.
-  - Agent: <!-- one of: go-software-engineer, go-software-architect, devops-engineer, data-engineer, data-architect, api-architect, technical-writer, solutions-architect, bats-test-engineer, go-e2e-test-engineer -->
-  - Files: <!-- list only files this cycle touches -->
+Key points:
+- Agent: one of: go-software-engineer, go-software-architect, devops-engineer, data-engineer,
+  data-architect, api-architect, technical-writer, solutions-architect, bats-test-engineer,
+  go-e2e-test-engineer
+- Files: list only files this cycle touches
+- Steps: atomic, grep-friendly actions
+- Verify: a runnable command — not a description
+- Done: observable exit condition, not a restatement of steps
+-->
+
+- [ ] **Cycle 1 - <short title>**: <one-sentence description of what this cycle delivers>.
+  - Agent: `<agent-name>`
+  - Files: `<file>`
   - Steps:
-    - <!-- atomic, grep-friendly action -->
-    - <!-- atomic, grep-friendly action -->
-  - Verify: <!-- runnable command, e.g. `go test ./internal/parser -v` — not a description -->
-  - Done: <!-- observable exit condition, not a restatement of steps. Example: "Parser returns an ordered list of pending migrations for a directory of numbered .up.sql files." -->
+    - <atomic action>
+    - <atomic action>
+  - Verify: `<runnable command>`
+  - Done: <observable exit condition>
 
 ## Risks and Mitigations
 
