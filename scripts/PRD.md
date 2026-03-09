@@ -165,7 +165,7 @@ Out of scope:
   - Done: Docker build completes, binaries are exported for expected targets, and e2e stage runs from the Docker-first flow.
 
 - [x] **Cycle 13 - Final docs and end-to-end verification**: Ensure usage docs and full test pass.
-  - Agent: `technical-writer` + `go software engineer`
+  - Agent: `technical-writer` + `go-software-engineer`
   - Files: `README.md`, `docs/PROMPT.md` (adjust only if needed)
   - Steps:
     - Update README usage examples to exact implemented flags.
