@@ -44,7 +44,7 @@ Out of scope:
 ## Implementation Plan
 
 - [x] **Cycle 1 - Fix compile blockers in CLI entrypoint**: Make `cmd/main/main.go` build-clean and remove obvious typos.
-  - Agent: `go software engineer`
+  - Agent: `go-software-engineer`
   - Files: `cmd/main/main.go`
   - Steps:
     - Fix module import path and flag variable naming typos.
@@ -54,7 +54,7 @@ Out of scope:
   - Done: `go build ./cmd/main` exits 0.
 
 - [x] **Cycle 2 - Define final CLI contract and defaults**: Lock flag names and defaults to match project intent.
-  - Agent: `go software engineer`
+  - Agent: `go-software-engineer`
   - Files: `cmd/main/main.go`, `README.md`
   - Steps:
     - Implement flags: `--prompt-md`, `--prd-md`, `--progress-file`, `--iterations`, `--version`.
@@ -64,7 +64,7 @@ Out of scope:
   - Done: Help output lists all supported flags with accurate descriptions.
 
 - [x] **Cycle 3 - Wire CLI to looper start path**: Call looper from `main` with validated inputs.
-  - Agent: `go software engineer`
+  - Agent: `go-software-engineer`
   - Files: `cmd/main/main.go`, `internal/looper/looper.go`
   - Steps:
     - Build a single start path from parsed flags to `looper.Start`.
@@ -74,7 +74,7 @@ Out of scope:
   - Done: `--version` prints metadata and exits 0; invalid input exits non-zero.
 
 - [x] **Cycle 4 - Implement looper input validation and progress file handling**: Complete `Start` contract.
-  - Agent: `go software engineer`
+  - Agent: `go-software-engineer`
   - Files: `internal/looper/looper.go`
   - Steps:
     - Validate prompt and PRD existence with actionable errors.
@@ -84,7 +84,7 @@ Out of scope:
   - Done: `Start` validates files and returns deterministic errors.
 
 - [x] **Cycle 5 - Implement first open item detection**: Add parser for first `- [ ]` line.
-  - Agent: `go software engineer`
+  - Agent: `go-software-engineer`
   - Files: `internal/looper/looper.go`
   - Steps:
     - Implement `getFirstOpenItem` against PRD content.
@@ -94,7 +94,7 @@ Out of scope:
   - Done: function returns first open item or empty string with no false matches.
 
 - [x] **Cycle 6 - Implement abandon-first-open-item mutation**: Change only first `- [ ]` to `- [~]`.
-  - Agent: `go software engineer`
+  - Agent: `go-software-engineer`
   - Files: `internal/looper/looper.go`
   - Steps:
     - Implement deterministic first-match replacement.
@@ -104,7 +104,7 @@ Out of scope:
   - Done: exactly one first open item is converted to `- [~]`.
 
 - [x] **Cycle 7 - Implement Claude invocation wrapper**: Run one non-interactive Claude attempt per loop cycle.
-  - Agent: `go software engineer`
+  - Agent: `go-software-engineer`
   - Files: `internal/looper/looper.go`
   - Steps:
     - Implement `invokeClaude` with `claude --print --dangerously-skip-permissions`.
@@ -114,7 +114,7 @@ Out of scope:
   - Done: invocation path is testable and non-zero exits are surfaced as attempt failures.
 
 - [x] **Cycle 8 - Implement loop control semantics**: Complete retry/completion/abandon logic in `exec`.
-  - Agent: `go software engineer`
+  - Agent: `go-software-engineer`
   - Files: `internal/looper/looper.go`
   - Steps:
     - Track `current item` and reset attempt counter when item changes.
@@ -124,7 +124,7 @@ Out of scope:
   - Done: loop semantics match `scripts/ralph.sh` behavior.
 
 - [x] **Cycle 9 - Add deterministic logging**: Emit stable progress logs per phase.
-  - Agent: `go software engineer`
+  - Agent: `go-software-engineer`
   - Files: `internal/looper/looper.go`
   - Steps:
     - Log start, invoke, check, completed, retry, abandoned, and done states.
@@ -134,7 +134,7 @@ Out of scope:
   - Done: each loop phase logs once per iteration with no noisy duplicates.
 
 - [x] **Cycle 10 - Update tests for current CLI shape**: Replace stale e2e expectations.
-  - Agent: `go software engineer`
+  - Agent: `go-software-engineer`
   - Files: `tests/e2e/gralph-tests.go`, `tests/e2e/test-runner.sh` (if needed)
   - Steps:
     - Update tests that currently assume subcommands not present in current CLI.
@@ -144,7 +144,7 @@ Out of scope:
   - Done: e2e tests reflect actual CLI behavior and pass reliably.
 
 - [x] **Cycle 11 - Add looper unit test suite**: Cover parsing, mutation, and control flow.
-  - Agent: `go software engineer`
+  - Agent: `go-software-engineer`
   - Files: `internal/looper/looper_test.go` (new)
   - Steps:
     - Add table tests for open-item detection edge cases.
@@ -154,7 +154,7 @@ Out of scope:
   - Done: looper package has meaningful unit coverage for core behaviors.
 
 - [x] **Cycle 12 - Docker-first build pipeline hardening**: Align Docker build outputs, quality gates, and CI-facing build behavior.
-  - Agent: `devops engineer`
+  - Agent: `devops-engineer`
   - Files: `build/Dockerfile`, `build/build.sh`, `Makefile` (if needed)
   - Steps:
     - Fix Docker cross-compile output paths so each OS/ARCH binary is emitted to the correct directory.
@@ -165,7 +165,7 @@ Out of scope:
   - Done: Docker build completes, binaries are exported for expected targets, and e2e stage runs from the Docker-first flow.
 
 - [x] **Cycle 13 - Final docs and end-to-end verification**: Ensure usage docs and full test pass.
-  - Agent: `technical writer` + `go software engineer`
+  - Agent: `technical-writer` + `go-software-engineer`
   - Files: `README.md`, `docs/PROMPT.md` (adjust only if needed)
   - Steps:
     - Update README usage examples to exact implemented flags.
