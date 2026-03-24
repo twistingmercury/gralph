@@ -22,7 +22,7 @@ Developers who want to run Ralph loops on machines without Bash, in Docker conta
 ### Primary Goals
 
 1. Reproduce `scripts/ralph.sh` loop semantics exactly: first-open-item detection, Claude invocation via stdin, completion detection, retry counting, and abandon mutation with `- [~]`.
-2. Accept file paths as explicit CLI flags (`--prd-md`, `--prompt-md`, `--progress-file`, `--iterations`) rather than relying on fixed directory conventions.
+2. Accept file paths as explicit CLI flags (`--prd`, `--prompt`, `--progress`, `--iterations`) rather than relying on fixed directory conventions.
 3. Produce cross-platform binaries (darwin/amd64, darwin/arm64, linux/amd64) from a single Docker build command.
 4. Enable unit testing of all loop logic without a real Claude CLI present.
 
@@ -49,7 +49,7 @@ Developers who want to run Ralph loops on machines without Bash, in Docker conta
 | Cross-platform binaries             | darwin/amd64, darwin/arm64, linux/amd64 produced                             | `./build/build.sh` exits 0; `.bin/` contains three binaries |
 | Unit tests pass without Claude      | `go test ./internal/looper -v` passes in CI                                  | commandRunner stub replaces real exec                       |
 | E2E tests pass against built binary | `go test ./tests/e2e/...` passes                                             | TestMain builds binary; tests invoke it                     |
-| Required flags enforced             | Missing `--prd-md` or `--prompt-md` exits non-zero with named flag in stderr | `TestMissingPromptMd`, `TestMissingPrdMd`                   |
+| Required flags enforced             | Missing `--prd` or `--prompt` exits non-zero with named flag in stderr | `TestMissingPrompt`, `TestMissingPrd`                   |
 
 ## Constraints
 

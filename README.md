@@ -19,14 +19,14 @@ checklist items until all are complete or abandoned.
 ## Usage
 
 ```bash
-gralph --prompt-md path/to/PROMPT.md --prd-md path/to/PRD.md [--progress-file path/to/progress.txt] [-i 10]
+gralph --prompt path/to/PROMPT.md --prd path/to/PRD.md [--progress path/to/progress.txt] [-i 10]
 ```
 
 | Flag                  | Required | Default                     | Description                                                    |
 | --------------------- | -------- | --------------------------- | -------------------------------------------------------------- |
-| `--prompt-md`         | Yes      | —                           | Path to the PROMPT.md template passed to Claude each iteration |
-| `--prd-md`            | Yes      | —                           | Path to the PRD.md checklist that drives the loop              |
-| `--progress-file`     | No       | `<prd-md dir>/progress.txt` | Path to the progress log file                                  |
+| `--prompt`            | Yes      | —                           | Path to the PROMPT.md template passed to Claude each iteration |
+| `--prd`               | Yes      | —                           | Path to the PRD.md checklist that drives the loop              |
+| `--progress`          | No       | `<prd dir>/progress.txt`    | Path to the progress log file                                  |
 | `--iterations` / `-i` | No       | `10`                        | Maximum attempts per checklist item before it is abandoned     |
 | `--version`           | No       | —                           | Print version information and exit                             |
 
@@ -34,8 +34,8 @@ gralph --prompt-md path/to/PROMPT.md --prd-md path/to/PRD.md [--progress-file pa
 
 ```bash
 gralph \
-  --prompt-md scripts/PROMPT.md \
-  --prd-md scripts/PRD.md \
+  --prompt scripts/PROMPT.md \
+  --prd scripts/PRD.md \
   --iterations 5
 ```
 

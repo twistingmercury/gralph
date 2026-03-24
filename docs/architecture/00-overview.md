@@ -20,7 +20,7 @@ The tool's sole consumer is a developer or CI job that wants to drive a multi-cy
 
 ```mermaid
 graph LR
-    Developer["Developer / CI"] -->|"--prd-md, --prompt-md"| Gralph["gralph (CLI)"]
+    Developer["Developer / CI"] -->|"--prd, --prompt"| Gralph["gralph (CLI)"]
     Gralph -->|"stdin: prompt + runtime paths"| Claude["claude (external CLI)"]
     Gralph -->|"reads / mutates"| PRD["PRD.md (checklist)"]
     Gralph -->|"creates / appends"| Progress["progress.txt"]

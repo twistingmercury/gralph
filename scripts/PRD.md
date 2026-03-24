@@ -57,7 +57,7 @@ Out of scope:
   - Agent: `go-software-engineer`
   - Files: `cmd/main/main.go`, `README.md`
   - Steps:
-    - Implement flags: `--prompt-md`, `--prd-md`, `--progress-file`, `--iterations`, `--version`.
+    - Implement flags: `--prompt`, `--prd`, `--progress`, `--iterations`, `--version`.
     - Make required flag behavior explicit in code and help text.
     - Ensure defaults are safe and documented.
   - Verify: `go run ./cmd/main --help`
