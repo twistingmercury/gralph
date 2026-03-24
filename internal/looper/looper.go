@@ -78,17 +78,21 @@ func runLoop(ctx context.Context, prompt, prd, progress string, maxAttempts int,
 			attempt++
 		}
 
-		fmt.Printf("[gralph] attempt item=%q attempt=%d max=%d\n", currentItem, attempt, maxAttempts)
-		fmt.Printf("[gralph] invoke\n")
+		label := itemLabel(currentItem)
+		fmt.Printf("[gralph] attempt %d/%d item=%q\n", attempt, maxAttempts, label)
+		fmt.Printf("[gralph] claude_output_begin item=%q\n", label)
 
 		if err := invokeClaude(ctx, prompt, prd, progress, runner); err != nil {
-			fmt.Printf("[gralph] invoke_failed err=%v\n", err)
+			fmt.Printf("[gralph] claude_output_end item=%q status=error\n", label)
+			fmt.Printf("[gralph] invoke_failed item=%q err=%v\n", label, err)
+		} else {
+			fmt.Printf("[gralph] claude_output_end item=%q status=ok\n", label)
 		}
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 
-		fmt.Printf("[gralph] check item=%q\n", currentItem)
+		fmt.Printf("[gralph] check item=%q\n", label)
 
 		itemAfter, err := getFirstOpenItem(prd)
 		if err != nil {
@@ -99,14 +103,14 @@ func runLoop(ctx context.Context, prompt, prd, progress string, maxAttempts int,
 		}
 
 		if itemAfter != currentItem {
-			fmt.Printf("[gralph] completed item=%q\n", currentItem)
+			fmt.Printf("[gralph] completed item=%q\n", label)
 			currentItem = ""
 			attempt = 0
 			continue
 		}
 
 		if attempt >= maxAttempts {
-			fmt.Printf("[gralph] abandoned item=%q\n", currentItem)
+			fmt.Printf("[gralph] abandoned item=%q\n", label)
 			if _, err := abandonFirstOpenItem(prd); err != nil {
 				return fmt.Errorf("could not abandon item: %w", err)
 			}
@@ -115,8 +119,34 @@ func runLoop(ctx context.Context, prompt, prd, progress string, maxAttempts int,
 			continue
 		}
 
-		fmt.Printf("[gralph] retry item=%q attempt=%d max=%d\n", currentItem, attempt, maxAttempts)
+		fmt.Printf("[gralph] retry item=%q next_attempt=%d/%d\n", label, attempt+1, maxAttempts)
 	}
+}
+
+func itemLabel(item string) string {
+	label := strings.TrimSpace(item)
+	for _, prefix := range []string{"- [ ]", "- [x]", "- [~]"} {
+		if strings.HasPrefix(label, prefix) {
+			label = strings.TrimSpace(strings.TrimPrefix(label, prefix))
+			break
+		}
+	}
+
+	if idx := strings.Index(label, ":"); idx >= 0 {
+		label = label[:idx]
+	}
+
+	label = strings.TrimSpace(label)
+	label = strings.Trim(label, "*` ")
+	label = strings.ReplaceAll(label, "**", "")
+	label = strings.ReplaceAll(label, "`", "")
+	label = strings.Join(strings.Fields(label), " ")
+
+	if label == "" {
+		return "unnamed item"
+	}
+
+	return label
 }
 
 func invokeClaude(ctx context.Context, prompt, prd, progress string, runner commandRunner) error {

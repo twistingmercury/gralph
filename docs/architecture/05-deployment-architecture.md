@@ -13,7 +13,7 @@
 
 ## Deployment Overview
 
-Gralph is a statically-compiled CLI binary. There is no server, no container runtime at deployment time, and no infrastructure to provision. Deployment means placing the correct binary on PATH. The build pipeline produces three targets from a single Docker invocation.
+Gralph is a statically-compiled CLI binary. There is no server, no container runtime at deployment time, and no infrastructure to provision. Deployment means placing the correct binary on PATH. The build pipeline produces multiple OS/arch targets from a single Docker invocation.
 
 ```mermaid
 flowchart TD
@@ -21,19 +21,23 @@ flowchart TD
     BuildSh -->|"docker build --target export"| Dockerfile["build/Dockerfile"]
 
     subgraph Docker["Docker builder stage"]
-        Tidy["go mod tidy"]
+        Verify["go mod verify"]
         Lint["goimports, golangci-lint"]
         Sec["govulncheck, gosec"]
         Test["go test ./..."]
         CompileA["CGO_ENABLED=0 GOARCH=amd64 GOOS=darwin"]
         CompileB["CGO_ENABLED=0 GOARCH=arm64 GOOS=darwin"]
         CompileC["CGO_ENABLED=0 GOARCH=amd64 GOOS=linux"]
-        Tidy --> Lint --> Sec --> Test --> CompileA
+        CompileD["CGO_ENABLED=0 GOARCH=arm64 GOOS=linux"]
+        CompileE["CGO_ENABLED=0 GOARCH=arm64 GOOS=windows"]
+        Verify --> Lint --> Sec --> Test --> CompileA
         Test --> CompileB
         Test --> CompileC
+        Test --> CompileD
+        Test --> CompileE
     end
 
-    Dockerfile -->|"scratch export stage"| BinDir[".bin/\namd64/darwin/gralph\narm64/darwin/gralph\namd64/linux/gralph"]
+    Dockerfile -->|"scratch export stage"| BinDir[".bin/\namd64/darwin/gralph\narm64/darwin/gralph\namd64/linux/gralph\narm64/linux/gralph\narm64/windows/gralph.exe"]
     BuildSh -->|"docker compose up"| E2E["tests/e2e (Dockerfile)"]
     E2E -->|"go test -v ./..."| Results["Test results"]
 ```
@@ -58,7 +62,7 @@ Quality gates run sequentially and block compilation on failure:
 4. `gosec ./...` — security anti-pattern scan
 5. `go test ./...` — unit tests (looper package + any future packages)
 
-Compilation runs after all gates pass. Three `go build` invocations produce separate binaries for each OS/arch target.
+Compilation runs after all gates pass. Five `go build` invocations produce separate binaries for each OS/arch target.
 
 ### Export Stage
 
@@ -69,15 +73,15 @@ A `FROM scratch AS export` stage contains only the binary tree. `--target export
   amd64/darwin/gralph
   arm64/darwin/gralph
   amd64/linux/gralph
+  arm64/linux/gralph
+  arm64/windows/gralph.exe
 ```
 
 ### Known Pipeline Issues
 
-1. **`go mod tidy` in Dockerfile vs. `go mod verify`**: Running `go mod tidy` during the Docker build can silently alter `go.sum` without surfacing the diff. The correct gate is `go mod verify`, which asserts that the committed module graph matches the downloaded cache. This should be raised as a follow-up item.
+1. **E2e path has two build modes**: local `go test` in `tests/e2e` builds the binary in `TestMain`, while the Docker e2e path reuses the prebuilt binary copied into the container via `GRALPH_BINARY`. The duplication is acceptable at this size, but the behavior differs by environment.
 
-2. **E2e container rebuilds from source**: `tests/e2e/Dockerfile` copies all source and builds the gralph binary again via `TestMain`. It does not reuse the already-exported binary from the builder stage. For a 13-cycle PRD scope this is acceptable; for a CI pipeline with longer compile times it is wasteful.
-
-3. **`make test` excludes e2e**: `Makefile`'s `test` target runs `go test -v ./internal/...` only. Developers running `make test` locally never exercise the e2e suite. The Makefile should either alias `build/build.sh` for full test coverage or add a separate `make e2e` target.
+2. **`make test` excludes e2e**: `Makefile`'s `test` target runs `go test -v ./internal/...` only. Developers running `make test` locally never exercise the e2e suite. The Makefile should either alias `build/build.sh` for full test coverage or add a separate `make e2e` target.
 
 ## Binary Distribution
 
@@ -102,8 +106,8 @@ docker compose -f tests/docker-compose.yaml up --exit-code-from tests
 The `docker-compose.yaml` maps to `tests/e2e/Dockerfile`, which:
 
 1. Uses `golang:1.26-alpine` (not the custom tooling image — no linters needed here).
-2. Downloads main module and e2e module dependencies separately for layer caching.
-3. Sets `WORKDIR /workspace/tests/e2e` and runs `go test -v ./...`.
+2. Copies the prebuilt `gralph` binary from `.bin/...` into `/usr/local/bin/gralph`.
+3. Copies only the e2e test module, sets `WORKDIR /workspace/tests/e2e`, and runs `go test -v ./...`.
 
 ## Local Development Build
 

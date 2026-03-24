@@ -28,7 +28,6 @@ Each architectural decision is recorded as an ADR with the following structure:
 | ADR-004 | Docker-first release build with scratch export stage   | Accepted | 2025-01-01 |
 | ADR-005 | Separate Go module for e2e tests                       | Accepted | 2025-01-01 |
 | ADR-006 | Progress file opened in Start but not written by loop  | Accepted | 2025-01-01 |
-| ADR-007 | internal/tooling.go blank imports for go.mod retention | Accepted | 2025-01-01 |
 
 ## Decisions
 
@@ -42,7 +41,7 @@ Gralph has a single execution mode: run the loop. It has five flags and no subco
 
 **Decision:**
 
-Use `github.com/spf13/pflag` directly in `cmd/main/main.go`. Define all flags as package-level vars. Validation is a simple loop over missing-flag names, not a framework hook. Cobra is retained in `go.mod` only via the `internal/tooling.go` blank import.
+Use `github.com/spf13/pflag` directly in `cmd/main/main.go`. Define all flags as package-level vars. Validation is a simple loop over missing-flag names, not a framework hook.
 
 **Consequences:**
 
@@ -54,7 +53,6 @@ _Positive:_
 _Negative:_
 
 - Adding subcommands later (e.g., `gralph validate`, `gralph status`) would require manual routing, not a framework-managed dispatch table.
-- Cobra is a go.mod dependency that contributes to binary size and vulnerability surface without being used in production code.
 
 ---
 
@@ -117,11 +115,11 @@ _Negative:_
 
 **Context:**
 
-Cross-compiling Go for three targets (darwin/amd64, darwin/arm64, linux/amd64) on a developer laptop requires matching toolchain versions. Running quality gates (golangci-lint, govulncheck, gosec) locally requires those tools to be installed and pinned. The team wanted reproducible builds that do not depend on local tool state.
+Cross-compiling Go for multiple targets (darwin/amd64, darwin/arm64, linux/amd64, linux/arm64, windows/arm64) on a developer laptop requires matching toolchain versions. Running quality gates (golangci-lint, govulncheck, gosec) locally requires those tools to be installed and pinned. The team wanted reproducible builds that do not depend on local tool state.
 
 **Decision:**
 
-`build/Dockerfile` uses a builder stage (`ghcr.io/twistingmercury/golang-tooling:alpine`) that includes all required tools. It runs linters, scanners, and `go test ./...` before compiling. A `scratch` export stage extracts only the binaries. `build/build.sh` invokes `docker build --target export --output .bin`.
+`build/Dockerfile` uses a builder stage (`ghcr.io/twistingmercury/golang-tooling:alpine`) that includes all required tools. It verifies modules with `go mod verify`, runs linters, scanners, and `go test ./...` before compiling, and exports binaries from a `scratch` stage. `build/build.sh` invokes `docker build --target export --output .bin`, then runs the Docker-based e2e suite.
 
 **Consequences:**
 
@@ -134,8 +132,7 @@ _Positive:_
 _Negative:_
 
 - The Docker build is slow compared to `go build` locally — not suitable for rapid iteration. The Makefile `local` target exists for this reason.
-- `go mod tidy` runs in the Dockerfile before tests, which can silently alter `go.sum` during the Docker build and cause a mismatch with the committed file. This should be `go mod verify` instead.
-- The e2e test stage runs via `docker compose` after the binary build, creating a two-step Docker invocation in `build/build.sh`. The e2e container rebuilds the binary from source rather than using the already-exported binary, wasting build time.
+- The e2e test stage runs via `docker compose` after the binary export, creating a two-step Docker invocation in `build/build.sh`.
 
 ---
 
@@ -191,30 +188,5 @@ _Negative:_
 - If the intent ever changes to have gralph write progress entries, the file handle must be plumbed through to `runLoop`, which currently receives only the path string.
 
 ---
-
-### ADR-007: internal/tooling.go blank imports for go.mod retention
-
-**Status:** Accepted
-
-**Context:**
-
-`go.mod` includes Cobra, Viper, and testify as direct dependencies. Cobra is not used in production code; it was a placeholder from project setup. Viper is not used. testify is used in tests. Without a reference in non-test code, `go mod tidy` would remove Cobra and Viper from `go.mod`. The team wants them retained (for future use or to preserve a known-good dependency baseline) without adding `// indirect` noise.
-
-**Decision:**
-
-`internal/tooling.go` blank-imports Cobra, Viper, and testify, keeping them as direct dependencies in `go.mod`. The file contains a comment noting it should be removed later.
-
-**Consequences:**
-
-_Positive:_
-
-- Prevents `go mod tidy` from removing dependencies that may be used in future cycles.
-- Makes the intent explicit in one file rather than scattered `// indirect` markers.
-
-_Negative:_
-
-- Cobra and Viper add transitive dependencies (mousetrap, afero, fsnotify, mapstructure, etc.) that increase binary size and vulnerability surface for no runtime benefit.
-- `gosec` and `govulncheck` scan these transitive deps, potentially flagging issues in code that is never executed.
-- The pattern is unusual enough that future contributors may not understand why it exists. The "remove later" comment should be paired with a specific cycle or condition.
 
 **Next:** [System Architecture](03-system-architecture.md)

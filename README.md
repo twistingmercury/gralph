@@ -58,16 +58,18 @@ the item is unchanged after `--iterations` attempts, gralph rewrites it as
 
 ### Log output
 
-Gralph writes structured log lines to stdout:
+Gralph writes structured log lines to stdout and brackets Claude's raw output so each attempt is easier to scan:
 
 ```
 [gralph] start max_attempts=<n>
-[gralph] attempt item="..." attempt=<n> max=<n>
-[gralph] invoke
-[gralph] invoke_failed err=<error>
+[gralph] attempt <n>/<max> item="Cycle 1 - Short title"
+[gralph] claude_output_begin item="Cycle 1 - Short title"
+... raw claude output ...
+[gralph] claude_output_end item="Cycle 1 - Short title" status=ok
+[gralph] invoke_failed item="Cycle 1 - Short title" err=<error>
 [gralph] check item="..."
 [gralph] completed item="..."
-[gralph] retry item="..." attempt=<n> max=<n>
+[gralph] retry item="..." next_attempt=<n>/<max>
 [gralph] abandoned item="..."
 [gralph] done
 ```

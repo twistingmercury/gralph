@@ -135,7 +135,7 @@ Out of scope:
 
 - [x] **Cycle 10 - Update tests for current CLI shape**: Replace stale e2e expectations.
   - Agent: `go-software-engineer`
-  - Files: `tests/e2e/gralph-tests.go`, `tests/e2e/test-runner.sh` (if needed)
+  - Files: `tests/e2e/gralph-tests.go`
   - Steps:
     - Update tests that currently assume subcommands not present in current CLI.
     - Add coverage for flags: `--version`, missing required files, and successful startup path.

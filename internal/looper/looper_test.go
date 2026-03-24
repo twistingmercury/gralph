@@ -1,6 +1,7 @@
 package looper
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"os"
@@ -313,6 +314,61 @@ func TestRunLoop_NoOpenItems(t *testing.T) {
 	}
 }
 
+func TestRunLoop_LogsHumanReadableItemLabels(t *testing.T) {
+	dir := t.TempDir()
+	promptPath := filepath.Join(dir, "prompt.md")
+	prdPath := filepath.Join(dir, "prd.md")
+	progressPath := filepath.Join(dir, "progress.txt")
+
+	if err := os.WriteFile(promptPath, []byte("# Prompt\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(prdPath, []byte("# PRD\n\n- [ ] **Cycle 1 - Add GetByIDs to pattern repository**: long details here\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	stubRunner := func(_ context.Context, _ string) error {
+		return os.WriteFile(prdPath, []byte("# PRD\n\n- [x] **Cycle 1 - Add GetByIDs to pattern repository**: long details here\n"), 0o644) // #nosec G304
+	}
+
+	origStdout := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout = w
+
+	runErr := runLoop(context.Background(), promptPath, prdPath, progressPath, 3, stubRunner)
+
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout = origStdout
+
+	var buf bytes.Buffer
+	if _, err := buf.ReadFrom(r); err != nil {
+		t.Fatal(err)
+	}
+
+	if runErr != nil {
+		t.Fatalf("expected nil, got: %v", runErr)
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, `[gralph] attempt 1/3 item="Cycle 1 - Add GetByIDs to pattern repository"`) {
+		t.Fatalf("expected shortened attempt log, got:\n%s", output)
+	}
+	if !strings.Contains(output, `[gralph] claude_output_begin item="Cycle 1 - Add GetByIDs to pattern repository"`) {
+		t.Fatalf("expected claude output start marker, got:\n%s", output)
+	}
+	if !strings.Contains(output, `[gralph] claude_output_end item="Cycle 1 - Add GetByIDs to pattern repository" status=ok`) {
+		t.Fatalf("expected claude output end marker, got:\n%s", output)
+	}
+	if strings.Contains(output, "long details here") {
+		t.Fatalf("expected verbose item details to be omitted from logs, got:\n%s", output)
+	}
+}
+
 func TestRunLoop_CompletionDetected(t *testing.T) {
 	dir := t.TempDir()
 	promptPath := filepath.Join(dir, "prompt.md")
@@ -482,6 +538,38 @@ func TestGetFirstOpenItem(t *testing.T) {
 			}
 			if got != tc.wantLine {
 				t.Errorf("got %q, want %q", got, tc.wantLine)
+			}
+		})
+	}
+}
+
+func TestItemLabel(t *testing.T) {
+	tests := []struct {
+		name string
+		item string
+		want string
+	}{
+		{
+			name: "strips checklist marker and details",
+			item: "- [ ] **Cycle 1 - Add GetByIDs to pattern repository**: long details here",
+			want: "Cycle 1 - Add GetByIDs to pattern repository",
+		},
+		{
+			name: "collapses whitespace",
+			item: "- [ ]   `Cycle 2`   :   more details",
+			want: "Cycle 2",
+		},
+		{
+			name: "falls back for empty item",
+			item: "- [ ]   ",
+			want: "unnamed item",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := itemLabel(tc.item); got != tc.want {
+				t.Fatalf("got %q, want %q", got, tc.want)
 			}
 		})
 	}
