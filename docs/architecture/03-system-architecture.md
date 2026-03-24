@@ -39,7 +39,7 @@ graph TB
 **Responsibilities:**
 
 - Parse CLI flags using pflag.
-- Validate that required flags (`--prd-md`, `--prompt-md`) are set; print actionable errors and exit non-zero if not.
+- Validate that required flags (`--prd`, `--prompt`) are set; print actionable errors and exit non-zero if not.
 - Handle `--version` as an immediate-exit path before any file I/O.
 - Delegate all loop behavior to `looper.Start`.
 

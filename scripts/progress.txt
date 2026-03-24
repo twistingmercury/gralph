@@ -5,7 +5,7 @@ outcome: done
 files_changed:
   - internal/looper/looper.go
 tests_added: none (no new tests required; existing TestRunLoop_* tests exercise all log phases)
-verify_command: go run ./cmd/main --prompt-md=<tmp>/prompt.md --prd-md=<tmp>/prd.md --iterations=1 2>&1 | head -20
+verify_command: go run ./cmd/main --prompt=<tmp>/prompt.md --prd=<tmp>/prd.md --iterations=1 2>&1 | head -20
 verify_result: |
   [gralph] start max_attempts=1
   [gralph] item item="- [ ] Test item" attempt=1 max=1
@@ -155,7 +155,7 @@ quality_gates:
   govulncheck: no vulnerabilities found
   gosec: 0 issues
 notes: >
-  Improved flag help text to mark --prompt-md and --prd-md as Required, --progress-file as Optional.
+  Improved flag help text to mark --prompt and --prd as Required, --progress as Optional.
   Added validateRequiredFlags() that prints error + usage and exits 1 when either required flag is absent.
   progressFlag and iterationsFlag carry //nolint:unused since they are forward declarations for Cycle 3.
 
@@ -338,7 +338,7 @@ quality_gates:
   gosec: 0 issues (9 nosec annotations in place)
 notes: >
   Updated README.md to match the implemented CLI. Changes: corrected flag names
-  (--prompt-md, --prd-md, --progress-file, --iterations/-i, --version),
+  (--prompt, --prd, --progress, --iterations/-i, --version),
   added flag reference table, added "How it works" section describing loop
   semantics (open-item detection, invocation, completion check, retry/abandon),
   added checklist markers table (- [ ], - [x], - [~]), added structured log

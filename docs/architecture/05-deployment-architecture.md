@@ -136,7 +136,7 @@ Gralph propagates the root `context.Background()` from `main` to `exec.CommandCo
 All log lines go to stdout prefixed with `[gralph]`. Errors go to stderr. There is no log level, no structured JSON output, and no log file. Redirect stdout to a file if persistent logging is needed:
 
 ```bash
-gralph --prd-md scripts/PRD.md --prompt-md scripts/PROMPT.md 2>&1 | tee run.log
+gralph --prd scripts/PRD.md --prompt scripts/PROMPT.md 2>&1 | tee run.log
 ```
 
 ### No Rollback Mechanism

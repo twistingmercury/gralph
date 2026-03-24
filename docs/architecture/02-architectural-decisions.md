@@ -106,7 +106,7 @@ _Positive:_
 
 _Negative:_
 
-- `os.Rename` is not atomic across filesystems. If `--prd-md` points to a file on a different filesystem from the temp directory (e.g., a network mount), the rename will fail. The constraint is documented in requirements.
+- `os.Rename` is not atomic across filesystems. If `--prd` points to a file on a different filesystem from the temp directory (e.g., a network mount), the rename will fail. The constraint is documented in requirements.
 - The temp file uses `prd-*.tmp` in the PRD's directory, which is visible to users watching the filesystem during a write.
 
 ---

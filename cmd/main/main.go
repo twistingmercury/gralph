@@ -13,9 +13,9 @@ import (
 
 var (
 	versionFlag    = pflag.Bool("version", false, "Show the current version of gralph")
-	prdFlag        = pflag.String("prd-md", "", "Required. Path to the PRD.md checklist file that drives the loop")
-	promptFlag     = pflag.String("prompt-md", "", "Required. Path to the PROMPT.md template file passed to Claude each iteration")
-	progressFlag   = pflag.String("progress-file", "", "Optional. Path to the progress log file (default: <prd-md dir>/progress.txt)")
+	prdFlag        = pflag.String("prd", "", "Required. Path to the PRD.md checklist file that drives the loop")
+	promptFlag     = pflag.String("prompt", "", "Required. Path to the PROMPT.md template file passed to Claude each iteration")
+	progressFlag   = pflag.String("progress", "", "Optional. Path to the progress log file (default: <prd dir>/progress.txt)")
 	iterationsFlag = pflag.IntP("iterations", "i", 10, "Maximum attempts per checklist item before it is abandoned")
 )
 
@@ -42,10 +42,10 @@ func checkVersion() {
 func validateRequiredFlags() {
 	var missing []string
 	if *promptFlag == "" {
-		missing = append(missing, "--prompt-md")
+		missing = append(missing, "--prompt")
 	}
 	if *prdFlag == "" {
-		missing = append(missing, "--prd-md")
+		missing = append(missing, "--prd")
 	}
 	if len(missing) == 0 {
 		if *iterationsFlag < 1 {

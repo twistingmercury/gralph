@@ -127,25 +127,25 @@ func TestHelpFlag(t *testing.T) {
 	}
 }
 
-// TestMissingPromptMd verifies that omitting --prompt-md exits non-zero.
-func TestMissingPromptMd(t *testing.T) {
-	result := runCLI(t, "--prd-md=/tmp/prd.md")
+// TestMissingPrompt verifies that omitting --prompt exits non-zero.
+func TestMissingPrompt(t *testing.T) {
+	result := runCLI(t, "--prd=/tmp/prd.md")
 	if result.exitCode == 0 {
-		t.Fatal("expected non-zero exit when --prompt-md is missing")
+		t.Fatal("expected non-zero exit when --prompt is missing")
 	}
-	if !strings.Contains(result.stderr, "--prompt-md") {
-		t.Errorf("expected stderr to mention --prompt-md; got: %s", result.stderr)
+	if !strings.Contains(result.stderr, "--prompt") {
+		t.Errorf("expected stderr to mention --prompt; got: %s", result.stderr)
 	}
 }
 
-// TestMissingPrdMd verifies that omitting --prd-md exits non-zero.
-func TestMissingPrdMd(t *testing.T) {
-	result := runCLI(t, "--prompt-md=/tmp/prompt.md")
+// TestMissingPrd verifies that omitting --prd exits non-zero.
+func TestMissingPrd(t *testing.T) {
+	result := runCLI(t, "--prompt=/tmp/prompt.md")
 	if result.exitCode == 0 {
-		t.Fatal("expected non-zero exit when --prd-md is missing")
+		t.Fatal("expected non-zero exit when --prd is missing")
 	}
-	if !strings.Contains(result.stderr, "--prd-md") {
-		t.Errorf("expected stderr to mention --prd-md; got: %s", result.stderr)
+	if !strings.Contains(result.stderr, "--prd") {
+		t.Errorf("expected stderr to mention --prd; got: %s", result.stderr)
 	}
 }
 
@@ -153,15 +153,15 @@ func TestMissingPrdMd(t *testing.T) {
 func TestMissingBothRequiredFlags(t *testing.T) {
 	result := runCLI(t)
 	if result.exitCode == 0 {
-		t.Fatal("expected non-zero exit when both --prompt-md and --prd-md are missing")
+		t.Fatal("expected non-zero exit when both --prompt and --prd are missing")
 	}
 }
 
 // TestNonexistentFiles verifies that valid flags pointing to missing files exits non-zero.
 func TestNonexistentFiles(t *testing.T) {
 	result := runCLI(t,
-		"--prompt-md=/nonexistent/prompt.md",
-		"--prd-md=/nonexistent/prd.md",
+		"--prompt=/nonexistent/prompt.md",
+		"--prd=/nonexistent/prd.md",
 	)
 	if result.exitCode == 0 {
 		t.Fatal("expected non-zero exit when referenced files do not exist")

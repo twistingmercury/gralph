@@ -46,7 +46,7 @@ Implementation satisfies all 13 PRD behavioral requirements. Loop semantics matc
 - Claude invoked with `--print --dangerously-skip-permissions` ✓
 - Prompt + runtime paths injected as stdin ✓
 - Progress file created at derived or explicit path ✓
-- All flags: `--prompt-md`, `--prd-md`, `--progress-file`, `--iterations/-i`, `--version` ✓
+- All flags: `--prompt`, `--prd`, `--progress`, `--iterations/-i`, `--version` ✓
 
 ### Design Doc Divergences
 
