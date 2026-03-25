@@ -212,9 +212,9 @@ func TestInvokeClaude(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		stubRunner := func(_ context.Context, _ string) error { return nil }
+		stubRunner := func(_ context.Context, _ string) (string, error) { return "", nil }
 
-		if err := invokeClaude(context.Background(), promptPath, "prd.md", "progress.txt", stubRunner); err != nil {
+		if _, err := invokeClaude(context.Background(), promptPath, "prd.md", "progress.txt", stubRunner); err != nil {
 			t.Fatalf("expected nil error, got: %v", err)
 		}
 	})
@@ -226,9 +226,9 @@ func TestInvokeClaude(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		stubRunner := func(_ context.Context, _ string) error { return errors.New("exit status 1") }
+		stubRunner := func(_ context.Context, _ string) (string, error) { return "", errors.New("exit status 1") }
 
-		if err := invokeClaude(context.Background(), promptPath, "prd.md", "progress.txt", stubRunner); err == nil {
+		if _, err := invokeClaude(context.Background(), promptPath, "prd.md", "progress.txt", stubRunner); err == nil {
 			t.Fatal("expected error, got nil")
 		}
 	})
@@ -245,12 +245,12 @@ func TestInvokeClaude(t *testing.T) {
 		progressPath := "/path/to/progress.txt"
 
 		var capturedStdin string
-		stubRunner := func(_ context.Context, stdin string) error {
+		stubRunner := func(_ context.Context, stdin string) (string, error) {
 			capturedStdin = stdin
-			return nil
+			return "", nil
 		}
 
-		if err := invokeClaude(context.Background(), promptPath, prdPath, progressPath, stubRunner); err != nil {
+		if _, err := invokeClaude(context.Background(), promptPath, prdPath, progressPath, stubRunner); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
@@ -272,12 +272,12 @@ func TestInvokeClaude(t *testing.T) {
 		dir := t.TempDir()
 		called := false
 
-		stubRunner := func(_ context.Context, _ string) error {
+		stubRunner := func(_ context.Context, _ string) (string, error) {
 			called = true
-			return nil
+			return "", nil
 		}
 
-		err := invokeClaude(context.Background(), filepath.Join(dir, "missing.md"), "prd.md", "progress.txt", stubRunner)
+		_, err := invokeClaude(context.Background(), filepath.Join(dir, "missing.md"), "prd.md", "progress.txt", stubRunner)
 		if err == nil {
 			t.Fatal("expected error for missing prompt file, got nil")
 		}
@@ -301,9 +301,9 @@ func TestRunLoop_NoOpenItems(t *testing.T) {
 	}
 
 	called := false
-	stubRunner := func(_ context.Context, _ string) error {
+	stubRunner := func(_ context.Context, _ string) (string, error) {
 		called = true
-		return nil
+		return "", nil
 	}
 
 	if err := runLoop(context.Background(), promptPath, prdPath, progressPath, 3, stubRunner); err != nil {
@@ -323,12 +323,12 @@ func TestRunLoop_LogsHumanReadableItemLabels(t *testing.T) {
 	if err := os.WriteFile(promptPath, []byte("# Prompt\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(prdPath, []byte("# PRD\n\n- [ ] **Cycle 1 - Add GetByIDs to pattern repository**: long details here\n"), 0o644); err != nil {
+	if err := os.WriteFile(prdPath, []byte("# PRD\n\n- [ ] **Cycle 1 - Add GetByIDs to pattern repository**: long details here\n  - Agent: `technical writer`\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	stubRunner := func(_ context.Context, _ string) error {
-		return os.WriteFile(prdPath, []byte("# PRD\n\n- [x] **Cycle 1 - Add GetByIDs to pattern repository**: long details here\n"), 0o644) // #nosec G304
+	stubRunner := func(_ context.Context, _ string) (string, error) {
+		return "", os.WriteFile(prdPath, []byte("# PRD\n\n- [x] **Cycle 1 - Add GetByIDs to pattern repository**: long details here\n"), 0o644) // #nosec G304
 	}
 
 	origStdout := os.Stdout
@@ -355,14 +355,20 @@ func TestRunLoop_LogsHumanReadableItemLabels(t *testing.T) {
 	}
 
 	output := buf.String()
-	if !strings.Contains(output, `[gralph] attempt 1/3 item="Cycle 1 - Add GetByIDs to pattern repository"`) {
-		t.Fatalf("expected shortened attempt log, got:\n%s", output)
+	if !strings.Contains(output, `Cycle 1: Add GetByIDs to pattern repository`) {
+		t.Fatalf("expected cycle header, got:\n%s", output)
 	}
-	if !strings.Contains(output, `[gralph] claude_output_begin item="Cycle 1 - Add GetByIDs to pattern repository"`) {
-		t.Fatalf("expected claude output start marker, got:\n%s", output)
+	if !strings.Contains(output, `- Agent: technical writer`) {
+		t.Fatalf("expected agent line, got:\n%s", output)
 	}
-	if !strings.Contains(output, `[gralph] claude_output_end item="Cycle 1 - Add GetByIDs to pattern repository" status=ok`) {
-		t.Fatalf("expected claude output end marker, got:\n%s", output)
+	if !strings.Contains(output, `- Status: Running ... (1/3)`) {
+		t.Fatalf("expected running status, got:\n%s", output)
+	}
+	if !strings.Contains(output, `- Status: Complete`) {
+		t.Fatalf("expected complete status, got:\n%s", output)
+	}
+	if !strings.Contains(output, `- Files Changed:`) {
+		t.Fatalf("expected files-changed section, got:\n%s", output)
 	}
 	if strings.Contains(output, "long details here") {
 		t.Fatalf("expected verbose item details to be omitted from logs, got:\n%s", output)
@@ -383,9 +389,9 @@ func TestRunLoop_CompletionDetected(t *testing.T) {
 	}
 
 	callCount := 0
-	stubRunner := func(_ context.Context, _ string) error {
+	stubRunner := func(_ context.Context, _ string) (string, error) {
 		callCount++
-		return os.WriteFile(prdPath, []byte("# PRD\n\n- [x] Task one\n"), 0o644) // #nosec G304
+		return "", os.WriteFile(prdPath, []byte("# PRD\n\n- [x] Task one\n"), 0o644) // #nosec G304
 	}
 
 	if err := runLoop(context.Background(), promptPath, prdPath, progressPath, 3, stubRunner); err != nil {
@@ -417,9 +423,9 @@ func TestRunLoop_AbandonAtLimit(t *testing.T) {
 	}
 
 	callCount := 0
-	stubRunner := func(_ context.Context, _ string) error {
+	stubRunner := func(_ context.Context, _ string) (string, error) {
 		callCount++
-		return nil // never modifies PRD
+		return "", nil // never modifies PRD
 	}
 
 	if err := runLoop(context.Background(), promptPath, prdPath, progressPath, 3, stubRunner); err != nil {
@@ -451,13 +457,13 @@ func TestRunLoop_AttemptResetOnNewItem(t *testing.T) {
 	}
 
 	callCount := 0
-	stubRunner := func(_ context.Context, _ string) error {
+	stubRunner := func(_ context.Context, _ string) (string, error) {
 		callCount++
 		// Complete the first task on the 2nd call; second task is never completed.
 		if callCount == 2 {
-			return os.WriteFile(prdPath, []byte("# PRD\n\n- [x] First task\n- [ ] Second task\n"), 0o644) // #nosec G304
+			return "", os.WriteFile(prdPath, []byte("# PRD\n\n- [x] First task\n- [ ] Second task\n"), 0o644) // #nosec G304
 		}
-		return nil
+		return "", nil
 	}
 
 	// maxAttempts=2: first item requires 2 attempts (completes on 2nd),
@@ -573,4 +579,70 @@ func TestItemLabel(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestCycleHeader(t *testing.T) {
+	tests := []struct {
+		name  string
+		label string
+		want  string
+	}{
+		{
+			name:  "cycle with title",
+			label: "Cycle 10 - Migrate embeddings model",
+			want:  "Cycle 10: Migrate embeddings model",
+		},
+		{
+			name:  "non-cycle label passthrough",
+			label: "Task one",
+			want:  "Task one",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := cycleHeader(tc.label); got != tc.want {
+				t.Fatalf("got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestGetFirstOpenItemMeta(t *testing.T) {
+	t.Run("extracts agent from first open cycle block", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "prd.md")
+		content := "# PRD\n\n- [ ] **Cycle 10 - Refactor output format**: details\n  - Agent: `technical writer`\n- [ ] **Cycle 11 - Next**: details\n  - Agent: `go-software-engineer`\n"
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		got, err := getFirstOpenItemMeta(path)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got.item != "- [ ] **Cycle 10 - Refactor output format**: details" {
+			t.Fatalf("got item %q", got.item)
+		}
+		if got.agent != "technical writer" {
+			t.Fatalf("got agent %q", got.agent)
+		}
+	})
+
+	t.Run("uses unknown when no agent line", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "prd.md")
+		content := "# PRD\n\n- [ ] Task one\n"
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		got, err := getFirstOpenItemMeta(path)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got.agent != "unknown" {
+			t.Fatalf("got agent %q, want unknown", got.agent)
+		}
+	})
 }
