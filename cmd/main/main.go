@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/signal"
 
 	"github.com/twistingmercury/gralph/internal/looper"
 	"github.com/twistingmercury/gralph/internal/version"
@@ -24,7 +25,10 @@ func main() {
 	checkVersion()
 	validateRequiredFlags()
 
-	if err := looper.Start(context.Background(), *promptFlag, *prdFlag, *progressFlag, *iterationsFlag); err != nil {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+
+	if err := looper.Start(ctx, *promptFlag, *prdFlag, *progressFlag, *iterationsFlag); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
