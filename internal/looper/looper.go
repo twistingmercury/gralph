@@ -13,11 +13,36 @@ import (
 type commandRunner func(ctx context.Context, stdin string) error
 
 func defaultClaudeRunner(ctx context.Context, stdin string) error {
+	hideCursor()
+	defer showCursor()
+
 	cmd := exec.CommandContext(ctx, "claude", "--print", "--dangerously-skip-permissions") // #nosec G204 -- command name is a literal, not user-controlled
 	cmd.Stdin = strings.NewReader(stdin)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
+}
+
+func hideCursor() {
+	if !isTerminal(os.Stdout) {
+		return
+	}
+	_, _ = os.Stdout.WriteString("\x1b[?25l")
+}
+
+func showCursor() {
+	if !isTerminal(os.Stdout) {
+		return
+	}
+	_, _ = os.Stdout.WriteString("\x1b[?25h")
+}
+
+func isTerminal(f *os.File) bool {
+	info, err := f.Stat()
+	if err != nil {
+		return false
+	}
+	return (info.Mode() & os.ModeCharDevice) != 0
 }
 
 func Start(ctx context.Context, prompt, prd, progressFile string, maxAttempts int) error {
