@@ -23,7 +23,7 @@ Developers who want to run Ralph loops on machines without Bash, in Docker conta
 
 1. Reproduce `scripts/ralph.sh` loop semantics exactly: first-open-item detection, Claude invocation via stdin, completion detection, retry counting, and abandon mutation with `- [~]`.
 2. Accept file paths as explicit CLI flags (`--prd`, `--prompt`, `--progress`, `--iterations`) rather than relying on fixed directory conventions.
-3. Produce cross-platform binaries (darwin/amd64, darwin/arm64, linux/amd64) from a single Docker build command.
+3. Produce cross-platform binaries (darwin/amd64, darwin/arm64, linux/amd64, linux/arm64, windows/arm64) from a single Docker build command.
 4. Enable unit testing of all loop logic without a real Claude CLI present.
 
 ### Secondary Goals
@@ -46,7 +46,7 @@ Developers who want to run Ralph loops on machines without Bash, in Docker conta
 | ----------------------------------- | ---------------------------------------------------------------------------- | ----------------------------------------------------------- |
 | Loop behavior parity                | All ralph.sh semantics reproduced                                            | Unit tests for completion, retry, and abandon paths         |
 | Non-zero Claude exit is non-fatal   | Loop continues after Claude exits 1                                          | `TestRunLoop_AbandonAtLimit` with error-returning stub      |
-| Cross-platform binaries             | darwin/amd64, darwin/arm64, linux/amd64 produced                             | `./build/build.sh` exits 0; `.bin/` contains three binaries |
+| Cross-platform binaries             | darwin/amd64, darwin/arm64, linux/amd64, linux/arm64, windows/arm64 produced | `./build/build.sh` exits 0; `.bin/` contains the expected binaries |
 | Unit tests pass without Claude      | `go test ./internal/looper -v` passes in CI                                  | commandRunner stub replaces real exec                       |
 | E2E tests pass against built binary | `go test ./tests/e2e/...` passes                                             | TestMain builds binary; tests invoke it                     |
 | Required flags enforced             | Missing `--prd` or `--prompt` exits non-zero with named flag in stderr | `TestMissingPrompt`, `TestMissingPrd`                   |
@@ -69,7 +69,6 @@ Developers who want to run Ralph loops on machines without Bash, in Docker conta
 ### Organizational Constraints
 
 - `scripts/ralph.sh` is the behavioral specification. Any divergence is a bug, not a feature.
-- The `internal/tooling.go` blank-import approach is intentional and must be preserved until explicitly removed by the team.
 
 ## Assumptions
 

@@ -20,7 +20,6 @@ graph TB
         CLI["cmd/main\n(flag parsing, validation, version)"]
         Looper["internal/looper\n(loop engine)"]
         Version["internal/version\n(build metadata)"]
-        Tooling["internal/tooling.go\n(go.mod anchor)"]
 
         CLI -->|"looper.Start(ctx, prompt, prd, progress, maxAttempts)"| Looper
         CLI --> Version
@@ -78,13 +77,6 @@ graph TB
 
 - Hold `version`, `buildDate`, and `gitCommit` variables injected by `-ldflags` at build time.
 - Render the ASCII mascot and version string when `Print()` is called.
-
-### internal/tooling.go
-
-**Responsibilities:**
-
-- Blank-import Cobra, Viper, and testify to retain them as direct dependencies in `go.mod`.
-- Has no runtime behavior.
 
 ## Data Flow
 

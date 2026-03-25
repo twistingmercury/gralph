@@ -23,7 +23,7 @@ graph LR
     Developer["Developer / CI"] -->|"--prd, --prompt"| Gralph["gralph (CLI)"]
     Gralph -->|"stdin: prompt + runtime paths"| Claude["claude (external CLI)"]
     Gralph -->|"reads / mutates"| PRD["PRD.md (checklist)"]
-    Gralph -->|"creates / appends"| Progress["progress.txt"]
+    Gralph -->|"creates / validates path for"| Progress["progress.txt"]
 ```
 
 The loop is strictly sequential. Gralph reads the first `- [ ]` item, invokes Claude once, re-reads the PRD to detect completion, and repeats. Parallelism is out of scope.
@@ -35,9 +35,8 @@ The loop is strictly sequential. Gralph reads the first `- [ ]` item, invokes Cl
 | `cmd/main` | CLI entrypoint — pflag parsing, flag validation, version output |
 | `internal/looper` | Core loop — item detection, Claude invocation, retry/abandon control |
 | `internal/version` | Version metadata and ASCII mascot, injected at build time |
-| `internal/tooling.go` | Blank-import file keeping Cobra/Viper/testify in `go.mod` |
 | `scripts/ralph.sh` | Behavior reference / source of truth for loop semantics |
-| `build/Dockerfile` | Docker-first multi-target build (darwin/amd64, darwin/arm64, linux/amd64) |
+| `build/Dockerfile` | Docker-first multi-target build (darwin/amd64, darwin/arm64, linux/amd64, linux/arm64, windows/arm64) |
 | `tests/e2e` | Separate Go module; black-box tests against the compiled binary |
 
 ## Key Principles
