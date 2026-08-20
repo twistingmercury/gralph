@@ -6,7 +6,7 @@ Each task below is intended to be one small change that leaves the repository bu
 
 ## Tasks
 
-- [ ] **Task 1 — Define the provider-neutral command specification**
+- [x] **Task 1 — Define the provider-neutral command specification**
   - Add an `AgentCommand` value type containing `Executable`, `Args`, and `PromptMode`.
   - Define prompt modes for `stdin` and `arg`; do not execute anything yet.
   - Keep argument boundaries as `[]string`; do not accept a shell command string.
