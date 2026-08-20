@@ -13,7 +13,7 @@ Each task below is intended to be one small change that leaves the repository bu
   - Test: `go test ./internal/agent -run TestAgentCommand -v`
   - Done: the types compile, supported prompt modes are enumerated, and no field or default refers to Claude, Codex, Grok, or another provider.
 
-- [ ] **Task 2 — Validate agent command configuration**
+- [x] **Task 2 — Validate agent command configuration**
   - Reject a blank executable, unsupported prompt mode, and invalid prompt placeholders.
   - For `arg` mode, require exactly one whole argument equal to `{prompt}`; reject embedded interpolation such as `--prompt={prompt}`.
   - Permit spaces and shell metacharacters inside individual arguments because they will remain literal arguments.
