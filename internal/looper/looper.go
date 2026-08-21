@@ -2,6 +2,7 @@ package looper
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -120,6 +121,10 @@ func runLoop(ctx context.Context, prompt, prd, progress string, maxAttempts int,
 		fmt.Printf("- Status: Running ... (%d/%d)\n", attempt, maxAttempts)
 
 		claudeOutputPath, invokeErr := invokeClaude(ctx, prompt, prd, progress, runner)
+		if invokeErr != nil && !errors.Is(invokeErr, agent.ErrNonZeroExit) {
+			_ = cleanupOutputFile(claudeOutputPath)
+			return fmt.Errorf("agent invocation failed: %w", invokeErr)
+		}
 		if err := ctx.Err(); err != nil {
 			_ = cleanupOutputFile(claudeOutputPath)
 			return err

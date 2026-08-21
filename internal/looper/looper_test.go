@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -482,6 +483,215 @@ func TestRunLoop_CompletionDetected(t *testing.T) {
 	}
 	if strings.Contains(string(data), "- [ ]") {
 		t.Error("expected no open items after completion")
+	}
+}
+
+func TestRunLoopFatalInvocationPreservesPRD(t *testing.T) {
+	t.Run("invalid configuration", func(t *testing.T) {
+		dir := t.TempDir()
+		promptPath := filepath.Join(dir, "prompt.md")
+		prdPath := filepath.Join(dir, "prd.md")
+		originalPRD := []byte("# PRD\n\n- [ ] Task must remain open\n")
+		if err := os.WriteFile(promptPath, []byte("# Prompt\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(prdPath, originalPRD, 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		config := testConfig(promptPath, prdPath, "", 3)
+		config.AgentCommand.Executable = ""
+		err := Start(context.Background(), config)
+		if err == nil {
+			t.Fatal("expected configuration failure, got nil")
+		}
+		if !errors.Is(err, agent.ErrInvalidConfiguration) {
+			t.Fatalf("Start() error = %v, want configuration category", err)
+		}
+
+		after, readErr := os.ReadFile(prdPath) // #nosec G304 -- path is created by the test
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		if !bytes.Equal(after, originalPRD) {
+			t.Fatalf("configuration failure changed PRD:\nwant: %q\n got: %q", originalPRD, after)
+		}
+	})
+
+	t.Run("missing configured executable", func(t *testing.T) {
+		dir := t.TempDir()
+		promptPath := filepath.Join(dir, "prompt.md")
+		prdPath := filepath.Join(dir, "prd.md")
+		originalPRD := []byte("# PRD\n\n- [ ] Task must remain open\n")
+		if err := os.WriteFile(promptPath, []byte("# Prompt\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(prdPath, originalPRD, 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		config := testConfig(promptPath, prdPath, "", 3)
+		config.AgentCommand.Executable = filepath.Join(dir, "missing-agent")
+		err := Start(context.Background(), config)
+		if err == nil {
+			t.Fatal("expected process-start failure, got nil")
+		}
+		if !errors.Is(err, agent.ErrProcessStart) {
+			t.Fatalf("Start() error = %v, want process-start category", err)
+		}
+
+		after, readErr := os.ReadFile(prdPath) // #nosec G304 -- path is created by the test
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		if !bytes.Equal(after, originalPRD) {
+			t.Fatalf("fatal invocation changed PRD:\nwant: %q\n got: %q", originalPRD, after)
+		}
+	})
+
+	t.Run("prompt read failure", func(t *testing.T) {
+		dir := t.TempDir()
+		promptPath := filepath.Join(dir, "missing-prompt.md")
+		prdPath := filepath.Join(dir, "prd.md")
+		originalPRD := []byte("# PRD\n\n- [ ] Task must remain open\n")
+		if err := os.WriteFile(prdPath, originalPRD, 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		callCount := 0
+		stubRunner := func(_ context.Context, _ string) (string, error) {
+			callCount++
+			return "", nil
+		}
+		err := runLoop(context.Background(), promptPath, prdPath, filepath.Join(dir, "progress.txt"), 3, stubRunner)
+		if err == nil {
+			t.Fatal("expected prompt read failure, got nil")
+		}
+		if callCount != 0 {
+			t.Fatalf("runner called %d times, want 0", callCount)
+		}
+
+		after, readErr := os.ReadFile(prdPath) // #nosec G304 -- path is created by the test
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		if !bytes.Equal(after, originalPRD) {
+			t.Fatalf("prompt read failure changed PRD:\nwant: %q\n got: %q", originalPRD, after)
+		}
+	})
+
+	t.Run("fatal runner error returns after one attempt and cleans output", func(t *testing.T) {
+		dir := t.TempDir()
+		promptPath := filepath.Join(dir, "prompt.md")
+		prdPath := filepath.Join(dir, "prd.md")
+		outputPath := filepath.Join(dir, "agent-output.log")
+		originalPRD := []byte("# PRD\n\n- [ ] Task must remain open\n")
+		if err := os.WriteFile(promptPath, []byte("# Prompt\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(prdPath, originalPRD, 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		callCount := 0
+		stubRunner := func(_ context.Context, _ string) (string, error) {
+			callCount++
+			if err := os.WriteFile(outputPath, []byte("setup failed"), 0o600); err != nil {
+				return "", err
+			}
+			return outputPath, fmt.Errorf("%w: output setup failed", agent.ErrSetup)
+		}
+
+		err := runLoop(context.Background(), promptPath, prdPath, filepath.Join(dir, "progress.txt"), 3, stubRunner)
+		if err == nil {
+			t.Fatal("expected fatal invocation error, got nil")
+		}
+		if !errors.Is(err, agent.ErrSetup) {
+			t.Fatalf("runLoop() error = %v, want setup category", err)
+		}
+		if callCount != 1 {
+			t.Fatalf("runner called %d times, want 1", callCount)
+		}
+		if _, statErr := os.Stat(outputPath); !errors.Is(statErr, os.ErrNotExist) {
+			t.Fatalf("fatal invocation output was not cleaned up: %v", statErr)
+		}
+
+		after, readErr := os.ReadFile(prdPath) // #nosec G304 -- path is created by the test
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		if !bytes.Equal(after, originalPRD) {
+			t.Fatalf("fatal invocation changed PRD:\nwant: %q\n got: %q", originalPRD, after)
+		}
+	})
+
+	t.Run("cancellation", func(t *testing.T) {
+		dir := t.TempDir()
+		promptPath := filepath.Join(dir, "prompt.md")
+		prdPath := filepath.Join(dir, "prd.md")
+		originalPRD := []byte("# PRD\n\n- [ ] Task must remain open\n")
+		if err := os.WriteFile(promptPath, []byte("# Prompt\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(prdPath, originalPRD, 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		callCount := 0
+		stubRunner := func(_ context.Context, _ string) (string, error) {
+			callCount++
+			return "", fmt.Errorf("%w: %w", agent.ErrCanceled, context.Canceled)
+		}
+		err := runLoop(context.Background(), promptPath, prdPath, filepath.Join(dir, "progress.txt"), 3, stubRunner)
+		if err == nil {
+			t.Fatal("expected cancellation failure, got nil")
+		}
+		if !errors.Is(err, agent.ErrCanceled) || !errors.Is(err, context.Canceled) {
+			t.Fatalf("runLoop() error = %v, want cancellation categories", err)
+		}
+		if callCount != 1 {
+			t.Fatalf("runner called %d times, want 1", callCount)
+		}
+
+		after, readErr := os.ReadFile(prdPath) // #nosec G304 -- path is created by the test
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		if !bytes.Equal(after, originalPRD) {
+			t.Fatalf("cancellation changed PRD:\nwant: %q\n got: %q", originalPRD, after)
+		}
+	})
+}
+
+func TestRunLoop_RetriesClassifiedNonZeroExit(t *testing.T) {
+	dir := t.TempDir()
+	promptPath := filepath.Join(dir, "prompt.md")
+	prdPath := filepath.Join(dir, "prd.md")
+	if err := os.WriteFile(promptPath, []byte("# Prompt\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(prdPath, []byte("# PRD\n\n- [ ] Retryable task\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	callCount := 0
+	stubRunner := func(_ context.Context, _ string) (string, error) {
+		callCount++
+		return "", fmt.Errorf("%w: exit status 1", agent.ErrNonZeroExit)
+	}
+
+	if err := runLoop(context.Background(), promptPath, prdPath, filepath.Join(dir, "progress.txt"), 2, stubRunner); err != nil {
+		t.Fatalf("expected retryable exit to reach abandonment, got: %v", err)
+	}
+	if callCount != 2 {
+		t.Fatalf("runner called %d times, want 2", callCount)
+	}
+	after, err := os.ReadFile(prdPath) // #nosec G304 -- path is created by the test
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(after), "- [~] Retryable task") {
+		t.Fatalf("expected retryable task to be abandoned, got:\n%s", after)
 	}
 }
 

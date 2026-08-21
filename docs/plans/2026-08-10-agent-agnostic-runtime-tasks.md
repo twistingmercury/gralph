@@ -47,7 +47,7 @@ Each task below is intended to be one small change that leaves the repository bu
   - Test: `go test ./internal/looper -run 'TestStart|TestRunLoop' -v`
   - Done: the loop receives its agent command exclusively through configuration; no production path selects a provider implicitly; `make build` succeeds.
 
-- [ ] **Task 7 — Make fatal invocation failures non-mutating**
+- [x] **Task 7 — Make fatal invocation failures non-mutating**
   - Retry only when an agent process actually started and exited with a retryable non-zero status.
   - Return configuration, prompt-read, output-file, executable lookup/start, and cancellation failures immediately.
   - Assert that fatal failures do not create an abandonment marker and cause a non-zero CLI exit.
