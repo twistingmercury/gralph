@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"strconv"
 	"strings"
 	"time"
@@ -21,9 +22,14 @@ func main() {
 	recordPath := flag.String("record", "", "path to write the captured invocation")
 	attemptLogPath := flag.String("attempt-log", "", "path to append one line per invocation")
 	block := flag.Bool("block", false, "block until the caller terminates the process")
+	descendantReadyPath := flag.String("descendant-ready-file", "", "spawn a blocking descendant and write its process ID")
+	descendant := flag.Bool("descendant", false, "run as a blocking descendant fixture")
 	readyPath := flag.String("ready-file", "", "path to write the process ID before blocking")
 	exitCode := flag.Int("exit-code", 0, "exit unsuccessfully before changing the PRD")
 	flag.Parse()
+	if *descendant {
+		blockForever()
+	}
 	if *block && *recordPath == "" {
 		blockForever()
 	}
@@ -62,6 +68,16 @@ func main() {
 		}
 		if err := attemptLog.Close(); err != nil {
 			fail("close attempt log: %v", err)
+		}
+	}
+	if *descendantReadyPath != "" {
+		cmd := exec.Command(os.Args[0], "--descendant") // #nosec G204 -- current fixture executable and fixed argument
+		if err := cmd.Start(); err != nil {
+			fail("start descendant: %v", err)
+		}
+		if err := os.WriteFile(*descendantReadyPath, []byte(strconv.Itoa(cmd.Process.Pid)), 0o600); err != nil {
+			_ = cmd.Process.Kill()
+			fail("write descendant ready file: %v", err)
 		}
 	}
 	if *readyPath != "" {

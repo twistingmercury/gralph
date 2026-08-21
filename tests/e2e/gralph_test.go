@@ -423,14 +423,18 @@ func TestAgentStartupFailure(t *testing.T) {
 }
 
 func TestAgentSIGINT(t *testing.T) {
-	testAgentCancellation(t, interruptSignal())
+	testAgentCancellation(t, interruptSignal(), false)
 }
 
 func TestAgentSIGTERM(t *testing.T) {
-	testAgentCancellation(t, terminateSignal())
+	testAgentCancellation(t, terminateSignal(), false)
 }
 
-func testAgentCancellation(t *testing.T, signal os.Signal) {
+func TestAgentDescendantTermination(t *testing.T) {
+	testAgentCancellation(t, terminateSignal(), true)
+}
+
+func testAgentCancellation(t *testing.T, signal os.Signal, withDescendant bool) {
 	t.Helper()
 	if !signalTestsSupported() {
 		t.Skip("process signal assertions are not supported on this platform")
@@ -441,6 +445,7 @@ func testAgentCancellation(t *testing.T, signal os.Signal) {
 	progressPath := filepath.Join(dir, "progress.txt")
 	recordPath := filepath.Join(dir, "fake-agent-invocation.json")
 	readyPath := filepath.Join(dir, "fake-agent-ready")
+	descendantReadyPath := filepath.Join(dir, "fake-agent-descendant-ready")
 	initialPRD := []byte("# Test PRD\n\n- [ ] Cycle 1 - Preserve on cancellation\n")
 	if err := os.WriteFile(promptPath, []byte("# Cancellation prompt\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -460,6 +465,9 @@ func testAgentCancellation(t *testing.T, signal os.Signal) {
 		"--prompt-mode=stdin",
 		"--iterations=3",
 	}
+	if withDescendant {
+		args = append(args, "--agent-arg=--descendant-ready-file="+descendantReadyPath)
+	}
 	cmd := exec.Command(testBinaryPath, args...) // #nosec G204 -- testBinaryPath and fake-agent arguments are test fixtures
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -477,7 +485,11 @@ func testAgentCancellation(t *testing.T, signal os.Signal) {
 		}
 	})
 
-	agentPID := waitForAgentReady(t, readyPath, waitResult, &stdout, &stderr)
+	agentPID := waitForAgentReady(t, "fake agent", readyPath, waitResult, &stdout, &stderr)
+	descendantPID := 0
+	if withDescendant {
+		descendantPID = waitForAgentReady(t, "fake-agent descendant", descendantReadyPath, waitResult, &stdout, &stderr)
+	}
 	if err := cmd.Process.Signal(signal); err != nil {
 		t.Fatalf("send %v to gralph: %v", signal, err)
 	}
@@ -498,6 +510,15 @@ func testAgentCancellation(t *testing.T, signal os.Signal) {
 	if processIsRunning(agentPID) {
 		t.Errorf("fake agent process %d remained running after %v", agentPID, signal)
 	}
+	if withDescendant {
+		deadline = time.Now().Add(2 * time.Second)
+		for processIsRunning(descendantPID) && time.Now().Before(deadline) {
+			time.Sleep(10 * time.Millisecond)
+		}
+		if processIsRunning(descendantPID) {
+			t.Errorf("fake-agent descendant process %d remained running after %v", descendantPID, signal)
+		}
+	}
 	prdData, err := os.ReadFile(prdPath) // #nosec G304 -- path is created by the test
 	if err != nil {
 		t.Fatal(err)
@@ -507,7 +528,7 @@ func testAgentCancellation(t *testing.T, signal os.Signal) {
 	}
 }
 
-func waitForAgentReady(t *testing.T, readyPath string, waitResult <-chan error, stdout, stderr *bytes.Buffer) int {
+func waitForAgentReady(t *testing.T, label, readyPath string, waitResult <-chan error, stdout, stderr *bytes.Buffer) int {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
@@ -515,21 +536,21 @@ func waitForAgentReady(t *testing.T, readyPath string, waitResult <-chan error, 
 		if err == nil {
 			pid, err := strconv.Atoi(string(data))
 			if err != nil {
-				t.Fatalf("parse fake-agent PID %q: %v", data, err)
+				t.Fatalf("parse %s PID %q: %v", label, data, err)
 			}
 			return pid
 		}
 		if !os.IsNotExist(err) {
-			t.Fatalf("read fake-agent ready file: %v", err)
+			t.Fatalf("read %s ready file: %v", label, err)
 		}
 		select {
 		case err := <-waitResult:
-			t.Fatalf("gralph exited before fake agent was ready: %v; stdout=%q stderr=%q", err, stdout.String(), stderr.String())
+			t.Fatalf("gralph exited before %s was ready: %v; stdout=%q stderr=%q", label, err, stdout.String(), stderr.String())
 		default:
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	t.Fatalf("fake agent did not become ready; stdout=%q stderr=%q", stdout.String(), stderr.String())
+	t.Fatalf("%s did not become ready; stdout=%q stderr=%q", label, stdout.String(), stderr.String())
 	return 0
 }
 

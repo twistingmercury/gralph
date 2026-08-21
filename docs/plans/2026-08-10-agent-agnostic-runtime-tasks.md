@@ -117,7 +117,7 @@ Each task below is intended to be one small change that leaves the repository bu
   - Test from `tests/e2e`: `go test -run 'TestAgentSIGINT|TestAgentSIGTERM' -v .`
   - Done: either signal stops the fake agent, gralph exits non-zero, and the PRD remains unchanged; `make build` succeeds.
 
-- [ ] **Task 18 — Terminate agent descendant processes**
+- [x] **Task 18 — Terminate agent descendant processes**
   - Add platform-specific process-tree termination behind small build-tagged helpers.
   - Begin with Unix process groups; add or explicitly document the Windows job/process strategy before claiming Windows support for this behavior.
   - Test: `go test ./internal/agent -run TestTerminateProcessTree -v`; from `tests/e2e`, `go test -run TestAgentDescendantTermination -v .`

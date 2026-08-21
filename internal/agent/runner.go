@@ -100,6 +100,7 @@ func (r *CommandRunner) Run(ctx context.Context, prompt string) (CommandOutput, 
 	capture.StderrPath = stderrFile.Name()
 
 	cmd := exec.CommandContext(ctx, r.spec.Executable, args...) // #nosec G204 -- the executable and argument vector are explicit user configuration; no shell is involved
+	configureProcessTree(cmd)
 	if sendPromptToStdin {
 		cmd.Stdin = strings.NewReader(prompt)
 	}
