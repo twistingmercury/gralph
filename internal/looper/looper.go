@@ -14,13 +14,13 @@ import (
 )
 
 // promptRunner is a function that executes an agent with the given prompt.
-// It returns the path to a file containing combined stdout/stderr.
-type promptRunner func(ctx context.Context, prompt string) (string, error)
+// It returns separate stdout and stderr captures.
+type promptRunner func(ctx context.Context, prompt string) (agent.CommandOutput, error)
 
 var cycleLabelPattern = regexp.MustCompile(`^(Cycle\s+\d+)\s*-\s*(.+)$`)
 
 func withHiddenCursor(output io.Writer, runner promptRunner) promptRunner {
-	return func(ctx context.Context, prompt string) (string, error) {
+	return func(ctx context.Context, prompt string) (agent.CommandOutput, error) {
 		hideCursor(output)
 		defer showCursor(output)
 		return runner(ctx, prompt)
@@ -151,36 +151,36 @@ func runLoop(ctx context.Context, prompt, prd, progress string, maxAttempts int,
 			return err
 		}
 
-		agentOutputPath, invokeErr := invokeAgent(ctx, prompt, prd, progress, runner)
+		capture, invokeErr := invokeAgent(ctx, prompt, prd, progress, runner)
 		if invokeErr != nil && !errors.Is(invokeErr, agent.ErrNonZeroExit) {
-			_ = cleanupOutputFile(agentOutputPath)
-			return fmt.Errorf("agent invocation failed: %w", invokeErr)
+			return cleanupAfterInvocation(capture, fmt.Errorf("agent invocation failed: %w", invokeErr))
 		}
 		if err := ctx.Err(); err != nil {
-			_ = cleanupOutputFile(agentOutputPath)
-			return err
+			return cleanupAfterInvocation(capture, err)
 		}
 
 		itemAfter, err := getFirstOpenItem(prd)
 		if err != nil {
-			_ = cleanupOutputFile(agentOutputPath)
-			return fmt.Errorf("could not read PRD after invocation: %w", err)
+			return cleanupAfterInvocation(capture, fmt.Errorf("could not read PRD after invocation: %w", err))
 		}
 		if err := ctx.Err(); err != nil {
-			_ = cleanupOutputFile(agentOutputPath)
-			return err
+			return cleanupAfterInvocation(capture, err)
 		}
 
+		// Completed and final abandoned attempts print captured output. Intermediate
+		// retries, fatal failures, and cancellations discard it. Because stdout and
+		// stderr are captured independently, their original interleaving cannot be
+		// reconstructed; printed output is replayed deterministically stdout first.
 		if itemAfter != currentItem {
 			if err := writeLoopOutput(output, "- Status: Complete\n- Agent Output:\n"); err != nil {
-				_ = cleanupOutputFile(agentOutputPath)
+				return cleanupAfterInvocation(capture, err)
+			}
+			if err := printAgentOutput(output, capture); err != nil {
+				return cleanupAfterInvocation(capture, fmt.Errorf("could not print agent output: %w", err))
+			}
+			if err := cleanupAfterInvocation(capture, nil); err != nil {
 				return err
 			}
-			if err := printAgentOutput(output, agentOutputPath); err != nil {
-				_ = cleanupOutputFile(agentOutputPath)
-				return fmt.Errorf("could not print agent output: %w", err)
-			}
-			_ = cleanupOutputFile(agentOutputPath)
 			currentItem = ""
 			attempt = 0
 			continue
@@ -188,20 +188,19 @@ func runLoop(ctx context.Context, prompt, prd, progress string, maxAttempts int,
 
 		if attempt >= maxAttempts {
 			if err := writeLoopOutput(output, "- Status: Failed\n"); err != nil {
-				_ = cleanupOutputFile(agentOutputPath)
-				return err
+				return cleanupAfterInvocation(capture, err)
 			}
 			if invokeErr != nil {
 				if err := writeLoopOutput(output, "- Error: %v\n", invokeErr); err != nil {
-					_ = cleanupOutputFile(agentOutputPath)
-					return err
+					return cleanupAfterInvocation(capture, err)
 				}
 			}
-			if err := printAgentOutput(output, agentOutputPath); err != nil {
-				_ = cleanupOutputFile(agentOutputPath)
-				return fmt.Errorf("could not print agent output: %w", err)
+			if err := printAgentOutput(output, capture); err != nil {
+				return cleanupAfterInvocation(capture, fmt.Errorf("could not print agent output: %w", err))
 			}
-			_ = cleanupOutputFile(agentOutputPath)
+			if err := cleanupAfterInvocation(capture, nil); err != nil {
+				return err
+			}
 			if _, err := abandonFirstOpenItem(prd); err != nil {
 				return fmt.Errorf("could not abandon item: %w", err)
 			}
@@ -210,7 +209,9 @@ func runLoop(ctx context.Context, prompt, prd, progress string, maxAttempts int,
 			continue
 		}
 
-		_ = cleanupOutputFile(agentOutputPath)
+		if err := cleanupAfterInvocation(capture, nil); err != nil {
+			return err
+		}
 	}
 }
 
@@ -221,11 +222,18 @@ func writeLoopOutput(output io.Writer, format string, args ...any) error {
 	return nil
 }
 
-func printAgentOutput(output io.Writer, outputPath string) error {
-	if outputPath == "" {
+func printAgentOutput(output io.Writer, capture agent.CommandOutput) error {
+	if err := copyOutputFile(output, capture.StdoutPath); err != nil {
+		return err
+	}
+	return copyOutputFile(output, capture.StderrPath)
+}
+
+func copyOutputFile(output io.Writer, path string) error {
+	if path == "" {
 		return nil
 	}
-	f, err := os.Open(outputPath) // #nosec G304 -- outputPath is system-generated by os.CreateTemp
+	f, err := os.Open(path) // #nosec G304 -- path is system-generated by os.CreateTemp
 	if err != nil {
 		return err
 	}
@@ -237,11 +245,12 @@ func printAgentOutput(output io.Writer, outputPath string) error {
 	return err
 }
 
-func cleanupOutputFile(outputPath string) error {
-	if outputPath == "" {
-		return nil
+func cleanupAfterInvocation(capture agent.CommandOutput, primaryErr error) error {
+	if err := capture.Cleanup(); err != nil {
+		cleanupErr := fmt.Errorf("could not clean up agent output: %w", err)
+		return errors.Join(primaryErr, cleanupErr)
 	}
-	return os.Remove(outputPath) // #nosec G703 -- outputPath is system-generated by os.CreateTemp
+	return primaryErr
 }
 
 func cycleHeader(label string) string {
@@ -278,10 +287,10 @@ func itemLabel(item string) string {
 	return label
 }
 
-func invokeAgent(ctx context.Context, prompt, prd, progress string, runner promptRunner) (string, error) {
+func invokeAgent(ctx context.Context, prompt, prd, progress string, runner promptRunner) (agent.CommandOutput, error) {
 	data, err := os.ReadFile(prompt) // #nosec G304 -- path is CLI-provided or derived from validated PRD path
 	if err != nil {
-		return "", fmt.Errorf("could not read prompt file %q: %w", prompt, err)
+		return agent.CommandOutput{}, fmt.Errorf("could not read prompt file %q: %w", prompt, err)
 	}
 	combined := string(data) + fmt.Sprintf("\n## Runtime paths\n- PRD: %s\n- Progress: %s\n", prd, progress)
 	output, runErr := runner(ctx, combined)

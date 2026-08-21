@@ -20,8 +20,11 @@ import (
 
 const defaultTimeout = 10 * time.Second
 
-// testBinaryPath is set by TestMain after building the binary once.
-var testBinaryPath string
+// Binary paths are set by TestMain after building the test fixtures once.
+var (
+	testBinaryPath      string
+	fakeAgentBinaryPath string
+)
 
 // cliResult captures the result of executing the CLI binary.
 type cliResult struct {
@@ -39,6 +42,22 @@ func TestMain(m *testing.M) {
 // runTests sets up the binary path, runs the suite, and returns the exit code.
 // Using a helper function ensures defer executes before the process exits.
 func runTests(m *testing.M) int {
+	tmpDir, err := os.MkdirTemp("", "gralph-e2e-*")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to create temp dir: %v\n", err)
+		return 1
+	}
+	defer os.RemoveAll(tmpDir)
+
+	fakeAgentBinaryPath = filepath.Join(tmpDir, "fake-agent")
+	fakeAgentBuild := exec.Command("go", "build", "-o", fakeAgentBinaryPath, "./testdata/fakeagent") // #nosec G204 -- fixed literal args and test-owned output path
+	fakeAgentBuild.Stdout = os.Stdout
+	fakeAgentBuild.Stderr = os.Stderr
+	if err := fakeAgentBuild.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "failed to build fake agent: %v\n", err)
+		return 1
+	}
+
 	// When GRALPH_BINARY is set (e.g. inside the e2e Docker container), use that
 	// pre-built binary and skip compilation entirely.
 	if path := os.Getenv("GRALPH_BINARY"); path != "" {
@@ -47,13 +66,6 @@ func runTests(m *testing.M) int {
 	}
 
 	// Fallback: build from source for local development outside Docker.
-	tmpDir, err := os.MkdirTemp("", "gralph-e2e-*")
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "failed to create temp dir: %v\n", err)
-		return 1
-	}
-	defer os.RemoveAll(tmpDir)
-
 	testBinaryPath = filepath.Join(tmpDir, "gralph")
 
 	// During `go test`, working directory is set to the package directory (tests/e2e).
@@ -209,6 +221,85 @@ func TestInvalidPromptMode(t *testing.T) {
 type agentFlagsInvocation struct {
 	Args  []string `json:"args"`
 	Stdin string   `json:"stdin"`
+}
+
+type fakeAgentInvocation struct {
+	Prompt       string `json:"prompt"`
+	PRDPath      string `json:"prd_path"`
+	ProgressPath string `json:"progress_path"`
+}
+
+func TestAgentLoopSuccess(t *testing.T) {
+	dir := t.TempDir()
+	promptPath := filepath.Join(dir, "PROMPT.md")
+	prdPath := filepath.Join(dir, "PRD.md")
+	progressPath := filepath.Join(dir, "progress.txt")
+	recordPath := filepath.Join(dir, "fake-agent-invocation.json")
+	promptTemplate := "# Fake agent prompt\n\nComplete the first open checklist item.\n"
+	initialPRD := "# Test PRD\n\n- [ ] Cycle 1 - Exercise the fake agent\n"
+	completedPRD := "# Test PRD\n\n- [x] Cycle 1 - Exercise the fake agent\n"
+
+	if err := os.WriteFile(promptPath, []byte(promptTemplate), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(prdPath, []byte(initialPRD), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	result := runCLI(t,
+		"--prompt="+promptPath,
+		"--prd="+prdPath,
+		"--progress="+progressPath,
+		"--agent-exec="+fakeAgentBinaryPath,
+		"--agent-arg=--record="+recordPath,
+		"--prompt-mode=stdin",
+		"--iterations=1",
+	)
+	if result.exitCode != 0 {
+		t.Fatalf("expected successful agent loop; exit=%d stdout=%q stderr=%q", result.exitCode, result.stdout, result.stderr)
+	}
+	if result.stderr != "" {
+		t.Errorf("expected empty gralph stderr, got %q", result.stderr)
+	}
+	for _, expected := range []string{
+		"Cycle 1: Exercise the fake agent",
+		"- Status: Complete",
+		"fake agent completed first checklist item",
+	} {
+		if !strings.Contains(result.stdout, expected) {
+			t.Errorf("expected stdout to contain %q; got %q", expected, result.stdout)
+		}
+	}
+
+	recordData, err := os.ReadFile(recordPath) // #nosec G304 -- path is created by the test
+	if err != nil {
+		t.Fatal(err)
+	}
+	var invocation fakeAgentInvocation
+	if err := json.Unmarshal(recordData, &invocation); err != nil {
+		t.Fatal(err)
+	}
+	wantPrompt := promptTemplate + fmt.Sprintf("\n## Runtime paths\n- PRD: %s\n- Progress: %s\n", prdPath, progressPath)
+	if invocation.Prompt != wantPrompt {
+		t.Errorf("unexpected prompt:\nwant: %q\n got: %q", wantPrompt, invocation.Prompt)
+	}
+	if invocation.PRDPath != prdPath {
+		t.Errorf("unexpected PRD runtime path: want %q, got %q", prdPath, invocation.PRDPath)
+	}
+	if invocation.ProgressPath != progressPath {
+		t.Errorf("unexpected progress runtime path: want %q, got %q", progressPath, invocation.ProgressPath)
+	}
+
+	prdData, err := os.ReadFile(prdPath) // #nosec G304 -- path is created by the test
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(prdData) != completedPRD {
+		t.Errorf("unexpected PRD transition:\nwant: %q\n got: %q", completedPRD, string(prdData))
+	}
+	if _, err := os.Stat(progressPath); err != nil {
+		t.Errorf("expected progress file at runtime path: %v", err)
+	}
 }
 
 func TestAgentFlags(t *testing.T) {

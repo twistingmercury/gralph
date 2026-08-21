@@ -85,13 +85,13 @@ Each task below is intended to be one small change that leaves the repository bu
   - Test: `go test ./internal/looper -run TestRunLoopOutputWriter -v`
   - Done: loop tests can run in parallel without mutating `os.Stdout`; `make build` succeeds.
 
-- [ ] **Task 13 — Define agent output capture and cleanup**
+- [x] **Task 13 — Define agent output capture and cleanup**
   - Capture stdout and stderr separately while preserving their ordering limitations in documentation.
   - Define which attempts are printed and ensure temporary files are removed on success, retry, fatal error, and cancellation.
   - Test: `go test ./internal/agent -run 'TestCommandRunnerOutput|TestCommandRunnerCleanup' -v`
   - Done: each output stream and every cleanup path has a focused test; `make build` succeeds.
 
-- [ ] **Task 14 — Add a successful fake-agent end-to-end test**
+- [x] **Task 14 — Add a successful fake-agent end-to-end test**
   - Build a deterministic local fake agent during e2e setup.
   - Run gralph with the fake agent in stdin mode and have it complete one PRD item.
   - Assert prompt contents, runtime paths, output, PRD transition, and exit code.
