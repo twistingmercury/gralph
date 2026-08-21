@@ -79,7 +79,7 @@ Each task below is intended to be one small change that leaves the repository bu
   - Test: `go test ./internal/looper -run TestRunLoopLogsHumanReadableItemLabels -v`
   - Done: no output label assumes a provider-specific response format; `make build` succeeds.
 
-- [ ] **Task 12 — Inject loop output writers**
+- [x] **Task 12 — Inject loop output writers**
   - Add output writers to `looper.Config` instead of writing directly to global `os.Stdout`.
   - Update tests to use buffers without swapping process-global file descriptors.
   - Test: `go test ./internal/looper -run TestRunLoopOutputWriter -v`

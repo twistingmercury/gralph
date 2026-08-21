@@ -2,6 +2,7 @@ package looper
 
 import (
 	"errors"
+	"io"
 	"testing"
 
 	"github.com/twistingmercury/gralph/internal/agent"
@@ -9,9 +10,10 @@ import (
 
 func TestStart_ConfigValidation(t *testing.T) {
 	validConfig := Config{
-		PromptPath:  "prompt.md",
-		PRDPath:     "PRD.md",
-		MaxAttempts: 1,
+		PromptPath:   "prompt.md",
+		PRDPath:      "PRD.md",
+		MaxAttempts:  1,
+		OutputWriter: io.Discard,
 		AgentCommand: agent.AgentCommand{
 			Executable: "agent",
 			PromptMode: agent.PromptModeStdin,
@@ -28,6 +30,7 @@ func TestStart_ConfigValidation(t *testing.T) {
 		{name: "blank prompt path", config: func() Config { c := validConfig; c.PromptPath = " "; return c }(), wantErr: true},
 		{name: "blank PRD path", config: func() Config { c := validConfig; c.PRDPath = " "; return c }(), wantErr: true},
 		{name: "invalid maximum attempts", config: func() Config { c := validConfig; c.MaxAttempts = 0; return c }(), wantErr: true},
+		{name: "nil output writer", config: func() Config { c := validConfig; c.OutputWriter = nil; return c }(), wantErr: true},
 		{name: "invalid agent command", config: func() Config { c := validConfig; c.AgentCommand.Executable = ""; return c }(), wantErr: true, wantAgentConfig: true},
 	}
 

@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,12 +14,19 @@ import (
 	"github.com/twistingmercury/gralph/internal/agent"
 )
 
+type failingWriter struct{}
+
+func (failingWriter) Write(_ []byte) (int, error) {
+	return 0, errors.New("write failed")
+}
+
 func testConfig(promptPath, prdPath, progressPath string, maxAttempts int) Config {
 	return Config{
 		PromptPath:   promptPath,
 		PRDPath:      prdPath,
 		ProgressPath: progressPath,
 		MaxAttempts:  maxAttempts,
+		OutputWriter: io.Discard,
 		AgentCommand: agent.AgentCommand{
 			Executable: os.Args[0],
 			PromptMode: agent.PromptModeStdin,
@@ -517,7 +525,7 @@ func TestRunLoop_NoOpenItems(t *testing.T) {
 		return "", nil
 	}
 
-	if err := runLoop(context.Background(), promptPath, prdPath, progressPath, 3, stubRunner); err != nil {
+	if err := runLoop(context.Background(), promptPath, prdPath, progressPath, 3, io.Discard, stubRunner); err != nil {
 		t.Fatalf("expected nil, got: %v", err)
 	}
 	if called {
@@ -526,10 +534,56 @@ func TestRunLoop_NoOpenItems(t *testing.T) {
 }
 
 func TestRunLoop_LogsHumanReadableItemLabels(t *testing.T) {
+	t.Parallel()
+	testRunLoopOutputWriter(t)
+}
+
+func TestRunLoopOutputWriter(t *testing.T) {
+	t.Parallel()
+
+	t.Run("captures logs and agent output", testRunLoopOutputWriter)
+	t.Run("returns writer failures before invoking the agent", func(t *testing.T) {
+		dir := t.TempDir()
+		promptPath := filepath.Join(dir, "prompt.md")
+		prdPath := filepath.Join(dir, "prd.md")
+		if err := os.WriteFile(promptPath, []byte("# Prompt\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		originalPRD := []byte("# PRD\n\n- [ ] Task remains open\n")
+		if err := os.WriteFile(prdPath, originalPRD, 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		called := false
+		runner := func(_ context.Context, _ string) (string, error) {
+			called = true
+			return "", nil
+		}
+		err := runLoop(context.Background(), promptPath, prdPath, filepath.Join(dir, "progress.txt"), 1, failingWriter{}, runner)
+		if err == nil || !strings.Contains(err.Error(), "could not write loop output") {
+			t.Fatalf("runLoop() error = %v, want output writer failure", err)
+		}
+		if called {
+			t.Fatal("agent was invoked after the output writer failed")
+		}
+		after, readErr := os.ReadFile(prdPath) // #nosec G304 -- path is created by the test
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		if !bytes.Equal(after, originalPRD) {
+			t.Fatalf("writer failure changed PRD:\nwant: %q\n got: %q", originalPRD, after)
+		}
+	})
+}
+
+func testRunLoopOutputWriter(t *testing.T) {
+	t.Helper()
+
 	dir := t.TempDir()
 	promptPath := filepath.Join(dir, "prompt.md")
 	prdPath := filepath.Join(dir, "prd.md")
 	progressPath := filepath.Join(dir, "progress.txt")
+	agentOutputPath := filepath.Join(dir, "agent-output.log")
 
 	if err := os.WriteFile(promptPath, []byte("# Prompt\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -539,27 +593,17 @@ func TestRunLoop_LogsHumanReadableItemLabels(t *testing.T) {
 	}
 
 	stubRunner := func(_ context.Context, _ string) (string, error) {
-		return "", os.WriteFile(prdPath, []byte("# PRD\n\n- [x] **Cycle 1 - Add GetByIDs to pattern repository**: long details here\n"), 0o644) // #nosec G304
+		if err := os.WriteFile(prdPath, []byte("# PRD\n\n- [x] **Cycle 1 - Add GetByIDs to pattern repository**: long details here\n"), 0o644); err != nil { // #nosec G304 -- path is created by the test
+			return "", err
+		}
+		if err := os.WriteFile(agentOutputPath, []byte("captured agent output\n"), 0o600); err != nil {
+			return "", err
+		}
+		return agentOutputPath, nil
 	}
-
-	origStdout := os.Stdout
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	os.Stdout = w
-
-	runErr := runLoop(context.Background(), promptPath, prdPath, progressPath, 3, stubRunner)
-
-	if err := w.Close(); err != nil {
-		t.Fatal(err)
-	}
-	os.Stdout = origStdout
 
 	var buf bytes.Buffer
-	if _, err := buf.ReadFrom(r); err != nil {
-		t.Fatal(err)
-	}
+	runErr := runLoop(context.Background(), promptPath, prdPath, progressPath, 3, &buf, stubRunner)
 
 	if runErr != nil {
 		t.Fatalf("expected nil, got: %v", runErr)
@@ -580,6 +624,9 @@ func TestRunLoop_LogsHumanReadableItemLabels(t *testing.T) {
 	}
 	if !strings.Contains(output, `- Agent Output:`) {
 		t.Fatalf("expected agent-output section, got:\n%s", output)
+	}
+	if !strings.Contains(output, "captured agent output") {
+		t.Fatalf("expected captured agent output to use the configured writer, got:\n%s", output)
 	}
 	if strings.Contains(output, "long details here") {
 		t.Fatalf("expected verbose item details to be omitted from logs, got:\n%s", output)
@@ -605,7 +652,7 @@ func TestRunLoop_CompletionDetected(t *testing.T) {
 		return "", os.WriteFile(prdPath, []byte("# PRD\n\n- [x] Task one\n"), 0o644) // #nosec G304
 	}
 
-	if err := runLoop(context.Background(), promptPath, prdPath, progressPath, 3, stubRunner); err != nil {
+	if err := runLoop(context.Background(), promptPath, prdPath, progressPath, 3, io.Discard, stubRunner); err != nil {
 		t.Fatalf("expected nil, got: %v", err)
 	}
 	if callCount != 1 {
@@ -697,7 +744,7 @@ func TestRunLoopFatalInvocationPreservesPRD(t *testing.T) {
 			callCount++
 			return "", nil
 		}
-		err := runLoop(context.Background(), promptPath, prdPath, filepath.Join(dir, "progress.txt"), 3, stubRunner)
+		err := runLoop(context.Background(), promptPath, prdPath, filepath.Join(dir, "progress.txt"), 3, io.Discard, stubRunner)
 		if err == nil {
 			t.Fatal("expected prompt read failure, got nil")
 		}
@@ -736,7 +783,7 @@ func TestRunLoopFatalInvocationPreservesPRD(t *testing.T) {
 			return outputPath, fmt.Errorf("%w: output setup failed", agent.ErrSetup)
 		}
 
-		err := runLoop(context.Background(), promptPath, prdPath, filepath.Join(dir, "progress.txt"), 3, stubRunner)
+		err := runLoop(context.Background(), promptPath, prdPath, filepath.Join(dir, "progress.txt"), 3, io.Discard, stubRunner)
 		if err == nil {
 			t.Fatal("expected fatal invocation error, got nil")
 		}
@@ -776,7 +823,7 @@ func TestRunLoopFatalInvocationPreservesPRD(t *testing.T) {
 			callCount++
 			return "", fmt.Errorf("%w: %w", agent.ErrCanceled, context.Canceled)
 		}
-		err := runLoop(context.Background(), promptPath, prdPath, filepath.Join(dir, "progress.txt"), 3, stubRunner)
+		err := runLoop(context.Background(), promptPath, prdPath, filepath.Join(dir, "progress.txt"), 3, io.Discard, stubRunner)
 		if err == nil {
 			t.Fatal("expected cancellation failure, got nil")
 		}
@@ -814,7 +861,7 @@ func TestRunLoop_RetriesClassifiedNonZeroExit(t *testing.T) {
 		return "", fmt.Errorf("%w: exit status 1", agent.ErrNonZeroExit)
 	}
 
-	if err := runLoop(context.Background(), promptPath, prdPath, filepath.Join(dir, "progress.txt"), 2, stubRunner); err != nil {
+	if err := runLoop(context.Background(), promptPath, prdPath, filepath.Join(dir, "progress.txt"), 2, io.Discard, stubRunner); err != nil {
 		t.Fatalf("expected retryable exit to reach abandonment, got: %v", err)
 	}
 	if callCount != 2 {
@@ -848,7 +895,7 @@ func TestRunLoop_AbandonAtLimit(t *testing.T) {
 		return "", nil // never modifies PRD
 	}
 
-	if err := runLoop(context.Background(), promptPath, prdPath, progressPath, 3, stubRunner); err != nil {
+	if err := runLoop(context.Background(), promptPath, prdPath, progressPath, 3, io.Discard, stubRunner); err != nil {
 		t.Fatalf("expected nil, got: %v", err)
 	}
 	if callCount != 3 {
@@ -888,7 +935,7 @@ func TestRunLoop_AttemptResetOnNewItem(t *testing.T) {
 
 	// maxAttempts=2: first item requires 2 attempts (completes on 2nd),
 	// second item gets 2 attempts then is abandoned.
-	if err := runLoop(context.Background(), promptPath, prdPath, progressPath, 2, stubRunner); err != nil {
+	if err := runLoop(context.Background(), promptPath, prdPath, progressPath, 2, io.Discard, stubRunner); err != nil {
 		t.Fatalf("expected nil, got: %v", err)
 	}
 

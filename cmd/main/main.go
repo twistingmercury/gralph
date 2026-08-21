@@ -34,6 +34,7 @@ func main() {
 		PRDPath:      *prdFlag,
 		ProgressPath: *progressFlag,
 		MaxAttempts:  *iterationsFlag,
+		OutputWriter: os.Stdout,
 		AgentCommand: agent.AgentCommand{
 			Executable: *agentExecFlag,
 			Args:       append([]string(nil), (*agentArgsFlag)...),

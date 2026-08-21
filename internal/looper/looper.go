@@ -19,26 +19,28 @@ type promptRunner func(ctx context.Context, prompt string) (string, error)
 
 var cycleLabelPattern = regexp.MustCompile(`^(Cycle\s+\d+)\s*-\s*(.+)$`)
 
-func withHiddenCursor(runner promptRunner) promptRunner {
+func withHiddenCursor(output io.Writer, runner promptRunner) promptRunner {
 	return func(ctx context.Context, prompt string) (string, error) {
-		hideCursor()
-		defer showCursor()
+		hideCursor(output)
+		defer showCursor(output)
 		return runner(ctx, prompt)
 	}
 }
 
-func hideCursor() {
-	if !isTerminal(os.Stdout) {
+func hideCursor(output io.Writer) {
+	file, ok := output.(*os.File)
+	if !ok || !isTerminal(file) {
 		return
 	}
-	_, _ = os.Stdout.WriteString("\x1b[?25l")
+	_, _ = io.WriteString(output, "\x1b[?25l")
 }
 
-func showCursor() {
-	if !isTerminal(os.Stdout) {
+func showCursor(output io.Writer) {
+	file, ok := output.(*os.File)
+	if !ok || !isTerminal(file) {
 		return
 	}
-	_, _ = os.Stdout.WriteString("\x1b[?25h")
+	_, _ = io.WriteString(output, "\x1b[?25h")
 }
 
 func isTerminal(f *os.File) bool {
@@ -75,7 +77,7 @@ func Start(ctx context.Context, config Config) error {
 		return fmt.Errorf("could not configure agent runner: %w", err)
 	}
 
-	if err := runLoop(ctx, config.PromptPath, config.PRDPath, progressPath, config.MaxAttempts, withHiddenCursor(runner.Run)); err != nil {
+	if err := runLoop(ctx, config.PromptPath, config.PRDPath, progressPath, config.MaxAttempts, config.OutputWriter, withHiddenCursor(config.OutputWriter, runner.Run)); err != nil {
 		return fmt.Errorf("loop error: %w", err)
 	}
 
@@ -119,7 +121,7 @@ func ensureProgressFileExists(path string) error {
 	return f.Close()
 }
 
-func runLoop(ctx context.Context, prompt, prd, progress string, maxAttempts int, runner promptRunner) error {
+func runLoop(ctx context.Context, prompt, prd, progress string, maxAttempts int, output io.Writer, runner promptRunner) error {
 	currentItem := ""
 	attempt := 0
 
@@ -145,9 +147,9 @@ func runLoop(ctx context.Context, prompt, prd, progress string, maxAttempts int,
 		}
 
 		label := itemLabel(currentItem)
-		fmt.Printf("%s\n", cycleHeader(label))
-		fmt.Printf("- Agent: %s\n", meta.agent)
-		fmt.Printf("- Status: Running ... (%d/%d)\n", attempt, maxAttempts)
+		if err := writeLoopOutput(output, "%s\n- Agent: %s\n- Status: Running ... (%d/%d)\n", cycleHeader(label), meta.agent, attempt, maxAttempts); err != nil {
+			return err
+		}
 
 		agentOutputPath, invokeErr := invokeAgent(ctx, prompt, prd, progress, runner)
 		if invokeErr != nil && !errors.Is(invokeErr, agent.ErrNonZeroExit) {
@@ -170,9 +172,11 @@ func runLoop(ctx context.Context, prompt, prd, progress string, maxAttempts int,
 		}
 
 		if itemAfter != currentItem {
-			fmt.Printf("- Status: Complete\n")
-			fmt.Printf("- Agent Output:\n")
-			if err := printAgentOutput(agentOutputPath); err != nil {
+			if err := writeLoopOutput(output, "- Status: Complete\n- Agent Output:\n"); err != nil {
+				_ = cleanupOutputFile(agentOutputPath)
+				return err
+			}
+			if err := printAgentOutput(output, agentOutputPath); err != nil {
 				_ = cleanupOutputFile(agentOutputPath)
 				return fmt.Errorf("could not print agent output: %w", err)
 			}
@@ -183,11 +187,17 @@ func runLoop(ctx context.Context, prompt, prd, progress string, maxAttempts int,
 		}
 
 		if attempt >= maxAttempts {
-			fmt.Printf("- Status: Failed\n")
-			if invokeErr != nil {
-				fmt.Printf("- Error: %v\n", invokeErr)
+			if err := writeLoopOutput(output, "- Status: Failed\n"); err != nil {
+				_ = cleanupOutputFile(agentOutputPath)
+				return err
 			}
-			if err := printAgentOutput(agentOutputPath); err != nil {
+			if invokeErr != nil {
+				if err := writeLoopOutput(output, "- Error: %v\n", invokeErr); err != nil {
+					_ = cleanupOutputFile(agentOutputPath)
+					return err
+				}
+			}
+			if err := printAgentOutput(output, agentOutputPath); err != nil {
 				_ = cleanupOutputFile(agentOutputPath)
 				return fmt.Errorf("could not print agent output: %w", err)
 			}
@@ -204,7 +214,14 @@ func runLoop(ctx context.Context, prompt, prd, progress string, maxAttempts int,
 	}
 }
 
-func printAgentOutput(outputPath string) error {
+func writeLoopOutput(output io.Writer, format string, args ...any) error {
+	if _, err := fmt.Fprintf(output, format, args...); err != nil {
+		return fmt.Errorf("could not write loop output: %w", err)
+	}
+	return nil
+}
+
+func printAgentOutput(output io.Writer, outputPath string) error {
 	if outputPath == "" {
 		return nil
 	}
@@ -216,7 +233,7 @@ func printAgentOutput(outputPath string) error {
 		_ = f.Close()
 	}()
 
-	_, err = io.Copy(os.Stdout, f)
+	_, err = io.Copy(output, f)
 	return err
 }
 
