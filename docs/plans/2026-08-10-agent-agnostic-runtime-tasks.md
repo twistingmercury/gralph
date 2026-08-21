@@ -111,7 +111,7 @@ Each task below is intended to be one small change that leaves the repository bu
   - Test from `tests/e2e`: `go test -run TestRunCLITimeout -v .`
   - Done: a timed-out process always fails the test instead of satisfying a generic non-zero-exit assertion; `make build` succeeds.
 
-- [ ] **Task 17 — Add SIGTERM cancellation**
+- [x] **Task 17 — Add SIGTERM cancellation**
   - Register SIGTERM in addition to SIGINT and preserve cancellation through the generic runner.
   - Verify direct child termination and PRD preservation; leave descendant process groups to the next task.
   - Test from `tests/e2e`: `go test -run 'TestAgentSIGINT|TestAgentSIGTERM' -v .`

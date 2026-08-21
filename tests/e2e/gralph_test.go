@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -419,6 +420,117 @@ func TestAgentStartupFailure(t *testing.T) {
 			t.Errorf("invalid prompt configuration invoked the agent: %v", err)
 		}
 	})
+}
+
+func TestAgentSIGINT(t *testing.T) {
+	testAgentCancellation(t, interruptSignal())
+}
+
+func TestAgentSIGTERM(t *testing.T) {
+	testAgentCancellation(t, terminateSignal())
+}
+
+func testAgentCancellation(t *testing.T, signal os.Signal) {
+	t.Helper()
+	if !signalTestsSupported() {
+		t.Skip("process signal assertions are not supported on this platform")
+	}
+	dir := t.TempDir()
+	promptPath := filepath.Join(dir, "PROMPT.md")
+	prdPath := filepath.Join(dir, "PRD.md")
+	progressPath := filepath.Join(dir, "progress.txt")
+	recordPath := filepath.Join(dir, "fake-agent-invocation.json")
+	readyPath := filepath.Join(dir, "fake-agent-ready")
+	initialPRD := []byte("# Test PRD\n\n- [ ] Cycle 1 - Preserve on cancellation\n")
+	if err := os.WriteFile(promptPath, []byte("# Cancellation prompt\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(prdPath, initialPRD, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	args := []string{
+		"--prompt=" + promptPath,
+		"--prd=" + prdPath,
+		"--progress=" + progressPath,
+		"--agent-exec=" + fakeAgentBinaryPath,
+		"--agent-arg=--record=" + recordPath,
+		"--agent-arg=--ready-file=" + readyPath,
+		"--agent-arg=--block",
+		"--prompt-mode=stdin",
+		"--iterations=3",
+	}
+	cmd := exec.Command(testBinaryPath, args...) // #nosec G204 -- testBinaryPath and fake-agent arguments are test fixtures
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	waitResult := make(chan error, 1)
+	go func() {
+		waitResult <- cmd.Wait()
+	}()
+	t.Cleanup(func() {
+		if processIsRunning(cmd.Process.Pid) {
+			_ = cmd.Process.Kill()
+		}
+	})
+
+	agentPID := waitForAgentReady(t, readyPath, waitResult, &stdout, &stderr)
+	if err := cmd.Process.Signal(signal); err != nil {
+		t.Fatalf("send %v to gralph: %v", signal, err)
+	}
+	select {
+	case err := <-waitResult:
+		if err == nil {
+			t.Fatalf("expected gralph to exit non-zero after %v", signal)
+		}
+	case <-time.After(5 * time.Second):
+		_ = cmd.Process.Kill()
+		t.Fatalf("gralph did not exit after %v; stdout=%q stderr=%q", signal, stdout.String(), stderr.String())
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for processIsRunning(agentPID) && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if processIsRunning(agentPID) {
+		t.Errorf("fake agent process %d remained running after %v", agentPID, signal)
+	}
+	prdData, err := os.ReadFile(prdPath) // #nosec G304 -- path is created by the test
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(prdData, initialPRD) {
+		t.Errorf("cancellation mutated PRD:\nwant: %q\n got: %q", initialPRD, prdData)
+	}
+}
+
+func waitForAgentReady(t *testing.T, readyPath string, waitResult <-chan error, stdout, stderr *bytes.Buffer) int {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		data, err := os.ReadFile(readyPath) // #nosec G304 -- path is created by the test
+		if err == nil {
+			pid, err := strconv.Atoi(string(data))
+			if err != nil {
+				t.Fatalf("parse fake-agent PID %q: %v", data, err)
+			}
+			return pid
+		}
+		if !os.IsNotExist(err) {
+			t.Fatalf("read fake-agent ready file: %v", err)
+		}
+		select {
+		case err := <-waitResult:
+			t.Fatalf("gralph exited before fake agent was ready: %v; stdout=%q stderr=%q", err, stdout.String(), stderr.String())
+		default:
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("fake agent did not become ready; stdout=%q stderr=%q", stdout.String(), stderr.String())
+	return 0
 }
 
 func assertAgentStartupFailure(t *testing.T, dir, executable, promptMode string, agentArgs []string, wantAttempts int) {

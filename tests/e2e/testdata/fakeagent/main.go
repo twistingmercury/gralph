@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -20,12 +21,11 @@ func main() {
 	recordPath := flag.String("record", "", "path to write the captured invocation")
 	attemptLogPath := flag.String("attempt-log", "", "path to append one line per invocation")
 	block := flag.Bool("block", false, "block until the caller terminates the process")
+	readyPath := flag.String("ready-file", "", "path to write the process ID before blocking")
 	exitCode := flag.Int("exit-code", 0, "exit unsuccessfully before changing the PRD")
 	flag.Parse()
-	if *block {
-		for {
-			time.Sleep(time.Hour)
-		}
+	if *block && *recordPath == "" {
+		blockForever()
 	}
 	if *recordPath == "" {
 		fail("--record is required")
@@ -64,6 +64,14 @@ func main() {
 			fail("close attempt log: %v", err)
 		}
 	}
+	if *readyPath != "" {
+		if err := os.WriteFile(*readyPath, []byte(strconv.Itoa(os.Getpid())), 0o600); err != nil {
+			fail("write ready file: %v", err)
+		}
+	}
+	if *block {
+		blockForever()
+	}
 	if *exitCode != 0 {
 		fmt.Fprintf(os.Stderr, "fake agent exiting with status %d\n", *exitCode)
 		os.Exit(*exitCode)
@@ -82,6 +90,12 @@ func main() {
 	}
 
 	fmt.Println("fake agent completed first checklist item")
+}
+
+func blockForever() {
+	for {
+		time.Sleep(time.Hour)
+	}
 }
 
 func runtimePath(prompt, label string) string {
