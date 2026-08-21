@@ -123,7 +123,7 @@ Each task below is intended to be one small change that leaves the repository bu
   - Test: `go test ./internal/agent -run TestTerminateProcessTree -v`; from `tests/e2e`, `go test -run TestAgentDescendantTermination -v .`
   - Done: cancellation leaves no fake-agent descendant running on every platform for which the behavior is documented as supported; `make build` succeeds.
 
-- [ ] **Task 19 — Add optional provider profiles without weakening the generic path**
+- [x] **Task 19 — Add optional provider profiles without weakening the generic path**
   - Add a small profile registry only for providers whose current noninteractive invocation contract is verified.
   - Profiles may supply executable, arguments, and prompt mode; explicit CLI values must be able to override or bypass them.
   - Keep permission-bypass behavior opt-in and visible.
