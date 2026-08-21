@@ -7,40 +7,50 @@ import (
 )
 
 func TestProfiles(t *testing.T) {
-	t.Run("codex expands to a valid generic command", func(t *testing.T) {
-		command, err := Profile("codex")
-		if err != nil {
-			t.Fatalf("Profile(\"codex\") error = %v", err)
-		}
-
-		want := AgentCommand{
+	profiles := map[string]AgentCommand{
+		"claude-code": {
+			Executable: "claude",
+			Args:       []string{"--print", promptPlaceholder},
+			PromptMode: PromptModeArg,
+		},
+		"codex": {
 			Executable: "codex",
 			Args:       []string{"exec", promptPlaceholder},
 			PromptMode: PromptModeArg,
-		}
-		if !reflect.DeepEqual(command, want) {
-			t.Errorf("Profile(\"codex\") = %#v, want %#v", command, want)
-		}
-		if err := command.Validate(); err != nil {
-			t.Errorf("profile command Validate() error = %v", err)
-		}
-	})
+		},
+	}
+	for name, want := range profiles {
+		t.Run(name+" expands to a valid generic command", func(t *testing.T) {
+			command, err := Profile(name)
+			if err != nil {
+				t.Fatalf("Profile(%q) error = %v", name, err)
+			}
+			if !reflect.DeepEqual(command, want) {
+				t.Errorf("Profile(%q) = %#v, want %#v", name, command, want)
+			}
+			if err := command.Validate(); err != nil {
+				t.Errorf("profile command Validate() error = %v", err)
+			}
+		})
+	}
 
-	t.Run("returned command can be customized without changing the profile", func(t *testing.T) {
-		command, err := Profile("codex")
-		if err != nil {
-			t.Fatalf("Profile(\"codex\") error = %v", err)
-		}
-		command.Args[0] = "changed"
+	for name, want := range profiles {
+		t.Run(name+" returns an independent command copy", func(t *testing.T) {
+			command, err := Profile(name)
+			if err != nil {
+				t.Fatalf("Profile(%q) error = %v", name, err)
+			}
+			command.Args[0] = "changed"
 
-		freshCommand, err := Profile("codex")
-		if err != nil {
-			t.Fatalf("Profile(\"codex\") error = %v", err)
-		}
-		if got := freshCommand.Args[0]; got != "exec" {
-			t.Errorf("fresh profile argument = %q, want %q", got, "exec")
-		}
-	})
+			freshCommand, err := Profile(name)
+			if err != nil {
+				t.Fatalf("Profile(%q) error = %v", name, err)
+			}
+			if got, want := freshCommand.Args[0], want.Args[0]; got != want {
+				t.Errorf("fresh profile argument = %q, want %q", got, want)
+			}
+		})
+	}
 
 	t.Run("unknown profile is rejected", func(t *testing.T) {
 		_, err := Profile("not-a-profile")
@@ -52,7 +62,7 @@ func TestProfiles(t *testing.T) {
 		}
 	})
 
-	if got, want := ProfileNames(), []string{"codex"}; !reflect.DeepEqual(got, want) {
+	if got, want := ProfileNames(), []string{"claude-code", "codex"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("ProfileNames() = %q, want %q", got, want)
 	}
 }

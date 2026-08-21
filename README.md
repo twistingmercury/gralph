@@ -36,13 +36,33 @@ gralph \
   --prompt-mode arg
 ```
 
-The verified optional `codex` profile expands to an ordinary command
-configuration. Explicit `--agent-exec`, `--agent-arg`, and `--prompt-mode`
-values override the profile:
+The verified optional profiles are convenience configurations, not a default
+provider choice. The generic examples above remain the provider-independent
+path. Explicit `--agent-exec`, `--agent-arg`, and `--prompt-mode` values
+override a profile.
+
+### Codex profile
 
 ```bash
-gralph --prompt scripts/PROMPT.md --prd scripts/PRD.md --agent-profile codex
+gralph \
+  --prompt scripts/PROMPT.md \
+  --prd scripts/PRD.md \
+  --agent-profile codex
 ```
+
+### Claude Code profile
+
+```bash
+gralph \
+  --prompt scripts/PROMPT.md \
+  --prd scripts/PRD.md \
+  --agent-profile claude-code
+```
+
+Neither profile includes a permission-bypass option. The `claude-code` profile
+uses Claude Code’s documented noninteractive `--print` mode with the assembled
+prompt as one argument. Add an explicit `--agent-arg` only if you choose an
+agent-specific permission policy.
 
 ## CLI contract
 

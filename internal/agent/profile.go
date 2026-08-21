@@ -10,6 +10,11 @@ import (
 // arguments never include permission-bypass options; callers must opt into any
 // provider-specific security-sensitive arguments explicitly.
 var profiles = map[string]AgentCommand{
+	"claude-code": {
+		Executable: "claude",
+		Args:       []string{"--print", promptPlaceholder},
+		PromptMode: PromptModeArg,
+	},
 	"codex": {
 		Executable: "codex",
 		Args:       []string{"exec", promptPlaceholder},

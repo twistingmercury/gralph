@@ -137,18 +137,36 @@ Each task below is intended to be one small change that leaves the repository bu
   - Test: `actionlint .github/workflows/*.yml`
   - Done: no required GitHub workflow depends on Anthropic actions or `CLAUDE_CODE_OAUTH_TOKEN`; `make build` succeeds.
 
-- [ ] **Task 21 — Update the user and architecture contracts**
+- [x] **Task 21 — Update the user and architecture contracts**
   - Update README usage, requirements, ADRs, system architecture, deployment architecture, and output examples.
   - Supersede the Claude-specific execution ADR with the generic command specification, prompt transport, error policy, and security boundary.
   - Document the compatibility contract: noninteractive one-shot execution, configured prompt transport, meaningful exit status, and process termination.
   - Test: add and run `make docs-check` to compare captured `--help` output with documented flags and validate Markdown links.
   - Done: the documented default path requires no named provider, and Claude, Codex, and Grok appear only as optional examples or verified profiles; `make build` succeeds.
 
-- [ ] **Task 22 — Add the final provider-agnostic acceptance gate**
+- [x] **Task 22 — Add the final provider-agnostic acceptance gate**
   - Add one aggregate target that runs root unit tests, root race tests, e2e tests, e2e race tests, vet, lint, security checks, and provider-neutral identifier checks.
   - Assert the required release artifacts rather than checking for only one binary.
   - Test: `make verify`
   - Done: `make verify` passes from a clean checkout, fake-agent tests cover both prompt modes, `rg -n 'defaultClaudeRunner|invokeClaude|CLAUDE_CODE_OAUTH_TOKEN' cmd internal .github/workflows` returns no matches, and `make build` succeeds.
+
+- [x] **Task 23 — Register the Claude Code profile**
+  - Verify Claude Code’s current documented one-shot, noninteractive invocation contract from its official documentation before encoding it.
+  - Add a `claude-code` profile that expands to an ordinary validated `AgentCommand`; use the verified executable, literal arguments, and prompt transport.
+  - Do not add permission-bypass arguments to the profile. Callers must opt into any provider-specific elevated-permission option explicitly through `--agent-arg`.
+  - Preserve the generic command path and explicit-flag overrides; do not make this profile a default.
+  - Update profile tests to assert the exact profile specification, deterministic profile names, validation, and defensive copying.
+  - Update README profile examples and any affected architecture contract text.
+  - Test: `go test ./internal/agent -run TestProfiles -v && make docs-check && make verify`
+  - Done: `gralph --agent-profile claude-code` resolves to the verified safe command specification, arbitrary executables remain supported, and the full acceptance gate passes.
+
+- [x] **Task 24 — Document registered profile examples**
+  - Add separate copy-pasteable README examples using `--agent-profile codex` and `--agent-profile claude-code` with prompt and PRD paths.
+  - State that profiles are optional convenience configurations, that explicit agent flags override them, and that neither example enables a permission bypass.
+  - Keep the generic `--agent-exec`, `--agent-arg`, and `--prompt-mode` examples as the provider-independent default path.
+  - Verify that the examples match registered profile names and current CLI flags.
+  - Test: `make docs-check && make verify`
+  - Done: readers can choose either registered profile from documented commands without inferring a default provider or hidden permission policy.
 
 ## Recommended Delivery Boundaries
 
@@ -156,3 +174,5 @@ Each task below is intended to be one small change that leaves the repository bu
 2. **Neutral output and executable coverage:** Tasks 10–18.
 3. **Profiles, automation, and documentation:** Tasks 19–21.
 4. **Release gate:** Task 22.
+5. **Verified profile extension:** Task 23.
+6. **Profile guidance:** Task 24.
