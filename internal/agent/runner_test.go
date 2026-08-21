@@ -14,7 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-type commandRunnerInvocation struct {
+type agentInvocation struct {
 	Args  []string `json:"args"`
 	Stdin string   `json:"stdin"`
 }
@@ -63,7 +63,7 @@ func TestCommandRunnerStdin(t *testing.T) {
 		if !assert.NoError(t, err) {
 			return
 		}
-		var got commandRunnerInvocation
+		var got agentInvocation
 		if !assert.NoError(t, json.Unmarshal(data, &got)) {
 			return
 		}
@@ -123,7 +123,7 @@ func TestCommandRunnerArg(t *testing.T) {
 	if !assert.NoError(t, err) {
 		return
 	}
-	var got commandRunnerInvocation
+	var got agentInvocation
 	if !assert.NoError(t, json.Unmarshal(data, &got)) {
 		return
 	}
@@ -309,7 +309,7 @@ func TestCommandRunnerStdinHelper(t *testing.T) {
 	if err != nil {
 		os.Exit(3)
 	}
-	record := commandRunnerInvocation{
+	record := agentInvocation{
 		Args:  append([]string(nil), os.Args[1:]...),
 		Stdin: string(stdin),
 	}

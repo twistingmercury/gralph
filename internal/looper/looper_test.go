@@ -415,7 +415,7 @@ func TestAbandonFirstOpenItem(t *testing.T) {
 	})
 }
 
-func TestInvokeClaude(t *testing.T) {
+func TestInvokeAgent(t *testing.T) {
 	t.Run("returns nil on zero exit", func(t *testing.T) {
 		dir := t.TempDir()
 		promptPath := filepath.Join(dir, "prompt.md")
@@ -425,7 +425,7 @@ func TestInvokeClaude(t *testing.T) {
 
 		stubRunner := func(_ context.Context, _ string) (string, error) { return "", nil }
 
-		if _, err := invokeClaude(context.Background(), promptPath, "prd.md", "progress.txt", stubRunner); err != nil {
+		if _, err := invokeAgent(context.Background(), promptPath, "prd.md", "progress.txt", stubRunner); err != nil {
 			t.Fatalf("expected nil error, got: %v", err)
 		}
 	})
@@ -439,7 +439,7 @@ func TestInvokeClaude(t *testing.T) {
 
 		stubRunner := func(_ context.Context, _ string) (string, error) { return "", errors.New("exit status 1") }
 
-		if _, err := invokeClaude(context.Background(), promptPath, "prd.md", "progress.txt", stubRunner); err == nil {
+		if _, err := invokeAgent(context.Background(), promptPath, "prd.md", "progress.txt", stubRunner); err == nil {
 			t.Fatal("expected error, got nil")
 		}
 	})
@@ -461,7 +461,7 @@ func TestInvokeClaude(t *testing.T) {
 			return "", nil
 		}
 
-		if _, err := invokeClaude(context.Background(), promptPath, prdPath, progressPath, stubRunner); err != nil {
+		if _, err := invokeAgent(context.Background(), promptPath, prdPath, progressPath, stubRunner); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
@@ -488,7 +488,7 @@ func TestInvokeClaude(t *testing.T) {
 			return "", nil
 		}
 
-		_, err := invokeClaude(context.Background(), filepath.Join(dir, "missing.md"), "prd.md", "progress.txt", stubRunner)
+		_, err := invokeAgent(context.Background(), filepath.Join(dir, "missing.md"), "prd.md", "progress.txt", stubRunner)
 		if err == nil {
 			t.Fatal("expected error for missing prompt file, got nil")
 		}
@@ -521,7 +521,7 @@ func TestRunLoop_NoOpenItems(t *testing.T) {
 		t.Fatalf("expected nil, got: %v", err)
 	}
 	if called {
-		t.Error("expected claudeRunner not to be called when no open items")
+		t.Error("expected agent runner not to be called when no open items")
 	}
 }
 
@@ -609,7 +609,7 @@ func TestRunLoop_CompletionDetected(t *testing.T) {
 		t.Fatalf("expected nil, got: %v", err)
 	}
 	if callCount != 1 {
-		t.Errorf("expected claudeRunner called once, got %d", callCount)
+		t.Errorf("expected agent runner called once, got %d", callCount)
 	}
 	data, err := os.ReadFile(prdPath) // #nosec G304
 	if err != nil {
@@ -852,7 +852,7 @@ func TestRunLoop_AbandonAtLimit(t *testing.T) {
 		t.Fatalf("expected nil, got: %v", err)
 	}
 	if callCount != 3 {
-		t.Errorf("expected claudeRunner called 3 times, got %d", callCount)
+		t.Errorf("expected agent runner called 3 times, got %d", callCount)
 	}
 	data, err := os.ReadFile(prdPath) // #nosec G304
 	if err != nil {

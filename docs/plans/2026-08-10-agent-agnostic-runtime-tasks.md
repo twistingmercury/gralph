@@ -67,7 +67,7 @@ Each task below is intended to be one small change that leaves the repository bu
   - Test from `tests/e2e`: `go test -run 'TestAgentFlags|TestMissingAgentExecutable|TestInvalidPromptMode' -v .`
   - Done: CLI help documents the generic contract, missing/invalid configuration exits non-zero, and repeated arguments retain order; `make build` succeeds.
 
-- [ ] **Task 10 — Remove provider-specific names from core code**
+- [x] **Task 10 — Remove provider-specific names from core code**
   - Rename `commandRunner`, `defaultClaudeRunner`, `invokeClaude`, `claudeOutputPath`, and related comments to provider-neutral terminology.
   - Restrict provider names to explicit examples, optional profiles, or migration documentation.
   - Test: `go test ./...` and `rg -n 'Claude|claude' cmd internal`

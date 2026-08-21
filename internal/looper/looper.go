@@ -13,13 +13,13 @@ import (
 	"github.com/twistingmercury/gralph/internal/agent"
 )
 
-// commandRunner is a function that executes an agent with the given prompt.
+// promptRunner is a function that executes an agent with the given prompt.
 // It returns the path to a file containing combined stdout/stderr.
-type commandRunner func(ctx context.Context, prompt string) (string, error)
+type promptRunner func(ctx context.Context, prompt string) (string, error)
 
 var cycleLabelPattern = regexp.MustCompile(`^(Cycle\s+\d+)\s*-\s*(.+)$`)
 
-func withHiddenCursor(runner commandRunner) commandRunner {
+func withHiddenCursor(runner promptRunner) promptRunner {
 	return func(ctx context.Context, prompt string) (string, error) {
 		hideCursor()
 		defer showCursor()
@@ -119,7 +119,7 @@ func ensureProgressFileExists(path string) error {
 	return f.Close()
 }
 
-func runLoop(ctx context.Context, prompt, prd, progress string, maxAttempts int, runner commandRunner) error {
+func runLoop(ctx context.Context, prompt, prd, progress string, maxAttempts int, runner promptRunner) error {
 	currentItem := ""
 	attempt := 0
 
@@ -149,34 +149,34 @@ func runLoop(ctx context.Context, prompt, prd, progress string, maxAttempts int,
 		fmt.Printf("- Agent: %s\n", meta.agent)
 		fmt.Printf("- Status: Running ... (%d/%d)\n", attempt, maxAttempts)
 
-		claudeOutputPath, invokeErr := invokeClaude(ctx, prompt, prd, progress, runner)
+		agentOutputPath, invokeErr := invokeAgent(ctx, prompt, prd, progress, runner)
 		if invokeErr != nil && !errors.Is(invokeErr, agent.ErrNonZeroExit) {
-			_ = cleanupOutputFile(claudeOutputPath)
+			_ = cleanupOutputFile(agentOutputPath)
 			return fmt.Errorf("agent invocation failed: %w", invokeErr)
 		}
 		if err := ctx.Err(); err != nil {
-			_ = cleanupOutputFile(claudeOutputPath)
+			_ = cleanupOutputFile(agentOutputPath)
 			return err
 		}
 
 		itemAfter, err := getFirstOpenItem(prd)
 		if err != nil {
-			_ = cleanupOutputFile(claudeOutputPath)
+			_ = cleanupOutputFile(agentOutputPath)
 			return fmt.Errorf("could not read PRD after invocation: %w", err)
 		}
 		if err := ctx.Err(); err != nil {
-			_ = cleanupOutputFile(claudeOutputPath)
+			_ = cleanupOutputFile(agentOutputPath)
 			return err
 		}
 
 		if itemAfter != currentItem {
 			fmt.Printf("- Status: Complete\n")
 			fmt.Printf("- Files Changed:\n")
-			if err := printClaudeOutput(claudeOutputPath); err != nil {
-				_ = cleanupOutputFile(claudeOutputPath)
-				return fmt.Errorf("could not print Claude output: %w", err)
+			if err := printAgentOutput(agentOutputPath); err != nil {
+				_ = cleanupOutputFile(agentOutputPath)
+				return fmt.Errorf("could not print agent output: %w", err)
 			}
-			_ = cleanupOutputFile(claudeOutputPath)
+			_ = cleanupOutputFile(agentOutputPath)
 			currentItem = ""
 			attempt = 0
 			continue
@@ -187,11 +187,11 @@ func runLoop(ctx context.Context, prompt, prd, progress string, maxAttempts int,
 			if invokeErr != nil {
 				fmt.Printf("- Error: %v\n", invokeErr)
 			}
-			if err := printClaudeOutput(claudeOutputPath); err != nil {
-				_ = cleanupOutputFile(claudeOutputPath)
-				return fmt.Errorf("could not print Claude output: %w", err)
+			if err := printAgentOutput(agentOutputPath); err != nil {
+				_ = cleanupOutputFile(agentOutputPath)
+				return fmt.Errorf("could not print agent output: %w", err)
 			}
-			_ = cleanupOutputFile(claudeOutputPath)
+			_ = cleanupOutputFile(agentOutputPath)
 			if _, err := abandonFirstOpenItem(prd); err != nil {
 				return fmt.Errorf("could not abandon item: %w", err)
 			}
@@ -200,11 +200,11 @@ func runLoop(ctx context.Context, prompt, prd, progress string, maxAttempts int,
 			continue
 		}
 
-		_ = cleanupOutputFile(claudeOutputPath)
+		_ = cleanupOutputFile(agentOutputPath)
 	}
 }
 
-func printClaudeOutput(outputPath string) error {
+func printAgentOutput(outputPath string) error {
 	if outputPath == "" {
 		return nil
 	}
@@ -261,7 +261,7 @@ func itemLabel(item string) string {
 	return label
 }
 
-func invokeClaude(ctx context.Context, prompt, prd, progress string, runner commandRunner) (string, error) {
+func invokeAgent(ctx context.Context, prompt, prd, progress string, runner promptRunner) (string, error) {
 	data, err := os.ReadFile(prompt) // #nosec G304 -- path is CLI-provided or derived from validated PRD path
 	if err != nil {
 		return "", fmt.Errorf("could not read prompt file %q: %w", prompt, err)
