@@ -93,8 +93,13 @@ func runTests(m *testing.M) int {
 // runCLI executes the CLI binary with the given arguments and returns the result.
 func runCLI(t *testing.T, args ...string) cliResult {
 	t.Helper()
+	return runCLIWithTimeout(t, defaultTimeout, args...)
+}
 
-	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+func runCLIWithTimeout(t *testing.T, timeout time.Duration, args ...string) cliResult {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, testBinaryPath, args...) // #nosec G204 -- testBinaryPath is a test fixture
@@ -112,16 +117,43 @@ func runCLI(t *testing.T, args ...string) cliResult {
 	}
 
 	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			t.Fatalf("CLI command timed out after %v: %v: %v", timeout, args, ctxErr)
+		} else if exitErr, ok := err.(*exec.ExitError); ok {
 			result.exitCode = exitErr.ExitCode()
-		} else if ctx.Err() == context.DeadlineExceeded {
-			t.Fatalf("CLI command timed out after %v: %v", defaultTimeout, args)
 		} else {
 			t.Fatalf("failed to execute CLI: %v", err)
 		}
 	}
 
 	return result
+}
+
+func TestRunCLITimeout(t *testing.T) {
+	cmd := exec.Command(os.Args[0], "-test.run=^TestCLIBlockingHelper$", "-test.v") // #nosec G204 -- current test binary and fixed arguments
+	cmd.Env = append(os.Environ(),
+		"GRALPH_BINARY="+testBinaryPath,
+		"GRALPH_TIMEOUT_HELPER=1",
+	)
+	output, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("expected blocking CLI helper to fail its test; output=%s", output)
+	}
+	if !strings.Contains(string(output), "CLI command timed out after") {
+		t.Fatalf("expected timeout classification, got: %s", output)
+	}
+	if strings.Contains(string(output), "runCLI returned a generic CLI result") {
+		t.Fatalf("timeout was treated as an ordinary non-zero CLI result: %s", output)
+	}
+}
+
+func TestCLIBlockingHelper(t *testing.T) {
+	if os.Getenv("GRALPH_TIMEOUT_HELPER") != "1" {
+		return
+	}
+	testBinaryPath = fakeAgentBinaryPath
+	runCLIWithTimeout(t, 100*time.Millisecond, "--block")
+	t.Fatal("runCLI returned a generic CLI result for a timed-out process")
 }
 
 // TestVersionFlag verifies that --version exits 0 and produces output.

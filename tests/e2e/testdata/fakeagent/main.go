@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 )
 
 type invocation struct {
@@ -18,8 +19,14 @@ type invocation struct {
 func main() {
 	recordPath := flag.String("record", "", "path to write the captured invocation")
 	attemptLogPath := flag.String("attempt-log", "", "path to append one line per invocation")
+	block := flag.Bool("block", false, "block until the caller terminates the process")
 	exitCode := flag.Int("exit-code", 0, "exit unsuccessfully before changing the PRD")
 	flag.Parse()
+	if *block {
+		for {
+			time.Sleep(time.Hour)
+		}
+	}
 	if *recordPath == "" {
 		fail("--record is required")
 	}

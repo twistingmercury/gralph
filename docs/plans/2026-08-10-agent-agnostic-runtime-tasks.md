@@ -105,7 +105,7 @@ Each task below is intended to be one small change that leaves the repository bu
   - Test from `tests/e2e`: `go test -run 'TestAgentRetry|TestAgentStartupFailure' -v .`
   - Done: the destructive missing-agent behavior from the 2026-08-10 review is prevented by black-box regression tests; `make build` succeeds.
 
-- [ ] **Task 16 — Correct e2e timeout classification**
+- [x] **Task 16 — Correct e2e timeout classification**
   - Check `ctx.Err()` before treating `*exec.ExitError` as an ordinary CLI result.
   - Add a deliberately blocking fixture that exceeds the test deadline.
   - Test from `tests/e2e`: `go test -run TestRunCLITimeout -v .`
