@@ -264,6 +264,15 @@ type fakeAgentInvocation struct {
 }
 
 func TestAgentLoopSuccess(t *testing.T) {
+	for _, promptMode := range []string{"stdin", "arg"} {
+		t.Run(promptMode, func(t *testing.T) {
+			testAgentLoopSuccess(t, promptMode)
+		})
+	}
+}
+
+func testAgentLoopSuccess(t *testing.T, promptMode string) {
+	t.Helper()
 	dir := t.TempDir()
 	promptPath := filepath.Join(dir, "PROMPT.md")
 	prdPath := filepath.Join(dir, "PRD.md")
@@ -280,15 +289,19 @@ func TestAgentLoopSuccess(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result := runCLI(t,
-		"--prompt="+promptPath,
-		"--prd="+prdPath,
-		"--progress="+progressPath,
-		"--agent-exec="+fakeAgentBinaryPath,
-		"--agent-arg=--record="+recordPath,
-		"--prompt-mode=stdin",
+	args := []string{
+		"--prompt=" + promptPath,
+		"--prd=" + prdPath,
+		"--progress=" + progressPath,
+		"--agent-exec=" + fakeAgentBinaryPath,
+		"--agent-arg=--record=" + recordPath,
+		"--prompt-mode=" + promptMode,
 		"--iterations=1",
-	)
+	}
+	if promptMode == "arg" {
+		args = append(args, "--agent-arg={prompt}")
+	}
+	result := runCLI(t, args...)
 	if result.exitCode != 0 {
 		t.Fatalf("expected successful agent loop; exit=%d stdout=%q stderr=%q", result.exitCode, result.stdout, result.stderr)
 	}

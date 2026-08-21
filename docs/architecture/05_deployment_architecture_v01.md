@@ -36,4 +36,9 @@ path in `--help`, compares the result with `docs/cli-help.txt`, and verifies
 that every local Markdown file link resolves. This keeps the user-facing flag
 contract and document navigation in sync with the binary.
 
+`make verify` is the release acceptance gate. It runs root and E2E tests with
+and without the race detector, vet, lint, vulnerability and security checks,
+the provider-neutral identifier check, then the Docker release build and an
+assertion for every expected platform artifact.
+
 **Next:** [Architecture Overview](00_overview_v01.md)

@@ -41,7 +41,7 @@ func checkHelp(binary, helpFile string) error {
 		return fmt.Errorf("run %s --help: %w", binary, err)
 	}
 	actual := usageLine.ReplaceAllString(string(output), "Usage of gralph:")
-	expected, err := os.ReadFile(helpFile)
+	expected, err := os.ReadFile(helpFile) // #nosec G304 -- path is derived from the caller-selected repository root and help-file.
 	if err != nil {
 		return fmt.Errorf("read captured help %q: %w", helpFile, err)
 	}
@@ -62,7 +62,7 @@ func checkMarkdownLinks(root string) error {
 		if entry.IsDir() || filepath.Ext(path) != ".md" {
 			return nil
 		}
-		data, err := os.ReadFile(path)
+		data, err := os.ReadFile(path) // #nosec G304,G122 -- WalkDir enumerates this path beneath the caller-selected repository root.
 		if err != nil {
 			return err
 		}

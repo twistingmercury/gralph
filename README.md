@@ -93,12 +93,14 @@ termination only for the direct child process.
 go test ./...
 make e2e
 make docs-check
+make verify
 make build
 ```
 
 `make docs-check` builds the local binary, compares its `--help` output to the
-captured reference, and validates local Markdown links. `make build` is the
-Docker-based release build.
+captured reference, and validates local Markdown links. `make verify` is the
+provider-agnostic release acceptance gate; `make build` is the Docker-based
+release build.
 
 Architecture contracts are in [docs/architecture/00_overview_v01.md](docs/architecture/00_overview_v01.md).
 

@@ -41,6 +41,9 @@ func main() {
 	if err != nil {
 		fail("read stdin: %v", err)
 	}
+	if len(prompt) == 0 && flag.NArg() == 1 {
+		prompt = []byte(flag.Arg(0))
+	}
 	inv := invocation{
 		Prompt:       string(prompt),
 		PRDPath:      runtimePath(string(prompt), "PRD"),
