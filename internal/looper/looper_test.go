@@ -8,7 +8,22 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/twistingmercury/gralph/internal/agent"
 )
+
+func testConfig(promptPath, prdPath, progressPath string, maxAttempts int) Config {
+	return Config{
+		PromptPath:   promptPath,
+		PRDPath:      prdPath,
+		ProgressPath: progressPath,
+		MaxAttempts:  maxAttempts,
+		AgentCommand: agent.AgentCommand{
+			Executable: os.Args[0],
+			PromptMode: agent.PromptModeStdin,
+		},
+	}
+}
 
 func TestStart_MissingPrompt(t *testing.T) {
 	dir := t.TempDir()
@@ -17,7 +32,7 @@ func TestStart_MissingPrompt(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err := Start(context.Background(), filepath.Join(dir, "missing.md"), prd, "", 1)
+	err := Start(context.Background(), testConfig(filepath.Join(dir, "missing.md"), prd, "", 1))
 	if err == nil {
 		t.Fatal("expected error for missing prompt file, got nil")
 	}
@@ -30,7 +45,7 @@ func TestStart_MissingPRD(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err := Start(context.Background(), prompt, filepath.Join(dir, "missing.md"), "", 1)
+	err := Start(context.Background(), testConfig(prompt, filepath.Join(dir, "missing.md"), "", 1))
 	if err == nil {
 		t.Fatal("expected error for missing PRD file, got nil")
 	}
@@ -50,7 +65,7 @@ func TestStart_DerivedProgressPath(t *testing.T) {
 	// PRD has no open items, so runLoop returns nil immediately.
 	// What matters is that file validation passed and progress.txt was
 	// created/appended in the PRD directory.
-	if err := Start(context.Background(), prompt, prd, "", 1); err != nil {
+	if err := Start(context.Background(), testConfig(prompt, prd, "", 1)); err != nil {
 		t.Fatalf("unexpected error from Start: %v", err)
 	}
 
@@ -72,13 +87,74 @@ func TestStart_ExplicitProgressPath(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := Start(context.Background(), prompt, prd, explicit, 1); err != nil {
+	if err := Start(context.Background(), testConfig(prompt, prd, explicit, 1)); err != nil {
 		t.Fatalf("unexpected error from Start: %v", err)
 	}
 
 	if _, err := os.Stat(explicit); err != nil {
 		t.Fatalf("expected explicit progress file at %s to exist, got: %v", explicit, err)
 	}
+}
+
+func TestStart_UsesConfiguredAgent(t *testing.T) {
+	dir := t.TempDir()
+	prompt := filepath.Join(dir, "prompt.md")
+	prd := filepath.Join(dir, "PRD.md")
+	invocationMarker := filepath.Join(dir, "agent-invoked")
+	if err := os.WriteFile(prompt, []byte("# Prompt\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(prd, []byte("# PRD\n\n- [ ] Task one\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	config := testConfig(prompt, prd, "", 1)
+	config.AgentCommand.Args = []string{
+		"-test.run=^TestConfiguredAgentHelper$",
+		"--",
+		"--configured-agent-helper",
+		prd,
+		invocationMarker,
+	}
+	if err := Start(context.Background(), config); err != nil {
+		t.Fatalf("unexpected error from Start: %v", err)
+	}
+
+	if _, err := os.Stat(invocationMarker); err != nil {
+		t.Fatalf("expected configured agent to be invoked: %v", err)
+	}
+	data, err := os.ReadFile(prd) // #nosec G304 -- path is created by the test
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "- [x] Task one") {
+		t.Fatalf("expected configured agent to complete the task, got:\n%s", data)
+	}
+}
+
+func TestConfiguredAgentHelper(t *testing.T) {
+	const marker = "--configured-agent-helper"
+
+	markerIndex := -1
+	for i, arg := range os.Args {
+		if arg == marker {
+			markerIndex = i
+			break
+		}
+	}
+	if markerIndex == -1 {
+		return
+	}
+	if markerIndex+2 >= len(os.Args) {
+		os.Exit(2)
+	}
+	if err := os.WriteFile(os.Args[markerIndex+1], []byte("# PRD\n\n- [x] Task one\n"), 0o600); err != nil {
+		os.Exit(3)
+	}
+	if err := os.WriteFile(os.Args[markerIndex+2], nil, 0o600); err != nil {
+		os.Exit(4)
+	}
+	os.Exit(0)
 }
 
 func TestAbandonFirstOpenItem(t *testing.T) {

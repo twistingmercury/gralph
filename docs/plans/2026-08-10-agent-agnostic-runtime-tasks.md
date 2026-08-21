@@ -40,7 +40,7 @@ Each task below is intended to be one small change that leaves the repository bu
   - Test: `go test ./internal/agent -run TestCommandRunnerErrors -v`
   - Done: missing executable, permission denial, cancellation, and exit status 1 produce distinguishable outcomes; `make build` succeeds.
 
-- [ ] **Task 6 — Replace positional loop startup arguments with configuration**
+- [x] **Task 6 — Replace positional loop startup arguments with configuration**
   - Introduce a validated `looper.Config` containing prompt, PRD, progress, maximum attempts, and `AgentCommand`.
   - Change `looper.Start` to accept the configuration and inject the generic runner.
   - Update unit-test callers without changing loop behavior.

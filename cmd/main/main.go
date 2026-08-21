@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/signal"
 
+	"github.com/twistingmercury/gralph/internal/agent"
 	"github.com/twistingmercury/gralph/internal/looper"
 	"github.com/twistingmercury/gralph/internal/version"
 
@@ -28,7 +29,18 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
-	if err := looper.Start(ctx, *promptFlag, *prdFlag, *progressFlag, *iterationsFlag); err != nil {
+	config := looper.Config{
+		PromptPath:   *promptFlag,
+		PRDPath:      *prdFlag,
+		ProgressPath: *progressFlag,
+		MaxAttempts:  *iterationsFlag,
+		AgentCommand: agent.AgentCommand{
+			Executable: "claude",
+			Args:       []string{"--print", "--dangerously-skip-permissions"},
+			PromptMode: agent.PromptModeStdin,
+		},
+	}
+	if err := looper.Start(ctx, config); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
