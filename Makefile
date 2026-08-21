@@ -1,4 +1,4 @@
-.PHONY: build help install uninstall local test e2e build-local
+.PHONY: build help install uninstall local test e2e e2e-race build-local docs-check verify
 
 GIT_COMMIT := $(shell git rev-parse --short=8 HEAD 2>/dev/null || echo "unknown")
 GIT_TAG := $(shell git describe --tags --abbrev=0 2>/dev/null || echo "dev")
@@ -34,6 +34,33 @@ test: ## Runs unit tests only (internal packages). Run `make e2e` for integratio
 
 e2e: local ## Runs e2e integration tests locally against the built binary
 	cd tests/e2e && GRALPH_BINARY=${LOCAL_BUILD}/gralph go test -v .
+
+e2e-race: local ## Runs e2e integration tests with the Go race detector
+	cd tests/e2e && GRALPH_BINARY=${LOCAL_BUILD}/gralph go test -race -v .
+
+docs-check: local ## Verify captured CLI help and local Markdown links
+	go run ./cmd/docscheck --root . --help-file docs/cli-help.txt --binary ${LOCAL_BUILD}/gralph
+
+verify: ## Run the provider-agnostic release acceptance gate
+	go test ./...
+	go test -race ./...
+	$(MAKE) e2e
+	$(MAKE) e2e-race
+	$(MAKE) docs-check
+	go vet ./...
+	golangci-lint run
+	govulncheck ./cmd/... ./internal/...
+	gosec -quiet -exclude-dir=tests ./...
+	@if rg -n 'defaultClaudeRunner|invokeClaude|CLAUDE_CODE_OAUTH_TOKEN' cmd internal .github/workflows; then \
+		echo "provider-specific identifiers found"; \
+		exit 1; \
+	fi
+	$(MAKE) build
+	test -f .bin/amd64/darwin/gralph
+	test -f .bin/arm64/darwin/gralph
+	test -f .bin/amd64/linux/gralph
+	test -f .bin/arm64/linux/gralph
+	test -f .bin/arm64/windows/gralph.exe
 
 analyze: ## Run linters, formatters, security scanners, etc
 	goimports -w .

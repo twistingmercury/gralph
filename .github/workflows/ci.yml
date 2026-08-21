@@ -41,17 +41,19 @@ jobs:
 
       - name: Verify binaries
         run: |
-          echo "## Build Artifacts" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Architecture | OS | Binary | Size |" >> $GITHUB_STEP_SUMMARY
-          echo "|--------------|----|---------:|-----:|" >> $GITHUB_STEP_SUMMARY
+          {
+            echo "## Build Artifacts"
+            echo ""
+            echo "| Architecture | OS | Binary | Size |"
+            echo "|--------------|----|---------:|-----:|"
 
-          find .bin -type f -name 'gralph*' | while read -r binary; do
-            arch=$(echo "$binary" | cut -d'/' -f2)
-            os=$(echo "$binary" | cut -d'/' -f3)
-            size=$(du -h "$binary" | cut -f1)
-            echo "| $arch | $os | gralph | $size |" >> $GITHUB_STEP_SUMMARY
-          done
+            find .bin -type f -name 'gralph*' | while read -r binary; do
+              arch="$(echo "$binary" | cut -d'/' -f2)"
+              os="$(echo "$binary" | cut -d'/' -f3)"
+              size="$(du -h "$binary" | cut -f1)"
+              echo "| $arch | $os | gralph | $size |"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
 
           # Verify at least one binary exists
           if [ ! -d ".bin" ] || [ -z "$(find .bin -type f -name 'gralph*')" ]; then
@@ -79,9 +81,11 @@ jobs:
       - name: Build summary
         if: always()
         run: |
-          echo "## Build Metadata" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- **Commit**: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Branch**: ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Trigger**: ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Runner**: ubuntu-latest" >> $GITHUB_STEP_SUMMARY
+          {
+            echo "## Build Metadata"
+            echo ""
+            echo "- **Commit**: $GITHUB_SHA"
+            echo "- **Branch**: $GITHUB_REF_NAME"
+            echo "- **Trigger**: $GITHUB_EVENT_NAME"
+            echo "- **Runner**: ubuntu-latest"
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -1,6 +1,6 @@
 # Gralph Concept
 
-Gralph is to be port of the shell script [ralph.sh](./ralph.sh) written in Go.
+Gralph is a Go implementation of the Ralph-loop concept.
 
 It should do everything that the script does.
 

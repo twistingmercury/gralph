@@ -1,124 +1,130 @@
 # Gralph
 
-> **Maturity Level**: Emerging — under active development, expect breaking changes
+> **Maturity Level**: Emerging — under active development; breaking changes are possible.
 
----
+Gralph runs a Ralph loop against a Markdown PRD checklist. You configure the
+noninteractive AI-agent command that handles each attempt; Gralph supplies the
+assembled prompt, tracks retries, and updates the checklist only when an item
+is abandoned.
 
-Gralph drives "Ralph loops" against a PRD checklist using Claude Code. It runs
-`claude --print --dangerously-skip-permissions` in a loop, advancing through
-checklist items until all are complete or abandoned.
+## Quick start
 
-## Table of Contents
-
-- [Usage](#usage)
-- [How it works](#how-it-works)
-- [Key Considerations](#key-considerations)
-- [Development Considerations](#development-considerations)
-- [Versioning](#versioning)
-
-## Usage
+Build a local binary and run it with an arbitrary compatible agent:
 
 ```bash
-gralph --prompt path/to/PROMPT.md --prd path/to/PRD.md [--progress path/to/progress.txt] [-i 10]
+make local
+
+./.bin/local/gralph \
+  --prompt scripts/PROMPT.md \
+  --prd scripts/PRD.md \
+  --agent-exec my-agent \
+  --agent-arg=--non-interactive \
+  --prompt-mode stdin \
+  --iterations 5
 ```
 
-| Flag                  | Required | Default                     | Description                                                    |
-| --------------------- | -------- | --------------------------- | -------------------------------------------------------------- |
-| `--prompt`            | Yes      | —                           | Path to the PROMPT.md template passed to Claude each iteration |
-| `--prd`               | Yes      | —                           | Path to the PRD.md checklist that drives the loop              |
-| `--progress`          | No       | `<prd dir>/progress.txt`    | Path to the progress log file                                  |
-| `--iterations` / `-i` | No       | `10`                        | Maximum attempts per checklist item before it is abandoned     |
-| `--version`           | No       | —                           | Print version information and exit                             |
-
-### Example
+For an agent that accepts its prompt as an argument, include exactly one whole
+`{prompt}` argument:
 
 ```bash
 gralph \
   --prompt scripts/PROMPT.md \
   --prd scripts/PRD.md \
-  --iterations 5
+  --agent-exec my-agent \
+  --agent-arg=run \
+  --agent-arg='{prompt}' \
+  --prompt-mode arg
 ```
 
-## How it works
+The verified optional profiles are convenience configurations, not a default
+provider choice. The generic examples above remain the provider-independent
+path. Explicit `--agent-exec`, `--agent-arg`, and `--prompt-mode` values
+override a profile.
 
-Each iteration gralph finds the first unchecked item (`- [ ]`) in the PRD file
-and invokes Claude with the PROMPT.md template appended with the runtime paths
-of the PRD and progress files. After Claude exits, gralph re-reads the PRD: if
-the item is gone or changed it is counted as complete and the loop advances. If
-the item is unchanged after `--iterations` attempts, gralph rewrites it as
-`- [~]` (abandoned) and moves on. The loop ends when no `- [ ]` items remain.
-
-### Checklist markers
-
-| Marker  | Meaning                                               |
-| ------- | ----------------------------------------------------- |
-| `- [ ]` | Open — will be processed                              |
-| `- [x]` | Complete — skipped                                    |
-| `- [~]` | Abandoned — skipped after hitting the iteration limit |
-
-### Log output
-
-Gralph writes structured log lines to stdout and brackets Claude's raw output so each attempt is easier to scan:
-
-```
-[gralph] start max_attempts=<n>
-[gralph] attempt <n>/<max> item="Cycle 1 - Short title"
-[gralph] claude_output_begin item="Cycle 1 - Short title"
-... raw claude output ...
-[gralph] claude_output_end item="Cycle 1 - Short title" status=ok
-[gralph] invoke_failed item="Cycle 1 - Short title" err=<error>
-[gralph] check item="..."
-[gralph] completed item="..."
-[gralph] retry item="..." next_attempt=<n>/<max>
-[gralph] abandoned item="..."
-[gralph] done
-```
-
-## Key Considerations
-
-- **Runs outside Claude sessions**: gralph is a wrapper that launches Claude as a subprocess. Do not invoke it from within a running Claude session.
-- **`claude` must be on PATH**: gralph calls `claude --print --dangerously-skip-permissions` directly; the Claude CLI must be installed and accessible.
-- **PRD mutation is destructive**: gralph overwrites the PRD file in place when abandoning items (`- [~]`). Keep a copy or use version control.
-- **Non-zero Claude exits are retried**: a failed Claude invocation counts as one attempt and does not crash the loop.
-
-## Development Considerations
-
-### Quick Start
+### Codex profile
 
 ```bash
-git clone https://github.com/twistingmercury/gralph.git
-cd gralph
-go build ./cmd/main
+gralph \
+  --prompt scripts/PROMPT.md \
+  --prd scripts/PRD.md \
+  --agent-profile codex
 ```
 
-### Building
+### Claude Code profile
 
 ```bash
-go build -o gralph ./cmd/main
+gralph \
+  --prompt scripts/PROMPT.md \
+  --prd scripts/PRD.md \
+  --agent-profile claude-code
 ```
 
-To embed version metadata at build time:
+Neither profile includes a permission-bypass option. The `claude-code` profile
+uses Claude Code’s documented noninteractive `--print` mode with the assembled
+prompt as one argument. Add an explicit `--agent-arg` only if you choose an
+agent-specific permission policy.
 
-```bash
-go build \
-  -ldflags "-X github.com/twistingmercury/gralph/internal/version.version=$(git describe --tags) \
-            -X github.com/twistingmercury/gralph/internal/version.buildDate=$(date -u +%Y-%m-%dT%H:%M:%SZ) \
-            -X github.com/twistingmercury/gralph/internal/version.gitCommit=$(git rev-parse --short HEAD)" \
-  -o gralph ./cmd/main
+## CLI contract
+
+Required inputs are `--prompt`, `--prd`, and either `--agent-exec` or an agent
+profile. `--agent-arg` may be repeated; every value remains one literal
+argument, with no shell parsing or interpolation. In `stdin` mode, `{prompt}`
+is forbidden. In `arg` mode, exactly one argument must be `{prompt}`.
+
+See the captured, checked flag reference in [docs/cli-help.txt](docs/cli-help.txt).
+
+An agent is compatible when it can run noninteractively for one attempt, accept
+the selected prompt transport, return a meaningful exit status, and terminate
+when Gralph cancels it. Agent-specific permission or sandbox-bypass options are
+never implied; if needed, they must be explicit `--agent-arg` values that you
+choose and can review.
+
+## Loop behavior
+
+Gralph finds the first open `- [ ]` item, appends the PRD and progress paths to
+the prompt, then invokes the configured agent. If the item changes or is gone,
+it proceeds. A process that starts and exits non-zero is retried up to
+`--iterations`; an unchanged item then becomes `- [~]` through an atomic PRD
+rewrite. Configuration, input, process-start, setup, and cancellation failures
+are fatal and leave the PRD unchanged.
+
+Prompt and PRD inputs must be readable regular files; symbolic links are
+rejected. The progress file defaults to `progress.txt` next to the PRD.
+
+During a completed or final failed attempt, Gralph prints captured agent stdout
+followed by stderr. Their original interleaving cannot be reconstructed.
+
+```text
+Cycle 1: Implement feature
+- Agent: codex
+- Status: Running ... (1/3)
+- Status: Complete
+- Agent Output:
+updated the PRD
 ```
 
-### Testing
+SIGINT and SIGTERM stop an in-flight agent. On Unix, Gralph terminates its
+agent process group, including descendants. Windows currently guarantees
+termination only for the direct child process.
+
+## Development
 
 ```bash
 go test ./...
+make e2e
+make docs-check
+make verify
+make build
 ```
+
+`make docs-check` builds the local binary, compares its `--help` output to the
+captured reference, and validates local Markdown links. `make verify` is the
+provider-agnostic release acceptance gate; `make build` is the Docker-based
+release build.
+
+Architecture contracts are in [docs/architecture/00_overview_v01.md](docs/architecture/00_overview_v01.md).
 
 ## Versioning
 
-This project follows [Semantic Versioning 2.0.0](https://semver.org/). Current version: `v0.1.0`.
-
-Version is determined from git tags:
-
-```bash
-git describe --tags --always
-```
+Gralph follows [Semantic Versioning 2.0.0](https://semver.org/). Build metadata
+comes from Git tags, with `git describe --tags --always` as the local source.
