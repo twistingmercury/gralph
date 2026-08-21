@@ -171,7 +171,7 @@ func runLoop(ctx context.Context, prompt, prd, progress string, maxAttempts int,
 
 		if itemAfter != currentItem {
 			fmt.Printf("- Status: Complete\n")
-			fmt.Printf("- Files Changed:\n")
+			fmt.Printf("- Agent Output:\n")
 			if err := printAgentOutput(agentOutputPath); err != nil {
 				_ = cleanupOutputFile(agentOutputPath)
 				return fmt.Errorf("could not print agent output: %w", err)

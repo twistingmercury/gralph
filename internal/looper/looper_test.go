@@ -578,8 +578,8 @@ func TestRunLoop_LogsHumanReadableItemLabels(t *testing.T) {
 	if !strings.Contains(output, `- Status: Complete`) {
 		t.Fatalf("expected complete status, got:\n%s", output)
 	}
-	if !strings.Contains(output, `- Files Changed:`) {
-		t.Fatalf("expected files-changed section, got:\n%s", output)
+	if !strings.Contains(output, `- Agent Output:`) {
+		t.Fatalf("expected agent-output section, got:\n%s", output)
 	}
 	if strings.Contains(output, "long details here") {
 		t.Fatalf("expected verbose item details to be omitted from logs, got:\n%s", output)

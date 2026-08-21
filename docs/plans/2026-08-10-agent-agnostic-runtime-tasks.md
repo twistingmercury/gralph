@@ -73,7 +73,7 @@ Each task below is intended to be one small change that leaves the repository bu
   - Test: `go test ./...` and `rg -n 'Claude|claude' cmd internal`
   - Done: all root-module tests pass and the search returns no provider-specific identifiers in production core code; `make build` succeeds.
 
-- [ ] **Task 11 — Remove provider-specific output labels**
+- [x] **Task 11 — Remove provider-specific output labels**
   - Replace `Files Changed` with a label that accurately describes arbitrary agent output.
   - Leave output routing and buffering unchanged in this task.
   - Test: `go test ./internal/looper -run TestRunLoopLogsHumanReadableItemLabels -v`
