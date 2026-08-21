@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -299,6 +300,136 @@ func TestAgentLoopSuccess(t *testing.T) {
 	}
 	if _, err := os.Stat(progressPath); err != nil {
 		t.Errorf("expected progress file at runtime path: %v", err)
+	}
+}
+
+func TestAgentRetry(t *testing.T) {
+	dir := t.TempDir()
+	promptPath := filepath.Join(dir, "PROMPT.md")
+	prdPath := filepath.Join(dir, "PRD.md")
+	progressPath := filepath.Join(dir, "progress.txt")
+	recordPath := filepath.Join(dir, "fake-agent-invocation.json")
+	attemptLogPath := filepath.Join(dir, "attempts.log")
+	initialPRD := "# Test PRD\n\n- [ ] Cycle 1 - Retry a started agent\n"
+
+	if err := os.WriteFile(promptPath, []byte("# Retry prompt\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(prdPath, []byte(initialPRD), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	result := runCLI(t,
+		"--prompt="+promptPath,
+		"--prd="+prdPath,
+		"--progress="+progressPath,
+		"--agent-exec="+fakeAgentBinaryPath,
+		"--agent-arg=--record="+recordPath,
+		"--agent-arg=--attempt-log="+attemptLogPath,
+		"--agent-arg=--exit-code=7",
+		"--prompt-mode=stdin",
+		"--iterations=3",
+	)
+	if result.exitCode != 0 {
+		t.Fatalf("expected exhausted retry policy to finish successfully; exit=%d stdout=%q stderr=%q", result.exitCode, result.stdout, result.stderr)
+	}
+
+	attemptData, err := os.ReadFile(attemptLogPath) // #nosec G304 -- path is created by the test
+	if err != nil {
+		t.Fatal(err)
+	}
+	if attempts := strings.Count(string(attemptData), "attempt\n"); attempts != 3 {
+		t.Errorf("expected 3 started-agent attempts, got %d; log=%q", attempts, attemptData)
+	}
+	if runningStatuses := strings.Count(result.stdout, "- Status: Running"); runningStatuses != 3 {
+		t.Errorf("expected 3 running statuses, got %d; stdout=%q", runningStatuses, result.stdout)
+	}
+	if !strings.Contains(result.stdout, "- Status: Failed") {
+		t.Errorf("expected final failed status; stdout=%q", result.stdout)
+	}
+	if !strings.Contains(result.stdout, "fake agent exiting with status 7") {
+		t.Errorf("expected final agent error output; stdout=%q", result.stdout)
+	}
+
+	prdData, err := os.ReadFile(prdPath) // #nosec G304 -- path is created by the test
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantPRD := strings.Replace(initialPRD, "- [ ]", "- [~]", 1)
+	if string(prdData) != wantPRD {
+		t.Errorf("unexpected PRD after retries:\nwant: %q\n got: %q", wantPRD, string(prdData))
+	}
+}
+
+func TestAgentStartupFailure(t *testing.T) {
+	t.Run("missing executable", func(t *testing.T) {
+		dir := t.TempDir()
+		assertAgentStartupFailure(t, dir, filepath.Join(dir, "missing-agent"), "stdin", nil, 1)
+	})
+
+	t.Run("non-executable file", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("Windows does not use Unix executable permission bits")
+		}
+		dir := t.TempDir()
+		nonExecutablePath := filepath.Join(dir, "non-executable-agent")
+		if err := os.WriteFile(nonExecutablePath, []byte("#!/bin/sh\nexit 0\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		assertAgentStartupFailure(t, dir, nonExecutablePath, "stdin", nil, 1)
+	})
+
+	t.Run("invalid prompt configuration", func(t *testing.T) {
+		dir := t.TempDir()
+		recordPath := filepath.Join(dir, "unexpected-invocation.json")
+		assertAgentStartupFailure(t, dir, fakeAgentBinaryPath, "arg", []string{"--record=" + recordPath}, 0)
+		if _, err := os.Stat(recordPath); !os.IsNotExist(err) {
+			t.Errorf("invalid prompt configuration invoked the agent: %v", err)
+		}
+	})
+}
+
+func assertAgentStartupFailure(t *testing.T, dir, executable, promptMode string, agentArgs []string, wantAttempts int) {
+	t.Helper()
+	promptPath := filepath.Join(dir, "PROMPT.md")
+	prdPath := filepath.Join(dir, "PRD.md")
+	progressPath := filepath.Join(dir, "progress.txt")
+	initialPRD := []byte("# Test PRD\n\n- [ ] Cycle 1 - Preserve this item\n")
+	if err := os.WriteFile(promptPath, []byte("# Fatal failure prompt\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(prdPath, initialPRD, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	args := []string{
+		"--prompt=" + promptPath,
+		"--prd=" + prdPath,
+		"--progress=" + progressPath,
+		"--agent-exec=" + executable,
+		"--prompt-mode=" + promptMode,
+		"--iterations=3",
+	}
+	for _, arg := range agentArgs {
+		args = append(args, "--agent-arg="+arg)
+	}
+	result := runCLI(t, args...)
+	if result.exitCode == 0 {
+		t.Fatalf("expected fatal agent failure to exit non-zero; stdout=%q stderr=%q", result.stdout, result.stderr)
+	}
+	if attempts := strings.Count(result.stdout, "- Status: Running"); attempts != wantAttempts {
+		t.Errorf("expected %d attempted starts, got %d; stdout=%q", wantAttempts, attempts, result.stdout)
+	}
+
+	prdData, err := os.ReadFile(prdPath) // #nosec G304 -- path is created by the test
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(prdData, initialPRD) {
+		t.Errorf("fatal failure mutated PRD:\nwant: %q\n got: %q", initialPRD, prdData)
+	}
+	if bytes.Contains(prdData, []byte("- [~]")) {
+		t.Errorf("fatal failure abandoned PRD item: %q", prdData)
 	}
 }
 

@@ -17,6 +17,8 @@ type invocation struct {
 
 func main() {
 	recordPath := flag.String("record", "", "path to write the captured invocation")
+	attemptLogPath := flag.String("attempt-log", "", "path to append one line per invocation")
+	exitCode := flag.Int("exit-code", 0, "exit unsuccessfully before changing the PRD")
 	flag.Parse()
 	if *recordPath == "" {
 		fail("--record is required")
@@ -41,6 +43,23 @@ func main() {
 	}
 	if err := os.WriteFile(*recordPath, data, 0o600); err != nil {
 		fail("write invocation: %v", err)
+	}
+	if *attemptLogPath != "" {
+		attemptLog, err := os.OpenFile(*attemptLogPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600) // #nosec G304 -- path is supplied by the e2e test
+		if err != nil {
+			fail("open attempt log: %v", err)
+		}
+		if _, err := fmt.Fprintln(attemptLog, "attempt"); err != nil {
+			_ = attemptLog.Close()
+			fail("write attempt log: %v", err)
+		}
+		if err := attemptLog.Close(); err != nil {
+			fail("close attempt log: %v", err)
+		}
+	}
+	if *exitCode != 0 {
+		fmt.Fprintf(os.Stderr, "fake agent exiting with status %d\n", *exitCode)
+		os.Exit(*exitCode)
 	}
 
 	prd, err := os.ReadFile(inv.PRDPath)

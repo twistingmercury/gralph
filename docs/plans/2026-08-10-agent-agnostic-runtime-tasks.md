@@ -98,7 +98,7 @@ Each task below is intended to be one small change that leaves the repository bu
   - Test from `tests/e2e`: `go test -run TestAgentLoopSuccess -v .`
   - Done: a complete loop is tested through the compiled gralph binary without network access or a real AI provider; `make build` succeeds.
 
-- [ ] **Task 15 — Add failure-policy fake-agent end-to-end tests**
+- [x] **Task 15 — Add failure-policy fake-agent end-to-end tests**
   - Cover a started agent exiting non-zero, a missing executable, a non-executable file, and an invalid prompt configuration.
   - Verify retry counts only for the started/non-zero case.
   - Verify fatal cases preserve the PRD and exit non-zero immediately.
