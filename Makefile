@@ -1,4 +1,4 @@
-.PHONY: build help install uninstall local test e2e build-local
+.PHONY: build help install uninstall local test e2e build-local docs-check
 
 GIT_COMMIT := $(shell git rev-parse --short=8 HEAD 2>/dev/null || echo "unknown")
 GIT_TAG := $(shell git describe --tags --abbrev=0 2>/dev/null || echo "dev")
@@ -34,6 +34,9 @@ test: ## Runs unit tests only (internal packages). Run `make e2e` for integratio
 
 e2e: local ## Runs e2e integration tests locally against the built binary
 	cd tests/e2e && GRALPH_BINARY=${LOCAL_BUILD}/gralph go test -v .
+
+docs-check: local ## Verify captured CLI help and local Markdown links
+	go run ./cmd/docscheck --root . --help-file docs/cli-help.txt --binary ${LOCAL_BUILD}/gralph
 
 analyze: ## Run linters, formatters, security scanners, etc
 	goimports -w .
