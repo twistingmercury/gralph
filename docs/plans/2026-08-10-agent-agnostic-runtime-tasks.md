@@ -20,7 +20,7 @@ Each task below is intended to be one small change that leaves the repository bu
   - Test: `go test ./internal/agent -run TestAgentCommandValidate -v`
   - Done: table-driven tests cover every accepted and rejected configuration without starting a process.
 
-- [ ] **Task 3 — Implement generic stdin-based command execution**
+- [x] **Task 3 — Implement generic stdin-based command execution**
   - Add a runner that calls `exec.CommandContext(ctx, spec.Executable, spec.Args...)` directly.
   - Send the assembled prompt through stdin when `PromptMode` is `stdin`.
   - Preserve the existing temporary-output behavior initially so this task changes execution selection, not output policy.
