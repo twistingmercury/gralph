@@ -24,13 +24,27 @@ func NewCommandRunner(spec AgentCommand) (*CommandRunner, error) {
 	return &CommandRunner{spec: spec}, nil
 }
 
-// Run invokes the configured command with prompt as its standard input. It
+// Run invokes the configured command using its selected prompt transport. It
 // returns the path to a temporary file containing combined stdout and stderr.
 func (r *CommandRunner) Run(ctx context.Context, prompt string) (string, error) {
 	if r == nil {
 		return "", fmt.Errorf("command runner must not be nil")
 	}
-	if r.spec.PromptMode != PromptModeStdin {
+
+	args := r.spec.Args
+	sendPromptToStdin := false
+	switch r.spec.PromptMode {
+	case PromptModeStdin:
+		sendPromptToStdin = true
+	case PromptModeArg:
+		args = append([]string(nil), r.spec.Args...)
+		for i, arg := range args {
+			if arg == promptPlaceholder {
+				args[i] = prompt
+				break
+			}
+		}
+	default:
 		return "", fmt.Errorf("prompt mode %q execution is not implemented", r.spec.PromptMode)
 	}
 
@@ -40,8 +54,10 @@ func (r *CommandRunner) Run(ctx context.Context, prompt string) (string, error) 
 	}
 	outPath := outFile.Name()
 
-	cmd := exec.CommandContext(ctx, r.spec.Executable, r.spec.Args...) // #nosec G204 -- the executable and argument vector are explicit user configuration; no shell is involved
-	cmd.Stdin = strings.NewReader(prompt)
+	cmd := exec.CommandContext(ctx, r.spec.Executable, args...) // #nosec G204 -- the executable and argument vector are explicit user configuration; no shell is involved
+	if sendPromptToStdin {
+		cmd.Stdin = strings.NewReader(prompt)
+	}
 	cmd.Stdout = outFile
 	cmd.Stderr = outFile
 	runErr := cmd.Run()

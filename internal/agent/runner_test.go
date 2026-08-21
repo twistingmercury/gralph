@@ -77,6 +77,59 @@ func TestCommandRunnerStdin(t *testing.T) {
 	})
 }
 
+func TestCommandRunnerArg(t *testing.T) {
+	t.Parallel()
+
+	testExecutable, err := os.Executable()
+	if !assert.NoError(t, err) {
+		return
+	}
+
+	tempDir := t.TempDir()
+	recordPath := filepath.Join(tempDir, "arg invocation with spaces.json")
+	shellMarkerPath := filepath.Join(tempDir, "arg-shell-marker")
+	prompt := "exact prompt with spaces\nmetacharacters: $(touch " + shellMarkerPath + ") ; & | `no`\n"
+	configuredArgs := []string{
+		"-test.run=^TestCommandRunnerStdinHelper$",
+		"--",
+		"--command-runner-stdin-helper",
+		recordPath,
+		"argument before prompt",
+		promptPlaceholder,
+		"argument after prompt; still literal",
+	}
+	expectedArgs := append([]string(nil), configuredArgs...)
+	expectedArgs[5] = prompt
+
+	runner, err := NewCommandRunner(AgentCommand{
+		Executable: testExecutable,
+		Args:       configuredArgs,
+		PromptMode: PromptModeArg,
+	})
+	if !assert.NoError(t, err) {
+		return
+	}
+
+	outputPath, err := runner.Run(context.Background(), prompt)
+	if !assert.NoError(t, err) {
+		return
+	}
+	t.Cleanup(func() { _ = os.Remove(outputPath) })
+
+	data, err := os.ReadFile(recordPath)
+	if !assert.NoError(t, err) {
+		return
+	}
+	var got commandRunnerInvocation
+	if !assert.NoError(t, json.Unmarshal(data, &got)) {
+		return
+	}
+	assert.Equal(t, expectedArgs, got.Args)
+	assert.Empty(t, got.Stdin)
+	assert.Equal(t, promptPlaceholder, configuredArgs[5], "configured arguments must not be mutated")
+	assert.NoFileExists(t, shellMarkerPath, "shell metacharacters must remain literal")
+}
+
 func TestCommandRunnerStdinHelper(t *testing.T) {
 	const marker = "--command-runner-stdin-helper"
 
