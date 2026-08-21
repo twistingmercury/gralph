@@ -60,7 +60,7 @@ Each task below is intended to be one small change that leaves the repository bu
   - Test: `go test ./internal/looper -run TestStartInputValidation -v`
   - Done: missing, directory, unreadable, and unsupported symlink inputs fail before progress creation and PRD mutation; `make build` succeeds.
 
-- [ ] **Task 9 — Add provider-neutral CLI flags**
+- [x] **Task 9 — Add provider-neutral CLI flags**
   - Add required `--agent-exec`, repeatable `--agent-arg`, and `--prompt-mode stdin|arg` flags.
   - Convert parsed flags into `looper.Config` and validate them before starting the loop.
   - Do not add implicit permission-bypass arguments or a default provider.
