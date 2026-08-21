@@ -130,7 +130,7 @@ Each task below is intended to be one small change that leaves the repository bu
   - Test: `go test ./internal/agent -run TestProfiles -v`
   - Done: each profile expands to an ordinary validated `AgentCommand`, and an arbitrary unregistered executable remains fully supported; `make build` succeeds.
 
-- [ ] **Task 20 — Replace Claude-specific repository automation**
+- [x] **Task 20 — Replace Claude-specific repository automation**
   - Retire or replace `.github/workflows/claude.yml` and `.github/workflows/claude-code-review.yml` so repository automation does not require Claude credentials.
   - If a replacement workflow posts PR comments, grant only the required write permission.
   - Keep runtime provider choice separate from repository-review automation.
