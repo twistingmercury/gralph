@@ -70,6 +70,7 @@ site/
 **/*.err
 # Local documentation scripts
 docs/scripts/
+docs/code-reviews/
 
 # Go artifacts
 
