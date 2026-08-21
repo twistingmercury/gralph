@@ -54,7 +54,7 @@ Each task below is intended to be one small change that leaves the repository bu
   - Test: `go test ./internal/looper -run TestRunLoopFatalInvocationPreservesPRD -v`
   - Done: a missing configured executable leaves the PRD byte-for-byte unchanged and returns a wrapped fatal error after one attempted start; `make build` succeeds.
 
-- [ ] **Task 8 — Validate input files before loop side effects**
+- [x] **Task 8 — Validate input files before loop side effects**
   - Validate that prompt and PRD paths identify readable regular files before creating the progress file or invoking an agent.
   - Explicitly define whether symlink inputs are accepted or rejected.
   - Test: `go test ./internal/looper -run TestStartInputValidation -v`

@@ -52,6 +52,140 @@ func TestStart_MissingPRD(t *testing.T) {
 	}
 }
 
+func TestStartInputValidation(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		kind  string
+	}{
+		{name: "missing prompt", input: "prompt", kind: "missing"},
+		{name: "prompt directory", input: "prompt", kind: "directory"},
+		{name: "unreadable prompt", input: "prompt", kind: "unreadable"},
+		{name: "prompt symlink", input: "prompt", kind: "symlink"},
+		{name: "missing PRD", input: "prd", kind: "missing"},
+		{name: "PRD directory", input: "prd", kind: "directory"},
+		{name: "unreadable PRD", input: "prd", kind: "unreadable"},
+		{name: "PRD symlink", input: "prd", kind: "symlink"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			promptPath := filepath.Join(dir, "prompt.md")
+			prdPath := filepath.Join(dir, "prd.md")
+			progressPath := filepath.Join(dir, "progress.txt")
+			invocationMarker := filepath.Join(dir, "agent-invoked")
+			originalPrompt := []byte("# Prompt\n")
+			originalPRD := []byte("# PRD\n\n- [ ] Task must remain open\n")
+			if err := os.WriteFile(promptPath, originalPrompt, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(prdPath, originalPRD, 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			invalidPath := promptPath
+			invalidContent := originalPrompt
+			prdContentPath := prdPath
+			if tt.input == "prd" {
+				invalidPath = prdPath
+				invalidContent = originalPRD
+			}
+			switch tt.kind {
+			case "missing":
+				if err := os.Remove(invalidPath); err != nil {
+					t.Fatal(err)
+				}
+				if tt.input == "prd" {
+					prdContentPath = ""
+				}
+			case "directory":
+				if err := os.Remove(invalidPath); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Mkdir(invalidPath, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if tt.input == "prd" {
+					prdContentPath = ""
+				}
+			case "unreadable":
+				if err := os.Chmod(invalidPath, 0); err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { _ = os.Chmod(invalidPath, 0o600) })
+			case "symlink":
+				targetPath := invalidPath + ".target"
+				if err := os.WriteFile(targetPath, invalidContent, 0o600); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Remove(invalidPath); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(targetPath, invalidPath); err != nil {
+					t.Skipf("symlinks are not available: %v", err)
+				}
+				if tt.input == "prd" {
+					prdContentPath = targetPath
+				}
+			default:
+				t.Fatalf("unknown fixture kind %q", tt.kind)
+			}
+
+			config := testConfig(promptPath, prdPath, progressPath, 3)
+			config.AgentCommand.Args = []string{
+				"-test.run=^TestInputValidationAgentHelper$",
+				"--",
+				"--input-validation-agent-helper",
+				invocationMarker,
+			}
+			err := Start(context.Background(), config)
+			if err == nil {
+				t.Fatal("expected input validation failure, got nil")
+			}
+			if errors.Is(err, agent.ErrProcessStart) {
+				t.Fatalf("input validation reached agent startup: %v", err)
+			}
+			if _, statErr := os.Stat(progressPath); !errors.Is(statErr, os.ErrNotExist) {
+				t.Fatalf("progress file was created before input validation completed: %v", statErr)
+			}
+			if _, statErr := os.Stat(invocationMarker); !errors.Is(statErr, os.ErrNotExist) {
+				t.Fatalf("agent was invoked before input validation completed: %v", statErr)
+			}
+
+			if prdContentPath != "" {
+				if err := os.Chmod(prdContentPath, 0o600); err != nil {
+					t.Fatal(err)
+				}
+				after, readErr := os.ReadFile(prdContentPath) // #nosec G304 -- path is created by the test
+				if readErr != nil {
+					t.Fatal(readErr)
+				}
+				if !bytes.Equal(after, originalPRD) {
+					t.Fatalf("input validation changed PRD:\nwant: %q\n got: %q", originalPRD, after)
+				}
+			}
+		})
+	}
+}
+
+func TestInputValidationAgentHelper(t *testing.T) {
+	const marker = "--input-validation-agent-helper"
+
+	for i, arg := range os.Args {
+		if arg != marker {
+			continue
+		}
+		if i+1 >= len(os.Args) {
+			os.Exit(2)
+		}
+		if err := os.WriteFile(os.Args[i+1], nil, 0o600); err != nil {
+			os.Exit(3)
+		}
+		os.Exit(0)
+	}
+}
+
 func TestStart_DerivedProgressPath(t *testing.T) {
 	dir := t.TempDir()
 	prompt := filepath.Join(dir, "prompt.md")

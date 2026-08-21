@@ -54,11 +54,11 @@ func Start(ctx context.Context, config Config) error {
 		return fmt.Errorf("invalid loop configuration: %w", err)
 	}
 
-	if _, err := os.Stat(config.PromptPath); err != nil {
-		return fmt.Errorf("prompt file %q is not accessible: %w", config.PromptPath, err)
+	if err := validateInputFile("prompt", config.PromptPath); err != nil {
+		return err
 	}
-	if _, err := os.Stat(config.PRDPath); err != nil {
-		return fmt.Errorf("PRD file %q is not accessible: %w", config.PRDPath, err)
+	if err := validateInputFile("PRD", config.PRDPath); err != nil {
+		return err
 	}
 
 	progressPath := config.ProgressPath
@@ -77,6 +77,35 @@ func Start(ctx context.Context, config Config) error {
 
 	if err := runLoop(ctx, config.PromptPath, config.PRDPath, progressPath, config.MaxAttempts, withHiddenCursor(runner.Run)); err != nil {
 		return fmt.Errorf("loop error: %w", err)
+	}
+
+	return nil
+}
+
+// validateInputFile rejects symlinks so a later atomic PRD replacement cannot
+// replace a link itself while leaving its target unchanged. Prompt and PRD
+// inputs follow the same policy for a consistent CLI contract.
+func validateInputFile(label, path string) error {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return fmt.Errorf("%s file %q is not accessible: %w", label, path, err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("%s file %q must not be a symbolic link", label, path)
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("%s file %q must be a regular file", label, path)
+	}
+	if info.Mode().Perm()&0o444 == 0 {
+		return fmt.Errorf("%s file %q has no read permissions", label, path)
+	}
+
+	f, err := os.Open(path) // #nosec G304 -- path is supplied through validated loop configuration
+	if err != nil {
+		return fmt.Errorf("%s file %q is not readable: %w", label, path, err)
+	}
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("could not close %s file %q after validation: %w", label, path, err)
 	}
 
 	return nil
