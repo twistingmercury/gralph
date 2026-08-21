@@ -33,7 +33,7 @@ Each task below is intended to be one small change that leaves the repository bu
   - Test: `go test ./internal/agent -run TestCommandRunnerArg -v`
   - Done: the fake executable receives the prompt as one argument, and surrounding arguments retain their original boundaries.
 
-- [ ] **Task 5 — Classify invocation outcomes**
+- [x] **Task 5 — Classify invocation outcomes**
   - Introduce explicit result/error categories for configuration failure, setup/I/O failure, process start failure, cancellation, and a process that started but exited non-zero.
   - Preserve wrapped underlying errors so callers can use `errors.Is` and `errors.As`.
   - Do not change retry behavior in this task.
