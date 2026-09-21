@@ -1,93 +1,58 @@
-.claude/settings.local.json
-# Operating System Files
-.DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
-Thumbs.db
-Desktop.ini
-$RECYCLE.BIN/
-
-# Linux
-*~
-.directory
-.Trash-*
-
-# Windows
-[Dd]esktop.ini
-$RECYCLE.BIN/
-*.lnk
-
-# IDEs and Editors
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-.project
-.classpath
-.c9/
-*.launch
-.settings/
-*.sublime-workspace
-*.sublime-project
-.code-workspace
-
-# JetBrains
-.idea/
-*.iml
-*.iws
-*.ipr
+# Build output
+.bin/
+bin/
 out/
+coverage.out
 
-# Visual Studio Code
-.vscode/*
+# Local agent and tool state
+.claude/settings.local.json
+rlm_state/
 
+# Local working files
+_archive/
+_ideas/
+_reviews/
+_code-reviews/
+_draft-skills/
+code-reviews/
+/docs/architecture/reviews/
+/docs/scripts/
+scratch.md
+*.backup
+*.pdf
+
+# Secrets and environment
 *.env
 .env.local
 .env.*.local
 
-# Logs
+# Logs and temporary files
 logs/
-**/*.log
-**/*.log*
-
-
-# Temporary files
-**/*.tmp
-**/*.temp
+logs_*
+*.log
+*.log.*
+*.err
+*.tmp
+*.temp
 .cache/
 
-# MkDocs
-site/
-**/out/
-**/bin/
-**/.bin/
-**/*.pdf
-**/publish/
-**/*.err
-# Local documentation scripts
-docs/scripts/
+# Editors and IDEs
+.vscode/
+.idea/
+*.iml
+*.iws
+*.ipr
+*.swp
+*.swo
+*.sublime-workspace
+*.sublime-project
+*.code-workspace
 
-# Go artifacts
-
-**/coverage.out
-src/mnemonic/docs/swagger/
-
-**/rlm_state/
-**/rlm_state/*
-**/*.backup
-/docs/architecture/reviews
-/operations
-/api/mcp
-/_ideas
-/_archive
-/_reviews
-_code-reviews
-_draft-skills
-scratch.md
-
-/.bin
-logs_*
+# Operating system files
+.DS_Store
+._*
+.Spotlight-V100
+.Trashes
+*~
+.directory
+.Trash-*
