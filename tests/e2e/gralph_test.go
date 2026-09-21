@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -19,6 +20,12 @@ const defaultTimeout = 10 * time.Second
 
 // testBinaryPath is set by TestMain after building the binary once.
 var testBinaryPath string
+
+// fakeClaudeDir is set by TestMain after building the fake claude fixture
+// once. It holds a directory whose only entry is an executable named
+// "claude" (or "claude.exe" on windows) so it can be prepended to a gralph
+// child process's PATH.
+var fakeClaudeDir string
 
 // cliResult captures the result of executing the CLI binary.
 type cliResult struct {
@@ -36,14 +43,6 @@ func TestMain(m *testing.M) {
 // runTests sets up the binary path, runs the suite, and returns the exit code.
 // Using a helper function ensures defer executes before the process exits.
 func runTests(m *testing.M) int {
-	// When GRALPH_BINARY is set (e.g. inside the e2e Docker container), use that
-	// pre-built binary and skip compilation entirely.
-	if path := os.Getenv("GRALPH_BINARY"); path != "" {
-		testBinaryPath = path
-		return m.Run()
-	}
-
-	// Fallback: build from source for local development outside Docker.
 	tmpDir, err := os.MkdirTemp("", "gralph-e2e-*")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to create temp dir: %v\n", err)
@@ -51,27 +50,57 @@ func runTests(m *testing.M) int {
 	}
 	defer os.RemoveAll(tmpDir)
 
-	testBinaryPath = filepath.Join(tmpDir, "gralph")
+	// When GRALPH_BINARY is set (e.g. inside the e2e Docker container), use
+	// that pre-built binary and skip compiling gralph itself. The fake
+	// claude fixture still needs to be compiled from tests/e2e's own module.
+	if path := os.Getenv("GRALPH_BINARY"); path != "" {
+		testBinaryPath = path
+	} else {
+		testBinaryPath = filepath.Join(tmpDir, "gralph")
 
-	// During `go test`, working directory is set to the package directory (tests/e2e).
-	// Two levels up reaches the module root.
-	wd, err := os.Getwd()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "failed to get working dir: %v\n", err)
+		// During `go test`, working directory is set to the package directory (tests/e2e).
+		// Two levels up reaches the module root.
+		wd, err := os.Getwd()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "failed to get working dir: %v\n", err)
+			return 1
+		}
+		projectRoot := filepath.Join(wd, "..", "..")
+
+		build := exec.Command("go", "build", "-o", testBinaryPath, "./cmd/main") // #nosec G204 -- fixed literal args
+		build.Dir = projectRoot
+		build.Stdout = os.Stdout
+		build.Stderr = os.Stderr
+		if err := build.Run(); err != nil {
+			fmt.Fprintf(os.Stderr, "failed to build gralph binary: %v\n", err)
+			return 1
+		}
+	}
+
+	fakeClaudeDir = filepath.Join(tmpDir, "fakeclaude-bin")
+	if err := os.Mkdir(fakeClaudeDir, 0o755); err != nil {
+		fmt.Fprintf(os.Stderr, "failed to create fake claude bin dir: %v\n", err)
 		return 1
 	}
-	projectRoot := filepath.Join(wd, "..", "..")
-
-	build := exec.Command("go", "build", "-o", testBinaryPath, "./cmd/main") // #nosec G204 -- fixed literal args
-	build.Dir = projectRoot
+	fakeClaudeBin := filepath.Join(fakeClaudeDir, fakeClaudeBinaryName())
+	build := exec.Command("go", "build", "-o", fakeClaudeBin, "./testdata/fakeclaude")
 	build.Stdout = os.Stdout
 	build.Stderr = os.Stderr
 	if err := build.Run(); err != nil {
-		fmt.Fprintf(os.Stderr, "failed to build gralph binary: %v\n", err)
+		fmt.Fprintf(os.Stderr, "failed to build fake claude fixture: %v\n", err)
 		return 1
 	}
 
 	return m.Run()
+}
+
+// fakeClaudeBinaryName returns the executable name gralph resolves via PATH
+// on the current platform.
+func fakeClaudeBinaryName() string {
+	if runtime.GOOS == "windows" {
+		return "claude.exe"
+	}
+	return "claude"
 }
 
 // runCLI executes the CLI binary with the given arguments and returns the result.
