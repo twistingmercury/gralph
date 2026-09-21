@@ -10,7 +10,7 @@ WORKDIR /workspace
 
 COPY go.mod go.sum ./
 # go mod verify asserts downloads match committed checksums without mutating go.sum.
-# Run `make tidy` locally if you need to update go.sum.
+# Run `go mod tidy` locally if you need to update go.sum.
 RUN go mod verify
 
 COPY . .
