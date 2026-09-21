@@ -70,7 +70,6 @@ site/
 **/*.err
 # Local documentation scripts
 docs/scripts/
-docs/code-reviews/
 
 # Go artifacts
 
@@ -92,4 +91,3 @@ scratch.md
 
 /.bin
 logs_*
-/.local

@@ -1,4 +1,4 @@
-FROM ghcr.io/twistingmercury/golang-tooling:alpine AS builder
+FROM ghcr.io/twistingmercury/golang-tooling:go1.27.1 AS builder
 
 ARG BUILD_VER
 ARG BUILD_DATE
@@ -10,7 +10,7 @@ WORKDIR /workspace
 
 COPY go.mod go.sum ./
 # go mod verify asserts downloads match committed checksums without mutating go.sum.
-# Run `go mod tidy` locally if you need to update go.sum.
+# Run `make tidy` locally if you need to update go.sum.
 RUN go mod verify
 
 COPY . .

@@ -12,7 +12,7 @@ BUILD_VER="${BUILD_VER:-$(git -C "${PROJ_ROOT}" describe --tags --abbrev=0 2>/de
 BUILD_DATE="${BUILD_DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
 BUILD_COMMIT="${BUILD_COMMIT:-$(git -C "${PROJ_ROOT}" rev-parse --short HEAD 2>/dev/null || echo 'unknown')}"
 
-export_binaries(){
+build(){
     printf "\n=== exporting binaries ===\n"
     docker build --rm --no-cache --pull \
         --file "${SCRIPT_DIR}/Dockerfile" \
@@ -34,7 +34,7 @@ e2e_tests(){
 }
 
 main(){
-    export_binaries
+    build
     e2e_tests
 }
 

@@ -1,10 +1,9 @@
 //go:build darwin || linux
 
-package agent
+package looper
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -15,53 +14,50 @@ import (
 	"time"
 )
 
-type processTreeRunResult struct {
-	capture CommandOutput
-	err     error
-}
-
+// TestTerminateProcessTree proves that a descendant of the claude child
+// (i.e. a process the child itself spawns) is killed when the run context is
+// canceled. It does not require a real claude binary: it re-execs the test
+// binary itself as a "parent" helper that spawns a "descendant" helper.
 func TestTerminateProcessTree(t *testing.T) {
 	testExecutable, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
 	}
 	descendantReadyPath := t.TempDir() + "/descendant-ready"
-	runner, err := NewCommandRunner(AgentCommand{
-		Executable: testExecutable,
-		Args: []string{
-			"-test.run=^TestProcessTreeHelper$",
-			"--",
-			"--process-tree-helper=parent",
-			"--descendant-ready=" + descendantReadyPath,
-		},
-		PromptMode: PromptModeStdin,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	resultCh := make(chan processTreeRunResult, 1)
+
+	cmd := exec.CommandContext(ctx, testExecutable,
+		"-test.run=^TestProcessTreeHelper$",
+		"--",
+		"--process-tree-helper=parent",
+		"--descendant-ready="+descendantReadyPath,
+	)
+	configureProcessTree(cmd)
+
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+
+	waitErrCh := make(chan error, 1)
 	go func() {
-		capture, runErr := runner.Run(ctx, "prompt")
-		resultCh <- processTreeRunResult{capture: capture, err: runErr}
+		waitErrCh <- cmd.Wait()
 	}()
 
-	descendantPID := waitForProcessTreePID(t, descendantReadyPath, resultCh)
+	descendantPID := waitForProcessTreePID(t, descendantReadyPath, waitErrCh)
 	t.Cleanup(func() {
 		_ = syscall.Kill(descendantPID, syscall.SIGKILL)
 	})
 	cancel()
 
 	select {
-	case result := <-resultCh:
-		t.Cleanup(func() { _ = result.capture.Cleanup() })
-		if !errors.Is(result.err, ErrCanceled) || !errors.Is(result.err, context.Canceled) {
-			t.Fatalf("Run() error = %v, want cancellation categories", result.err)
+	case err := <-waitErrCh:
+		if err == nil {
+			t.Fatal("cmd.Wait() error = nil, want an error from cancellation")
 		}
 	case <-time.After(5 * time.Second):
-		t.Fatal("runner did not return after cancellation")
+		t.Fatal("process did not exit after cancellation")
 	}
 
 	deadline := time.Now().Add(2 * time.Second)
@@ -73,6 +69,10 @@ func TestTerminateProcessTree(t *testing.T) {
 	}
 }
 
+// TestProcessTreeHelper is not a real test; it is re-exec'd by
+// TestTerminateProcessTree as a "parent" or "descendant" helper process. When
+// run normally by `go test`, --process-tree-helper is unset and it returns
+// immediately.
 func TestProcessTreeHelper(t *testing.T) {
 	mode := processTreeHelperArg("--process-tree-helper=")
 	switch mode {
@@ -87,7 +87,7 @@ func TestProcessTreeHelper(t *testing.T) {
 		if readyPath == "" {
 			os.Exit(2)
 		}
-		cmd := exec.Command(os.Args[0], "-test.run=^TestProcessTreeHelper$", "--", "--process-tree-helper=descendant") // #nosec G204 -- current test binary and fixed helper arguments
+		cmd := exec.Command(os.Args[0], "-test.run=^TestProcessTreeHelper$", "--", "--process-tree-helper=descendant")
 		if err := cmd.Start(); err != nil {
 			os.Exit(3)
 		}
@@ -112,11 +112,11 @@ func processTreeHelperArg(prefix string) string {
 	return ""
 }
 
-func waitForProcessTreePID(t *testing.T, path string, resultCh <-chan processTreeRunResult) int {
+func waitForProcessTreePID(t *testing.T, path string, waitErrCh <-chan error) int {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		data, err := os.ReadFile(path) // #nosec G304 -- path is created by the test
+		data, err := os.ReadFile(path)
 		if err == nil {
 			pid, err := strconv.Atoi(string(data))
 			if err != nil {
@@ -128,9 +128,8 @@ func waitForProcessTreePID(t *testing.T, path string, resultCh <-chan processTre
 			t.Fatalf("read descendant ready file: %v", err)
 		}
 		select {
-		case result := <-resultCh:
-			_ = result.capture.Cleanup()
-			t.Fatalf("runner exited before descendant was ready: %v", result.err)
+		case err := <-waitErrCh:
+			t.Fatalf("process exited before descendant was ready: %v", err)
 		default:
 		}
 		time.Sleep(10 * time.Millisecond)
@@ -144,9 +143,12 @@ func unixProcessIsRunning(pid int) bool {
 	if err != nil && err != syscall.EPERM {
 		return false
 	}
-	stat, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid)) // #nosec G304 -- pid belongs to the test helper
+	stat, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
 	if err != nil {
-		return true
+		// No /proc (darwin), or the process was reaped between the signal
+		// probe and this read; probe again to tell the two apart.
+		err := syscall.Kill(pid, 0)
+		return err == nil || err == syscall.EPERM
 	}
 	closingParen := strings.LastIndexByte(string(stat), ')')
 	if closingParen == -1 {

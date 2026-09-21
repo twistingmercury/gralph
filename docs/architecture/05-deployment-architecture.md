@@ -46,7 +46,7 @@ flowchart TD
 
 ### Builder Stage
 
-The builder stage uses `ghcr.io/twistingmercury/golang-tooling:alpine`, a custom image with Go toolchain, golangci-lint, govulncheck, gosec, and goimports pre-installed. Build arguments inject version metadata:
+The builder stage uses `ghcr.io/twistingmercury/golang-tooling:go1.27.1`, a custom image with Go toolchain, golangci-lint, govulncheck, gosec, and goimports pre-installed. Build arguments inject version metadata:
 
 | Build Arg      | Source in build.sh            | Injected As              |
 | -------------- | ----------------------------- | ------------------------ |
@@ -105,7 +105,7 @@ docker compose -f tests/docker-compose.yaml up --exit-code-from tests
 
 The `docker-compose.yaml` maps to `tests/e2e/Dockerfile`, which:
 
-1. Uses `golang:1.26-alpine` (not the custom tooling image — no linters needed here).
+1. Uses `golang:1.27.1-alpine` (not the custom tooling image — no linters needed here).
 2. Copies the prebuilt `gralph` binary from `.bin/...` into `/usr/local/bin/gralph`.
 3. Copies only the e2e test module, sets `WORKDIR /workspace/tests/e2e`, and runs `go test -v ./...`.
 
@@ -133,7 +133,7 @@ The local build injects the same version metadata via `-ldflags` but skips all q
 
 ### Interruption and Context Cancellation
 
-Gralph propagates the root context from `main` to the configured agent command. Sending SIGINT or SIGTERM cancels the in-flight invocation. On Linux and macOS, each agent starts in its own Unix process group and cancellation terminates the whole group, including descendants. On Windows, cancellation currently terminates only the direct agent process; descendant termination requires assigning the process to a Job Object configured with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` and is not yet supported. The PRD is only mutated on an explicit abandon at the attempt limit, so a mid-loop interrupt leaves it unchanged at the last completed item boundary.
+Gralph propagates the root `context.Background()` from `main` to `exec.CommandContext`. Sending SIGINT terminates the in-flight Claude invocation via the context. The PRD is only mutated on an explicit abandon at the attempt limit — a mid-loop interrupt leaves the PRD unchanged at the last completed item boundary.
 
 ### Log Output
 
