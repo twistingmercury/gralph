@@ -17,7 +17,7 @@ func TestStart_MissingPrompt(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err := Start(context.Background(), filepath.Join(dir, "missing.md"), prd, "", 1)
+	err := Start(context.Background(), filepath.Join(dir, "missing.md"), prd, "")
 	if err == nil {
 		t.Fatal("expected error for missing prompt file, got nil")
 	}
@@ -30,7 +30,7 @@ func TestStart_MissingPRD(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err := Start(context.Background(), prompt, filepath.Join(dir, "missing.md"), "", 1)
+	err := Start(context.Background(), prompt, filepath.Join(dir, "missing.md"), "")
 	if err == nil {
 		t.Fatal("expected error for missing PRD file, got nil")
 	}
@@ -50,7 +50,7 @@ func TestStart_DerivedProgressPath(t *testing.T) {
 	// PRD has no open items, so runLoop returns nil immediately.
 	// What matters is that file validation passed and progress.txt was
 	// created/appended in the PRD directory.
-	if err := Start(context.Background(), prompt, prd, "", 1); err != nil {
+	if err := Start(context.Background(), prompt, prd, ""); err != nil {
 		t.Fatalf("unexpected error from Start: %v", err)
 	}
 
@@ -72,136 +72,13 @@ func TestStart_ExplicitProgressPath(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := Start(context.Background(), prompt, prd, explicit, 1); err != nil {
+	if err := Start(context.Background(), prompt, prd, explicit); err != nil {
 		t.Fatalf("unexpected error from Start: %v", err)
 	}
 
 	if _, err := os.Stat(explicit); err != nil {
 		t.Fatalf("expected explicit progress file at %s to exist, got: %v", explicit, err)
 	}
-}
-
-func TestAbandonFirstOpenItem(t *testing.T) {
-	t.Run("abandons first open item when multiple exist", func(t *testing.T) {
-		dir := t.TempDir()
-		path := filepath.Join(dir, "prd.md")
-		content := "# PRD\n\n- [x] Done\n- [ ] First open\n- [ ] Second open\n"
-		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-			t.Fatal(err)
-		}
-
-		got, err := abandonFirstOpenItem(path)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if got != "- [ ] First open" {
-			t.Errorf("got %q, want %q", got, "- [ ] First open")
-		}
-
-		updated, err := os.ReadFile(path) // #nosec G304
-		if err != nil {
-			t.Fatal(err)
-		}
-		updatedStr := string(updated)
-		if !strings.Contains(updatedStr, "- [~] First open") {
-			t.Error("expected first open item to be abandoned with [~]")
-		}
-		if !strings.Contains(updatedStr, "- [ ] Second open") {
-			t.Error("expected second open item to remain unchanged")
-		}
-	})
-
-	t.Run("returns empty string when no open items", func(t *testing.T) {
-		dir := t.TempDir()
-		path := filepath.Join(dir, "prd.md")
-		content := "# PRD\n\n- [x] Done\n- [~] Abandoned\n"
-		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-			t.Fatal(err)
-		}
-
-		got, err := abandonFirstOpenItem(path)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if got != "" {
-			t.Errorf("expected empty string, got %q", got)
-		}
-		// file should be unchanged
-		after, err := os.ReadFile(path) // #nosec G304
-		if err != nil {
-			t.Fatal(err)
-		}
-		if string(after) != content {
-			t.Error("expected file to be unchanged when no open items")
-		}
-	})
-
-	t.Run("returns error for nonexistent file", func(t *testing.T) {
-		dir := t.TempDir()
-		_, err := abandonFirstOpenItem(filepath.Join(dir, "nonexistent.md"))
-		if err == nil {
-			t.Fatal("expected error, got nil")
-		}
-	})
-
-	t.Run("replaces only exact prefix not mid-line text", func(t *testing.T) {
-		dir := t.TempDir()
-		path := filepath.Join(dir, "prd.md")
-		content := "# PRD\n\n- [ ] Task with - [ ] in description\n- [ ] Second\n"
-		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-			t.Fatal(err)
-		}
-
-		got, err := abandonFirstOpenItem(path)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if got != "- [ ] Task with - [ ] in description" {
-			t.Errorf("got %q", got)
-		}
-
-		updated, err := os.ReadFile(path) // #nosec G304
-		if err != nil {
-			t.Fatal(err)
-		}
-		updatedStr := string(updated)
-		// The first line should be abandoned; the mid-line text is preserved as-is
-		if !strings.Contains(updatedStr, "- [~] Task with - [ ] in description") {
-			t.Errorf("expected first line abandoned, got:\n%s", updatedStr)
-		}
-		if !strings.Contains(updatedStr, "- [ ] Second") {
-			t.Error("expected second item still open")
-		}
-	})
-
-	t.Run("file has exactly one fewer open and one more abandoned", func(t *testing.T) {
-		dir := t.TempDir()
-		path := filepath.Join(dir, "prd.md")
-		content := "- [ ] A\n- [ ] B\n- [ ] C\n"
-		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-			t.Fatal(err)
-		}
-
-		_, err := abandonFirstOpenItem(path)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-
-		after, err := os.ReadFile(path) // #nosec G304
-		if err != nil {
-			t.Fatal(err)
-		}
-		afterStr := string(after)
-
-		openCount := strings.Count(afterStr, "- [ ]")
-		abandonCount := strings.Count(afterStr, "- [~]")
-		if openCount != 2 {
-			t.Errorf("expected 2 open items after abandon, got %d", openCount)
-		}
-		if abandonCount != 1 {
-			t.Errorf("expected 1 abandoned item after abandon, got %d", abandonCount)
-		}
-	})
 }
 
 func TestInvokeClaude(t *testing.T) {
@@ -306,7 +183,7 @@ func TestRunLoop_NoOpenItems(t *testing.T) {
 		return nil
 	}
 
-	if err := runLoop(context.Background(), promptPath, prdPath, progressPath, 3, stubRunner); err != nil {
+	if err := runLoop(context.Background(), promptPath, prdPath, progressPath, stubRunner); err != nil {
 		t.Fatalf("expected nil, got: %v", err)
 	}
 	if called {
@@ -338,7 +215,7 @@ func TestRunLoop_LogsHumanReadableItemLabels(t *testing.T) {
 	}
 	os.Stdout = w
 
-	runErr := runLoop(context.Background(), promptPath, prdPath, progressPath, 3, stubRunner)
+	runErr := runLoop(context.Background(), promptPath, prdPath, progressPath, stubRunner)
 
 	if err := w.Close(); err != nil {
 		t.Fatal(err)
@@ -355,7 +232,7 @@ func TestRunLoop_LogsHumanReadableItemLabels(t *testing.T) {
 	}
 
 	output := buf.String()
-	if !strings.Contains(output, `[gralph] attempt 1/3 item="Cycle 1 - Add GetByIDs to pattern repository"`) {
+	if !strings.Contains(output, `[gralph] attempt item="Cycle 1 - Add GetByIDs to pattern repository"`) {
 		t.Fatalf("expected shortened attempt log, got:\n%s", output)
 	}
 	if !strings.Contains(output, `[gralph] claude_output_begin item="Cycle 1 - Add GetByIDs to pattern repository"`) {
@@ -388,7 +265,7 @@ func TestRunLoop_CompletionDetected(t *testing.T) {
 		return os.WriteFile(prdPath, []byte("# PRD\n\n- [x] Task one\n"), 0o644) // #nosec G304
 	}
 
-	if err := runLoop(context.Background(), promptPath, prdPath, progressPath, 3, stubRunner); err != nil {
+	if err := runLoop(context.Background(), promptPath, prdPath, progressPath, stubRunner); err != nil {
 		t.Fatalf("expected nil, got: %v", err)
 	}
 	if callCount != 1 {
@@ -403,41 +280,7 @@ func TestRunLoop_CompletionDetected(t *testing.T) {
 	}
 }
 
-func TestRunLoop_AbandonAtLimit(t *testing.T) {
-	dir := t.TempDir()
-	promptPath := filepath.Join(dir, "prompt.md")
-	prdPath := filepath.Join(dir, "prd.md")
-	progressPath := filepath.Join(dir, "progress.txt")
-
-	if err := os.WriteFile(promptPath, []byte("# Prompt\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(prdPath, []byte("# PRD\n\n- [ ] Stubborn task\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	callCount := 0
-	stubRunner := func(_ context.Context, _ string) error {
-		callCount++
-		return nil // never modifies PRD
-	}
-
-	if err := runLoop(context.Background(), promptPath, prdPath, progressPath, 3, stubRunner); err != nil {
-		t.Fatalf("expected nil, got: %v", err)
-	}
-	if callCount != 3 {
-		t.Errorf("expected claudeRunner called 3 times, got %d", callCount)
-	}
-	data, err := os.ReadFile(prdPath) // #nosec G304
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(data), "- [~] Stubborn task") {
-		t.Errorf("expected item abandoned, got:\n%s", string(data))
-	}
-}
-
-func TestRunLoop_AttemptResetOnNewItem(t *testing.T) {
+func TestRunLoop_MultipleItemsSucceed(t *testing.T) {
 	dir := t.TempDir()
 	promptPath := filepath.Join(dir, "prompt.md")
 	prdPath := filepath.Join(dir, "prd.md")
@@ -453,29 +296,160 @@ func TestRunLoop_AttemptResetOnNewItem(t *testing.T) {
 	callCount := 0
 	stubRunner := func(_ context.Context, _ string) error {
 		callCount++
-		// Complete the first task on the 2nd call; second task is never completed.
-		if callCount == 2 {
+		switch callCount {
+		case 1:
 			return os.WriteFile(prdPath, []byte("# PRD\n\n- [x] First task\n- [ ] Second task\n"), 0o644) // #nosec G304
+		case 2:
+			return os.WriteFile(prdPath, []byte("# PRD\n\n- [x] First task\n- [x] Second task\n"), 0o644)
+		default:
+			return nil
 		}
-		return nil
 	}
 
-	// maxAttempts=2: first item requires 2 attempts (completes on 2nd),
-	// second item gets 2 attempts then is abandoned.
-	if err := runLoop(context.Background(), promptPath, prdPath, progressPath, 2, stubRunner); err != nil {
+	if err := runLoop(context.Background(), promptPath, prdPath, progressPath, stubRunner); err != nil {
 		t.Fatalf("expected nil, got: %v", err)
+	}
+	if callCount != 2 {
+		t.Errorf("expected claudeRunner called twice, got %d", callCount)
 	}
 
 	data, err := os.ReadFile(prdPath) // #nosec G304
 	if err != nil {
 		t.Fatal(err)
 	}
-	content := string(data)
-	if !strings.Contains(content, "- [x] First task") {
-		t.Errorf("expected first task completed, got:\n%s", content)
+	if strings.Contains(string(data), "- [ ]") {
+		t.Errorf("expected no open items after both tasks completed, got:\n%s", string(data))
 	}
-	if !strings.Contains(content, "- [~] Second task") {
-		t.Errorf("expected second task abandoned, got:\n%s", content)
+}
+
+func TestRunLoop_UnchangedItemFailsCycle(t *testing.T) {
+	dir := t.TempDir()
+	promptPath := filepath.Join(dir, "prompt.md")
+	prdPath := filepath.Join(dir, "prd.md")
+	progressPath := filepath.Join(dir, "progress.txt")
+
+	const prdContent = "# PRD\n\n- [ ] Stubborn task\n"
+	if err := os.WriteFile(promptPath, []byte("# Prompt\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(prdPath, []byte(prdContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	callCount := 0
+	stubRunner := func(_ context.Context, _ string) error {
+		callCount++
+		return nil // never modifies the PRD
+	}
+
+	err := runLoop(context.Background(), promptPath, prdPath, progressPath, stubRunner)
+	if !errors.Is(err, ErrCycleFailed) {
+		t.Fatalf("expected ErrCycleFailed, got: %v", err)
+	}
+	if callCount != 1 {
+		t.Errorf("expected claudeRunner called exactly once, got %d", callCount)
+	}
+
+	data, err := os.ReadFile(prdPath) // #nosec G304
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != prdContent {
+		t.Errorf("expected PRD to be left untouched, got:\n%s", string(data))
+	}
+}
+
+func TestRunLoop_UnchangedItemNextItemNeverStarted(t *testing.T) {
+	dir := t.TempDir()
+	promptPath := filepath.Join(dir, "prompt.md")
+	prdPath := filepath.Join(dir, "prd.md")
+	progressPath := filepath.Join(dir, "progress.txt")
+
+	if err := os.WriteFile(promptPath, []byte("# Prompt\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(prdPath, []byte("# PRD\n\n- [ ] First task\n- [ ] Second task\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var capturedPrompts []string
+	stubRunner := func(_ context.Context, prompt string) error {
+		capturedPrompts = append(capturedPrompts, prompt)
+		return nil // never modifies the PRD
+	}
+
+	err := runLoop(context.Background(), promptPath, prdPath, progressPath, stubRunner)
+	if !errors.Is(err, ErrCycleFailed) {
+		t.Fatalf("expected ErrCycleFailed, got: %v", err)
+	}
+	if len(capturedPrompts) != 1 {
+		t.Fatalf("expected exactly one invocation, got %d", len(capturedPrompts))
+	}
+}
+
+func TestRunLoop_ChangedItemWithRunnerErrorContinues(t *testing.T) {
+	dir := t.TempDir()
+	promptPath := filepath.Join(dir, "prompt.md")
+	prdPath := filepath.Join(dir, "prd.md")
+	progressPath := filepath.Join(dir, "progress.txt")
+
+	if err := os.WriteFile(promptPath, []byte("# Prompt\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(prdPath, []byte("# PRD\n\n- [ ] Task one\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	callCount := 0
+	stubRunner := func(_ context.Context, _ string) error {
+		callCount++
+		// The runner reports a nonzero-exit style error, but it still edited
+		// the PRD before failing (e.g. claude made the change, then errored).
+		if err := os.WriteFile(prdPath, []byte("# PRD\n\n- [x] Task one\n"), 0o644); err != nil {
+			return err
+		}
+		return errors.New("exit status 1")
+	}
+
+	if err := runLoop(context.Background(), promptPath, prdPath, progressPath, stubRunner); err != nil {
+		t.Fatalf("expected nil (cycle completes despite runner error since item changed), got: %v", err)
+	}
+	if callCount != 1 {
+		t.Errorf("expected claudeRunner called once, got %d", callCount)
+	}
+}
+
+func TestRunLoop_CancellationReturnsContextErrorAndLeavesPRDUntouched(t *testing.T) {
+	dir := t.TempDir()
+	promptPath := filepath.Join(dir, "prompt.md")
+	prdPath := filepath.Join(dir, "prd.md")
+	progressPath := filepath.Join(dir, "progress.txt")
+
+	const prdContent = "# PRD\n\n- [ ] Task one\n"
+	if err := os.WriteFile(promptPath, []byte("# Prompt\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(prdPath, []byte(prdContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	stubRunner := func(_ context.Context, _ string) error {
+		cancel()
+		return context.Canceled
+	}
+
+	err := runLoop(ctx, promptPath, prdPath, progressPath, stubRunner)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got: %v", err)
+	}
+
+	data, err := os.ReadFile(prdPath) // #nosec G304
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != prdContent {
+		t.Errorf("expected PRD to be left untouched, got:\n%s", string(data))
 	}
 }
 
