@@ -32,7 +32,7 @@ gralph --prompt path/to/PROMPT.md --tasks path/to/PRD.md
 | ------------------ | -------- | -------------------------------------------------------------- |
 | `--prompt` / `-p`  | Yes      | Path to the prompt template passed to Claude each iteration    |
 | `--tasks` / `-t`   | Yes      | Path to the task checklist that drives the loop                |
-| `--version`        | No       | Print version information and exit                             |
+| `--version` / `-v` | No       | Print version information and exit                             |
 
 ```bash
 gralph \
@@ -53,11 +53,11 @@ item is unchanged, gralph prints a failure line and exits with a non-zero
 status, leaving the PRD untouched so the run can be resumed. The loop ends when
 no `- [ ]` items remain.
 
-| Marker  | Meaning                                      |
-| ------- | -------------------------------------------- |
-| `- [ ]` | Open — will be processed                     |
-| `- [x]` | Complete — skipped                           |
-| `- [~]` | Closed — skipped; gralph no longer writes it |
+| Marker  | Meaning                                        |
+| ------- | ---------------------------------------------- |
+| `- [ ]` | Open — will be processed                       |
+| `- [x]` | Complete — skipped                             |
+| `- [~]` | Closed — skipped; set by hand, never by gralph |
 
 Gralph writes structured log lines to stdout and brackets Claude's raw output:
 

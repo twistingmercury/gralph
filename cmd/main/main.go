@@ -17,11 +17,6 @@ var (
 	versionFlag = pflag.BoolP("version", "v", false, "Show the current version of gralph")
 	tasksFlag   = pflag.StringP("tasks", "t", "", "Required. Path to the tasks.yaml checklist file that drives the loop")
 	promptFlag  = pflag.StringP("prompt", "p", "", "Required. Path to the prompt.md template file passed to Claude each iteration")
-
-	// ITERATIONS-DISABLED: iterations flag disabled; the loop now fails fast
-	// after one invocation instead of retrying. Restore alongside
-	// looper.runLoop's maxAttempts parameter and the retry logic it gated.
-	// iterationsFlag = pflag.IntP("iterations", "i", 10, "Maximum attempts per checklist item before it is abandoned")
 )
 
 func main() {
@@ -56,13 +51,6 @@ func validateRequiredFlags() {
 		missing = append(missing, "--tasks")
 	}
 	if len(missing) == 0 {
-		// ITERATIONS-DISABLED: iterationsFlag bounds check disabled with the flag.
-		// if *iterationsFlag < 1 {
-		// 	fmt.Fprintf(os.Stderr, "error: --iterations must be at least 1\n")
-		// 	fmt.Fprintln(os.Stderr)
-		// 	pflag.Usage()
-		// 	os.Exit(1)
-		// }
 		return
 	}
 	for _, f := range missing {
