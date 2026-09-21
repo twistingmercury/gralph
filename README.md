@@ -9,9 +9,9 @@
 
 ---
 
-Gralph drives "Ralph loops" against a PRD checklist using Claude Code. It runs
-`claude --print --dangerously-skip-permissions` once per open checklist item,
-advancing until every item is complete or one is left unfinished.
+Gralph drives "Ralph loops" with Claude Code. It reads an ordered task list
+from a YAML file and runs `claude --print --dangerously-skip-permissions` once
+per task, feeding each session a shared prompt plus that task's own prompt.
 
 ## Table of Contents
 
@@ -25,55 +25,64 @@ advancing until every item is complete or one is left unfinished.
 ## Usage
 
 ```bash
-gralph --prompt path/to/PROMPT.md --tasks path/to/PRD.md
+gralph --prompt path/to/prompt.md --tasks path/to/tasks.yaml
 ```
 
-| Flag               | Required | Description                                                    |
-| ------------------ | -------- | -------------------------------------------------------------- |
-| `--prompt` / `-p`  | Yes      | Path to the prompt template passed to Claude each iteration    |
-| `--tasks` / `-t`   | Yes      | Path to the task checklist that drives the loop                |
-| `--version` / `-v` | No       | Print version information and exit                             |
+| Flag               | Required | Description                                            |
+| ------------------ | -------- | ------------------------------------------------------ |
+| `--prompt` / `-p`  | Yes      | Path to the shared prompt sent to Claude for every task |
+| `--tasks` / `-t`   | Yes      | Path to the YAML task list that drives the loop        |
+| `--version` / `-v` | No       | Print version information and exit                     |
 
-```bash
-gralph \
-  --prompt path/to/PROMPT.md \
-  --tasks path/to/PRD.md
+A task file is a `tasks` sequence. Each task has a unique positive integer `id`,
+a `name` (unique, ignoring case and surrounding whitespace), a `prompt`, and an
+optional `state`:
+
+```yaml
+tasks:
+  - id: 1
+    name: Add the widget repository
+    prompt: |
+      Objective:
+      Add a Postgres-backed WidgetRepository with Create and GetByID.
+
+      Verification:
+      - Command: go test ./internal/widget/...
+  - id: 2
+    name: Expose GET /widgets/{id}
+    state: pending
+    prompt: |
+      Add the HTTP handler using the repository from task 1.
 ```
 
-Start a new checklist from [docs/templates/PRD-template.md](docs/templates/PRD-template.md).
+`state` is `pending`, `completed`, or `abandoned`; leave it out for new work and
+it is read as `pending`. Gralph runs tasks in file order — `id` identifies a
+task, it does not order them. The `ralph-loop-docs-writer` skill in
+[skills/](skills/ralph-loop-docs-writer/SKILL.md) generates a task file and
+shared prompt for a project; `scripts/install_skill.sh` installs it.
 
 ## How it works
 
-Each iteration gralph finds the first unchecked item (`- [ ]`) in the PRD file
-and invokes Claude exactly once with the PROMPT.md template appended with the
-runtime path of the PRD file. After Claude exits, gralph
-re-reads the PRD: if the item is gone or changed it is counted as complete and
-the loop advances to the next item, even when Claude exited non-zero. If the
-item is unchanged, gralph prints a failure line and exits with a non-zero
-status, leaving the PRD untouched so the run can be resumed. The loop ends when
-no `- [ ]` items remain.
-
-| Marker  | Meaning                                        |
-| ------- | ---------------------------------------------- |
-| `- [ ]` | Open — will be processed                       |
-| `- [x]` | Complete — skipped                             |
-| `- [~]` | Closed — skipped; set by hand, never by gralph |
-
-Gralph writes structured log lines to stdout and brackets Claude's raw output:
+For each task, gralph combines the shared prompt with the task, prints the
+result to stdout, and starts a new `claude --print` session with it on stdin.
+The text Claude receives is:
 
 ```text
-[gralph] start
-[gralph] attempt item="Cycle 1 - Short title"
-[gralph] claude_output_begin item="Cycle 1 - Short title"
-... raw claude output ...
-[gralph] claude_output_end item="Cycle 1 - Short title" status=ok
-[gralph] check item="Cycle 1 - Short title"
-[gralph] completed item="Cycle 1 - Short title"
-[gralph] done
+<shared prompt>
+
+<id>: <name>
+
+<task prompt>
 ```
 
-When the item is unchanged, the last two lines are replaced by
-`[gralph] failed item="Cycle 1 - Short title"` and gralph exits non-zero.
+Claude's own output passes straight through to gralph's stdout and stderr. If
+the session exits non-zero, gralph reports `task <id>: <name> failed` and exits
+non-zero; later tasks do not run. There are no retries. When every task's
+session has exited zero, gralph exits zero.
+
+Gralph does not yet act on `state` or write it back: every task in the file is
+run, and the file is never modified. Selecting only pending tasks and recording
+completion is the next step.
 
 Background on the approach is in [docs/gralph-concept.md](docs/gralph-concept.md);
 the design is documented from [docs/architecture/00-overview.md](docs/architecture/00-overview.md).
@@ -82,10 +91,11 @@ the design is documented from [docs/architecture/00-overview.md](docs/architectu
 
 - **Runs outside Claude sessions**: gralph launches Claude as a subprocess. Do not invoke it from within a running Claude session.
 - **`claude` must be on PATH**: gralph calls `claude --print --dangerously-skip-permissions` directly; the Claude CLI must be installed and accessible.
-- **Permission checks are bypassed**: `--dangerously-skip-permissions` lets Claude run without user interaction. Treat prompts and PRDs as code you are choosing to execute, and do not run gralph against untrusted ones.
-- **PRD is never modified**: gralph does not write to the PRD file; Claude does. An unchanged item ends the run non-zero and leaves the PRD untouched for inspection or resumption.
-- **One invocation per item**: each unchecked item gets exactly one Claude invocation. There are no retries.
-- **Signal handling**: SIGINT (Ctrl-C) or SIGTERM cancels the current Claude invocation and leaves the PRD untouched. On macOS and Linux the entire Claude process group is terminated; on other platforms only the direct child process is guaranteed to be killed.
+- **Permission checks are bypassed**: `--dangerously-skip-permissions` lets Claude run without user interaction. Treat the prompt and task files as code you are choosing to execute, and do not run gralph against untrusted ones.
+- **Each session starts cold**: a session sees only the shared prompt and its one task. Anything it needs to know about earlier tasks must be in those two texts or in the repository.
+- **One session per task**: a failing task stops the run. Fix the cause and run gralph again.
+- **Signal handling**: SIGINT (Ctrl-C) or SIGTERM cancels the current Claude session and stops the run. The entire Claude process group is terminated, so nothing Claude spawned outlives gralph.
+- **Unix only**: gralph runs on Linux, macOS, and the BSDs. Windows is not supported.
 
 ## Development Considerations
 
@@ -113,7 +123,6 @@ cross-compiles into `.bin/<arch>/<os>/`, then runs the e2e suite in a container.
 
 ```bash
 make test      # unit tests: go test -v ./internal/...
-make e2e       # builds the local binary, then runs the black-box suite against it
 make analyze   # goimports, golangci-lint, govulncheck, gosec (tools must be on PATH)
 ```
 

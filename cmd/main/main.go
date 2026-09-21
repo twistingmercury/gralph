@@ -28,7 +28,7 @@ func main() {
 	defer stop()
 
 	if err := looper.Start(ctx, *promptFlag, *tasksFlag); err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		_, _ = fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
 }
@@ -47,16 +47,20 @@ func validateRequiredFlags() {
 	if *promptFlag == "" {
 		missing = append(missing, "--prompt")
 	}
+
 	if *tasksFlag == "" {
 		missing = append(missing, "--tasks")
 	}
+
 	if len(missing) == 0 {
 		return
 	}
+
 	for _, f := range missing {
-		fmt.Fprintf(os.Stderr, "error: required flag %s not set\n", f)
+		_, _ = fmt.Fprintf(os.Stderr, "error: required flag %s not set\n", f)
 	}
-	fmt.Fprintln(os.Stderr)
+
+	_, _ = fmt.Fprintln(os.Stderr)
 	pflag.Usage()
 	os.Exit(1)
 }

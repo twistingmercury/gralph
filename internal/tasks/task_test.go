@@ -8,6 +8,41 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+func TestTaskString(t *testing.T) {
+	tests := []struct {
+		name string
+		task Task
+		want string
+	}{
+		{
+			name: "exact format",
+			task: Task{ID: 1, Name: "First task", Prompt: "Do it."},
+			want: "1: First task\n\nDo it.",
+		},
+		{
+			name: "trailing newline of a block-scalar prompt is trimmed",
+			task: Task{ID: 7, Name: "Second task", Prompt: "Objective:\nDo the second thing.\n"},
+			want: "7: Second task\n\nObjective:\nDo the second thing.",
+		},
+		{
+			name: "interior indentation of the prompt's first line is preserved",
+			task: Task{ID: 2, Name: "Indented", Prompt: "  Step one\nStep two\n"},
+			want: "2: Indented\n\n  Step one\nStep two",
+		},
+		{
+			name: "empty prompt",
+			task: Task{ID: 3, Name: "No prompt"},
+			want: "3: No prompt",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, tt.task.String())
+		})
+	}
+}
+
 func TestParseTasks_Valid(t *testing.T) {
 	yml := []byte(`tasks:
   - id: 1

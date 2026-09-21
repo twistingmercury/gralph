@@ -2,7 +2,9 @@
 # guidance; this header covers only how to fill in this file.
 #
 # - Copy the task entry once per task and replace every GENERATE_* token.
-# - Leave `state` empty for new work; Gralph reads an empty state as pending.
+# - Each task must stand alone: implementable, testable, and committable in
+#   one session, with no reference to or reliance on later tasks.
+# - Leave `state` empty; Gralph reads an empty state as pending.
 # - Put every instruction the agent needs inside `prompt`. Comments are not
 #   passed to the agent, so drop this header from the generated file.
 tasks:

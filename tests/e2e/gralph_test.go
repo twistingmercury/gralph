@@ -6,14 +6,16 @@ package e2e
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
-	"strings"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 const defaultTimeout = 10 * time.Second
@@ -23,7 +25,7 @@ var testBinaryPath string
 
 // fakeClaudeDir is set by TestMain after building the fake claude fixture
 // once. It holds a directory whose only entry is an executable named
-// "claude" (or "claude.exe" on windows) so it can be prepended to a gralph
+// "claude" so it can be prepended to a gralph
 // child process's PATH.
 var fakeClaudeDir string
 
@@ -48,7 +50,11 @@ func runTests(m *testing.M) int {
 		fmt.Fprintf(os.Stderr, "failed to create temp dir: %v\n", err)
 		return 1
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() {
+		if err := os.RemoveAll(tmpDir); err != nil {
+			fmt.Fprintf(os.Stderr, "failed to remove temp dir %s: %v\n", tmpDir, err)
+		}
+	}()
 
 	// When GRALPH_BINARY is set (e.g. inside the e2e Docker container), use
 	// that pre-built binary and skip compiling gralph itself. The fake
@@ -82,7 +88,7 @@ func runTests(m *testing.M) int {
 		fmt.Fprintf(os.Stderr, "failed to create fake claude bin dir: %v\n", err)
 		return 1
 	}
-	fakeClaudeBin := filepath.Join(fakeClaudeDir, fakeClaudeBinaryName())
+	fakeClaudeBin := filepath.Join(fakeClaudeDir, "claude")
 	build := exec.Command("go", "build", "-o", fakeClaudeBin, "./testdata/fakeclaude")
 	build.Stdout = os.Stdout
 	build.Stderr = os.Stderr
@@ -94,15 +100,6 @@ func runTests(m *testing.M) int {
 	return m.Run()
 }
 
-// fakeClaudeBinaryName returns the executable name gralph resolves via PATH
-// on the current platform.
-func fakeClaudeBinaryName() string {
-	if runtime.GOOS == "windows" {
-		return "claude.exe"
-	}
-	return "claude"
-}
-
 // runCLI executes the CLI binary with the given arguments and returns the result.
 func runCLI(t *testing.T, args ...string) cliResult {
 	t.Helper()
@@ -111,12 +108,24 @@ func runCLI(t *testing.T, args ...string) cliResult {
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, testBinaryPath, args...) // #nosec G204 -- testBinaryPath is a test fixture
+	// Bound how long Wait() can block flushing output after the context kills
+	// the process, so a child that inherited stdout/stderr can't hang Wait
+	// past the deadline.
+	cmd.WaitDelay = 2 * time.Second
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
 	err := cmd.Run()
+
+	// Check for a timed-out context before interpreting the exit status: a
+	// killed process also returns a non-nil *exec.ExitError, so checking exit
+	// status first would let a hung gralph masquerade as a normal non-zero
+	// exit instead of failing the test outright.
+	if ctx.Err() != nil {
+		require.FailNow(t, fmt.Sprintf("gralph did not exit within %v (args=%v)\nstdout:\n%s\nstderr:\n%s", defaultTimeout, args, stdout.String(), stderr.String()))
+	}
 
 	result := cliResult{
 		stdout:   stdout.String(),
@@ -125,12 +134,11 @@ func runCLI(t *testing.T, args ...string) cliResult {
 	}
 
 	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
 			result.exitCode = exitErr.ExitCode()
-		} else if ctx.Err() == context.DeadlineExceeded {
-			t.Fatalf("CLI command timed out after %v: %v", defaultTimeout, args)
 		} else {
-			t.Fatalf("failed to execute CLI: %v", err)
+			require.NoError(t, err, "failed to execute CLI")
 		}
 	}
 
@@ -139,60 +147,51 @@ func runCLI(t *testing.T, args ...string) cliResult {
 
 // TestVersionFlag verifies that --version exits 0 and produces output.
 func TestVersionFlag(t *testing.T) {
+	t.Parallel()
 	result := runCLI(t, "--version")
-	if result.exitCode != 0 {
-		t.Errorf("expected exit 0 for --version, got %d; stderr: %s", result.exitCode, result.stderr)
-	}
-	if result.stdout == "" {
-		t.Error("expected non-empty output for --version")
-	}
+	assert.Equal(t, 0, result.exitCode, "stderr: %s", result.stderr)
+	assert.NotEmpty(t, result.stdout)
 }
 
 // TestHelpFlag verifies that --help exits 0 (pflag exits 0 on ErrHelp).
 func TestHelpFlag(t *testing.T) {
+	t.Parallel()
 	result := runCLI(t, "--help")
-	if result.exitCode != 0 {
-		t.Errorf("expected exit 0 for --help, got %d; stderr: %s", result.exitCode, result.stderr)
-	}
+	assert.Equal(t, 0, result.exitCode, "stderr: %s", result.stderr)
 }
 
 // TestMissingPrompt verifies that omitting --prompt exits non-zero.
 func TestMissingPrompt(t *testing.T) {
-	result := runCLI(t, "--tasks=/tmp/prd.md")
-	if result.exitCode == 0 {
-		t.Fatal("expected non-zero exit when --prompt is missing")
-	}
-	if !strings.Contains(result.stderr, "--prompt") {
-		t.Errorf("expected stderr to mention --prompt; got: %s", result.stderr)
-	}
+	t.Parallel()
+	result := runCLI(t, "--tasks=/tmp/tasks.yaml")
+	require.NotEqual(t, 0, result.exitCode, "expected non-zero exit when --prompt is missing")
+	assert.Contains(t, result.stderr, "--prompt")
 }
 
-// TestMissingPrd verifies that omitting --tasks exits non-zero.
-func TestMissingPrd(t *testing.T) {
+// TestMissingTasks verifies that omitting --tasks exits non-zero.
+func TestMissingTasks(t *testing.T) {
+	t.Parallel()
 	result := runCLI(t, "--prompt=/tmp/prompt.md")
-	if result.exitCode == 0 {
-		t.Fatal("expected non-zero exit when --tasks is missing")
-	}
-	if !strings.Contains(result.stderr, "--tasks") {
-		t.Errorf("expected stderr to mention --tasks; got: %s", result.stderr)
-	}
+	require.NotEqual(t, 0, result.exitCode, "expected non-zero exit when --tasks is missing")
+	assert.Contains(t, result.stderr, "--tasks")
 }
 
 // TestMissingBothRequiredFlags verifies that omitting both required flags exits non-zero.
 func TestMissingBothRequiredFlags(t *testing.T) {
+	t.Parallel()
 	result := runCLI(t)
-	if result.exitCode == 0 {
-		t.Fatal("expected non-zero exit when both --prompt and --tasks are missing")
-	}
+	require.NotEqual(t, 0, result.exitCode, "expected non-zero exit when both --prompt and --tasks are missing")
 }
 
-// TestNonexistentFiles verifies that valid flags pointing to missing files exits non-zero.
+// TestNonexistentFiles verifies that valid flags pointing to missing files exit non-zero
+// with an error naming the missing prompt/tasks file.
 func TestNonexistentFiles(t *testing.T) {
+	t.Parallel()
 	result := runCLI(t,
 		"--prompt=/nonexistent/prompt.md",
-		"--tasks=/nonexistent/prd.md",
+		"--tasks=/nonexistent/tasks.yaml",
 	)
-	if result.exitCode == 0 {
-		t.Fatal("expected non-zero exit when referenced files do not exist")
-	}
+	require.NotEqual(t, 0, result.exitCode, "expected non-zero exit when referenced files do not exist")
+	assert.Contains(t, result.stderr, "prompt file")
+	assert.Contains(t, result.stderr, "is not accessible")
 }

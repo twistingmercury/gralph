@@ -67,11 +67,14 @@ in place when authorized.
 
 ## Task scope
 
-One task delivers one independently verifiable capability. Keep task prompts
-focused and split independent goals. Order tasks so each one relies only on
-work that earlier tasks in the file have already delivered. Verification
-commands must fit the target repository; do not invent passes or require source
-tests for documentation-only changes.
+Each task is a complete unit of work that can be implemented, tested, and
+committed on its own. The session that runs it sees only the shared prompt and
+that one task, so a task must not refer to future tasks, leave work for a
+later task to finish, or depend on anything a later task will add. It may
+build on what earlier tasks delivered, because that work is already in the
+repository; order tasks so that holds. Keep task prompts focused and split
+independent goals. Verification commands must fit the target repository; do
+not invent passes or require source tests for documentation-only changes.
 
 Honor project policies for source commits, and never instruct the session to
 edit or commit `tasks.yaml`. Preserve existing progress and history files.

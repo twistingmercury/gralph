@@ -13,21 +13,23 @@
 //	                                FAKECLAUDE_DESCENDANT_PID_FILE). Descendant
 //	                                mode ignores every other variable, reads
 //	                                nothing, and blocks until killed.
-//	FAKECLAUDE_RECORD_FILE         path to write a JSON record of this
-//	                                invocation ({"argv":[...],"stdin":"..."})
+//	FAKECLAUDE_RECORD_FILE         path to append a newline-delimited JSON
+//	                                record of this invocation
+//	                                ({"argv":[...],"stdin":"..."}), one line
+//	                                per invocation in call order, so a test
+//	                                can recover every invocation across a
+//	                                single gralph run
 //	FAKECLAUDE_ATTEMPT_LOG_FILE    path to append one line to per invocation,
 //	                                used to count invocations across a run
 //	FAKECLAUDE_EXIT_CODE           exit code to use (default "0")
-//	FAKECLAUDE_SKIP_PRD_UPDATE     "1" to leave the PRD untouched instead of
-//	                                marking the first open item done
 //	FAKECLAUDE_STDOUT_MSG          text to print to stdout before exiting
 //	FAKECLAUDE_STDERR_MSG          text to print to stderr before exiting
 //	FAKECLAUDE_DESCENDANT_PID_FILE path to write the PID of a spawned
 //	                                blocking descendant process (empty: no
 //	                                descendant is spawned)
-//	FAKECLAUDE_BLOCK               "1" to block forever after setup
-//	                                (descendant spawn, ready file) instead of
-//	                                touching the PRD and exiting
+//	FAKECLAUDE_BLOCK               "1" to block forever after reading stdin
+//	                                and completing setup (descendant spawn,
+//	                                ready file) instead of exiting
 //	FAKECLAUDE_READY_FILE          path to write this process's own PID once
 //	                                setup is complete and it is about to
 //	                                block or exit
@@ -39,8 +41,8 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
-	"strings"
 	"time"
 )
 
@@ -65,22 +67,15 @@ func main() {
 		if err != nil {
 			fail("marshal record: %v", err)
 		}
-		if err := os.WriteFile(recordFile, data, 0o600); err != nil {
+		data = append(data, '\n')
+		if err := appendUnderRoot(recordFile, data, 0o600); err != nil {
 			fail("write record file: %v", err)
 		}
 	}
 
 	if attemptLog := os.Getenv("FAKECLAUDE_ATTEMPT_LOG_FILE"); attemptLog != "" {
-		f, err := os.OpenFile(attemptLog, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
-		if err != nil {
-			fail("open attempt log: %v", err)
-		}
-		if _, err := fmt.Fprintln(f, "attempt"); err != nil {
-			_ = f.Close()
+		if err := appendUnderRoot(attemptLog, []byte("attempt\n"), 0o600); err != nil {
 			fail("write attempt log: %v", err)
-		}
-		if err := f.Close(); err != nil {
-			fail("close attempt log: %v", err)
 		}
 	}
 
@@ -94,28 +89,20 @@ func main() {
 		if err := cmd.Start(); err != nil {
 			fail("start descendant: %v", err)
 		}
-		if err := os.WriteFile(descendantPIDFile, []byte(strconv.Itoa(cmd.Process.Pid)), 0o600); err != nil {
+		if err := writeUnderRoot(descendantPIDFile, []byte(strconv.Itoa(cmd.Process.Pid)), 0o600); err != nil {
 			_ = cmd.Process.Kill()
 			fail("write descendant pid file: %v", err)
 		}
 	}
 
 	if readyFile := os.Getenv("FAKECLAUDE_READY_FILE"); readyFile != "" {
-		if err := os.WriteFile(readyFile, []byte(strconv.Itoa(os.Getpid())), 0o600); err != nil {
+		if err := writeUnderRoot(readyFile, []byte(strconv.Itoa(os.Getpid())), 0o600); err != nil {
 			fail("write ready file: %v", err)
 		}
 	}
 
 	if os.Getenv("FAKECLAUDE_BLOCK") == "1" {
 		blockForever()
-	}
-
-	if os.Getenv("FAKECLAUDE_SKIP_PRD_UPDATE") != "1" {
-		prdPath := runtimePath(string(stdin), "PRD")
-		if prdPath == "" {
-			fail("prompt does not contain a PRD runtime path")
-		}
-		markFirstOpenItemDone(prdPath)
 	}
 
 	if msg := os.Getenv("FAKECLAUDE_STDOUT_MSG"); msg != "" {
@@ -136,28 +123,42 @@ func main() {
 	os.Exit(exitCode)
 }
 
-func markFirstOpenItemDone(prdPath string) {
-	data, err := os.ReadFile(prdPath)
-	if err != nil {
-		fail("read PRD: %v", err)
-	}
-	updated := strings.Replace(string(data), "- [ ]", "- [x]", 1)
-	if updated == string(data) {
-		fail("PRD has no open checklist item")
-	}
-	if err := os.WriteFile(prdPath, []byte(updated), 0o600); err != nil {
-		fail("write PRD: %v", err)
-	}
+// writeUnderRoot and appendUnderRoot confine file access to the directory
+// component of the caller-supplied path via os.Root, rather than passing an
+// environment-derived path straight to os.WriteFile/os.OpenFile. Neither
+// path is trusted: both come from FAKECLAUDE_* environment variables set by
+// the test process.
+
+func writeUnderRoot(path string, data []byte, perm os.FileMode) error {
+	return withRootFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm, data)
 }
 
-func runtimePath(prompt, label string) string {
-	prefix := "- " + label + ": "
-	for _, line := range strings.Split(prompt, "\n") {
-		if strings.HasPrefix(line, prefix) {
-			return strings.TrimPrefix(line, prefix)
-		}
+func appendUnderRoot(path string, data []byte, perm os.FileMode) error {
+	return withRootFile(path, os.O_WRONLY|os.O_CREATE|os.O_APPEND, perm, data)
+}
+
+func withRootFile(path string, flag int, perm os.FileMode, data []byte) error {
+	dir, base := filepath.Split(filepath.Clean(path))
+	if dir == "" {
+		dir = "."
 	}
-	return ""
+
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return fmt.Errorf("open root %q: %w", dir, err)
+	}
+	defer func() { _ = root.Close() }()
+
+	f, err := root.OpenFile(base, flag, perm)
+	if err != nil {
+		return fmt.Errorf("open %q under root %q: %w", base, dir, err)
+	}
+	defer func() { _ = f.Close() }()
+
+	if _, err := f.Write(data); err != nil {
+		return fmt.Errorf("write %q under root %q: %w", base, dir, err)
+	}
+	return nil
 }
 
 func blockForever() {

@@ -13,6 +13,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 // fakeClaudeRecord mirrors the JSON record written by
@@ -67,22 +69,33 @@ func runGralph(t *testing.T, timeout time.Duration, args []string, env []string)
 
 	cmd := exec.CommandContext(ctx, testBinaryPath, args...)
 	cmd.Env = env
+	// Bound how long Wait() can block flushing output after the context
+	// kills the process, so a child that inherited stdout/stderr can't hang
+	// Wait past the deadline.
+	cmd.WaitDelay = 2 * time.Second
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
 	err := cmd.Run()
+
+	// Check for a timed-out context before interpreting the exit status: a
+	// killed process also returns a non-nil *exec.ExitError, so checking exit
+	// status first would let a hung gralph masquerade as a normal non-zero
+	// exit instead of failing the test outright.
+	if ctx.Err() != nil {
+		require.FailNow(t, fmt.Sprintf("gralph did not exit within %v (args=%v)\nstdout:\n%s\nstderr:\n%s", timeout, args, stdout.String(), stderr.String()))
+	}
+
 	result := gralphResult{stdout: stdout.String(), stderr: stderr.String()}
 
 	if err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
 			result.exitCode = exitErr.ExitCode()
-		} else if ctx.Err() == context.DeadlineExceeded {
-			t.Fatalf("gralph timed out after %v (args=%v)\nstdout:\n%s\nstderr:\n%s", timeout, args, stdout.String(), stderr.String())
 		} else {
-			t.Fatalf("failed to execute gralph: %v", err)
+			require.NoError(t, err, "failed to execute gralph")
 		}
 	}
 
@@ -115,7 +128,7 @@ func startGralph(t *testing.T, safetyTimeout time.Duration, args []string, env [
 
 	if err := cmd.Start(); err != nil {
 		cancel()
-		t.Fatalf("failed to start gralph: %v", err)
+		require.NoError(t, err, "failed to start gralph")
 	}
 
 	done := make(chan error, 1)
@@ -148,58 +161,69 @@ func (gp *gralphProcess) waitExit(t *testing.T, timeout time.Duration) int {
 		if errors.As(err, &exitErr) {
 			return exitErr.ExitCode()
 		}
-		t.Fatalf("gralph exited with unexpected error: %v", err)
+		require.NoError(t, err, "gralph exited with unexpected error")
 		return -1
 	case <-time.After(timeout):
-		t.Fatalf("gralph did not exit within %v; stdout:\n%s\nstderr:\n%s", timeout, gp.stdout.String(), gp.stderr.String())
+		require.FailNow(t, fmt.Sprintf("gralph did not exit within %v; stdout:\n%s\nstderr:\n%s", timeout, gp.stdout.String(), gp.stderr.String()))
 		return -1
 	}
 }
 
-// writePRD writes a PRD.md fixture from the given checklist lines (each
-// element becomes one line, unmodified) and returns its path.
-func writePRD(t *testing.T, dir string, lines ...string) string {
+// writeTasksYAML writes a tasks.yaml fixture with the given content
+// (unmodified) and returns its path.
+func writeTasksYAML(t *testing.T, dir, content string) string {
 	t.Helper()
 
-	path := filepath.Join(dir, "PRD.md")
-	content := "# PRD\n\n" + strings.Join(lines, "\n") + "\n"
-	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
-		t.Fatalf("write PRD fixture: %v", err)
-	}
+	path := filepath.Join(dir, "tasks.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
 	return path
 }
 
-// writePrompt writes a PROMPT.md fixture with the given body and returns its path.
+// writePrompt writes a prompt.md fixture with the given body and returns its path.
 func writePrompt(t *testing.T, dir, body string) string {
 	t.Helper()
 
-	path := filepath.Join(dir, "PROMPT.md")
-	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
-		t.Fatalf("write prompt fixture: %v", err)
-	}
+	path := filepath.Join(dir, "prompt.md")
+	require.NoError(t, os.WriteFile(path, []byte(body), 0o600))
 	return path
 }
 
-// runtimeBlock mirrors the exact "## Runtime paths" block looper.go appends
-// to the prompt before sending it to claude on stdin.
-func runtimeBlock(prd string) string {
-	return fmt.Sprintf("\n## Runtime paths\n- PRD: %s\n", prd)
+// expectedStdin reproduces the exact wire format runLoop sends to claude on
+// stdin: sharedPrompt is the already-trimmed prompt file content, and id,
+// name, prompt describe the task being run. It mirrors
+// fmt.Sprintf("%s\n\n%s\n", p, task.String()) in internal/looper/looper.go
+// and Task.String() in internal/tasks/task.go exactly, so tests can
+// golden-assert recorded stdin.
+func expectedStdin(sharedPrompt string, id int, name, prompt string) string {
+	taskStr := strings.TrimSpace(fmt.Sprintf("%d: %s\n\n%s", id, name, prompt))
+	return fmt.Sprintf("%s\n\n%s\n", sharedPrompt, taskStr)
 }
 
-// readFakeClaudeRecord reads and decodes the JSON invocation record written
-// by the fake claude fixture.
-func readFakeClaudeRecord(t *testing.T, path string) fakeClaudeRecord {
+// readFakeClaudeRecords reads and decodes the newline-delimited JSON
+// invocation records appended by the fake claude fixture to
+// FAKECLAUDE_RECORD_FILE, one entry per invocation in call order. A missing
+// file returns no records.
+func readFakeClaudeRecords(t *testing.T, path string) []fakeClaudeRecord {
 	t.Helper()
 
 	data, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatalf("read fake claude record %s: %v", path, err)
+		if os.IsNotExist(err) {
+			return nil
+		}
+		require.NoError(t, err, "read fake claude record %s", path)
 	}
-	var rec fakeClaudeRecord
-	if err := json.Unmarshal(data, &rec); err != nil {
-		t.Fatalf("unmarshal fake claude record %s: %v", path, err)
+
+	var records []fakeClaudeRecord
+	for _, line := range strings.Split(strings.TrimRight(string(data), "\n"), "\n") {
+		if line == "" {
+			continue
+		}
+		var rec fakeClaudeRecord
+		require.NoError(t, json.Unmarshal([]byte(line), &rec), "unmarshal fake claude record line %q", line)
+		records = append(records, rec)
 	}
-	return rec
+	return records
 }
 
 // countAttempts returns the number of lines the fake claude fixture appended
@@ -213,7 +237,7 @@ func countAttempts(t *testing.T, path string) int {
 		if os.IsNotExist(err) {
 			return 0
 		}
-		t.Fatalf("read attempt log %s: %v", path, err)
+		require.NoError(t, err, "read attempt log %s", path)
 	}
 	trimmed := strings.TrimRight(string(data), "\n")
 	if trimmed == "" {
@@ -234,10 +258,10 @@ func waitForFile(t *testing.T, path string, timeout time.Duration) []byte {
 			return data
 		}
 		if !os.IsNotExist(err) {
-			t.Fatalf("read %s: %v", path, err)
+			require.NoError(t, err, "read %s", path)
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("timed out after %v waiting for %s to appear", timeout, path)
+			require.FailNow(t, fmt.Sprintf("timed out after %v waiting for %s to appear", timeout, path))
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
@@ -249,8 +273,6 @@ func readPIDFile(t *testing.T, path string, timeout time.Duration) int {
 
 	data := waitForFile(t, path, timeout)
 	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
-	if err != nil {
-		t.Fatalf("parse pid from %s (content %q): %v", path, string(data), err)
-	}
+	require.NoError(t, err, "parse pid from %s (content %q)", path, string(data))
 	return pid
 }

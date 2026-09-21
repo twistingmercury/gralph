@@ -19,7 +19,7 @@ a project-specific H1 title.
 
 Execute exactly one task for GENERATE_PROJECT_NAME: the single task supplied
 with this prompt. Verify its work, clean up what it created, report the
-outcome, and stop. Gralph alone selects tasks and records their state.
+outcome, and stop. Gralph selects the task; this session never chooses one.
 
 This task gets one session. No retry follows it, and no later session exists to
 defer work to. Work that cannot be finished here is reported as unfinished,
@@ -31,15 +31,18 @@ with a summary a person reads to decide what happens next.
 - Build and test rules: GENERATE_TOOLCHAIN_BUILD_COMMANDS_AND_REQUIRED_CHECKS.
 - Source-work commit policy: GENERATE_AUTHORIZED_COMMIT_RULES_OR_NOT_REQUIRED.
 
-The supplied task defines the bounded files, steps, verification, and
-completion criteria. This session starts with no memory of earlier tasks, so
-verify any claim about prior work against the actual workspace.
+The task follows this prompt. It begins with a line of the form `<id>: <name>`
+that identifies it; everything after that line is the task's own instructions,
+which define the bounded files, steps, verification, and completion criteria.
+Quote the id and name when reporting or committing. This session starts with
+no memory of earlier tasks, so verify any claim about prior work against the
+actual workspace.
 
 ## Execution rules
 
-1. Execute only the supplied task; never select, combine, or skip to another.
-2. Never edit the task file or any task's state. Gralph owns it, and changing
-   it to get past a blocker hides the failure from the person running the loop.
+1. Execute only the supplied task.
+2. Never edit the task file or any task's state. Changing it to get past a
+   blocker hides the failure from the person running the loop.
 3. Search before editing, and preserve unrelated workspace and Git changes.
 4. Keep work within the task's scope.
 5. Attempt cleanup on success and on failure.
@@ -58,9 +61,8 @@ none records `None`.
 
 ### Execute
 
-Make the bounded changes the task describes. Use a named specialist when the
-task calls for one and delegation is available; otherwise work within the same
-scope. Delegated workers report their changes, resources, verification, and
+Make the bounded changes the task describes. If delegation is available and
+useful, delegated workers report their changes, resources, verification, and
 failures back to this session, which stays responsible for the outcome.
 
 Note concrete resource names, IDs, paths, and ownership as work happens, so
@@ -96,7 +98,7 @@ failed. Skip commits after a verification or cleanup failure.
 
 ### Report
 
-End with a brief final report, then stop without starting another task:
+End with a brief final report, then stop:
 
 - Outcome: `completed`, or `blocked` with what was finished, what was not, and
   what must be resolved before the task runs again.

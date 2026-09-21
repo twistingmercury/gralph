@@ -25,6 +25,11 @@ type TaskList struct {
 	Tasks []Task `yaml:"tasks"`
 }
 
+func (t Task) String() string {
+	str := fmt.Sprintf("%d: %s\n\n%s", t.ID, t.Name, t.Prompt)
+	return strings.TrimSpace(str)
+}
+
 func taskEmpty() Task {
 	return Task{
 		ID:     0,
