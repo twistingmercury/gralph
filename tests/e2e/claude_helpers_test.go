@@ -180,15 +180,10 @@ func writePrompt(t *testing.T, dir, body string) string {
 	return path
 }
 
-// defaultProgressPath mirrors looper.Start's default: <prd dir>/progress.txt.
-func defaultProgressPath(prd string) string {
-	return filepath.Join(filepath.Dir(prd), "progress.txt")
-}
-
 // runtimeBlock mirrors the exact "## Runtime paths" block looper.go appends
 // to the prompt before sending it to claude on stdin.
-func runtimeBlock(prd, progress string) string {
-	return fmt.Sprintf("\n## Runtime paths\n- PRD: %s\n- Progress: %s\n", prd, progress)
+func runtimeBlock(prd string) string {
+	return fmt.Sprintf("\n## Runtime paths\n- PRD: %s\n", prd)
 }
 
 // readFakeClaudeRecord reads and decodes the JSON invocation record written

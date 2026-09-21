@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 )
 
@@ -52,7 +51,7 @@ func isTerminal(f *os.File) bool {
 	return (info.Mode() & os.ModeCharDevice) != 0
 }
 
-func Start(ctx context.Context, prompt, prd, progressFile string) error {
+func Start(ctx context.Context, prompt, prd string) error {
 	if _, err := os.Stat(prompt); err != nil {
 		return fmt.Errorf("prompt file %q is not accessible: %w", prompt, err)
 	}
@@ -60,33 +59,17 @@ func Start(ctx context.Context, prompt, prd, progressFile string) error {
 		return fmt.Errorf("PRD file %q is not accessible: %w", prd, err)
 	}
 
-	if progressFile == "" {
-		progressFile = filepath.Join(filepath.Dir(prd), "progress.txt")
-	}
-
-	if err := ensureProgressFileExists(progressFile); err != nil {
-		return err
-	}
-
-	if err := runLoop(ctx, prompt, prd, progressFile, defaultClaudeRunner); err != nil {
+	if err := runLoop(ctx, prompt, prd, defaultClaudeRunner); err != nil {
 		return fmt.Errorf("loop error: %w", err)
 	}
 
 	return nil
 }
 
-func ensureProgressFileExists(path string) error {
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY, 0o600) // #nosec G304 -- path is CLI-provided or derived from validated PRD path
-	if err != nil {
-		return fmt.Errorf("could not open progress file %q: %w", path, err)
-	}
-	return f.Close()
-}
-
-// ITERATIONS-DISABLED: runLoop took `maxAttempts int` after `progress` and
+// ITERATIONS-DISABLED: runLoop took `maxAttempts int` after `prd` and
 // Start passed the value from the removed --iterations flag. Restore the
 // parameter alongside the bookkeeping and retry/abandon blocks below.
-func runLoop(ctx context.Context, prompt, prd, progress string, runner commandRunner) error {
+func runLoop(ctx context.Context, prompt, prd string, runner commandRunner) error {
 	fmt.Printf("[gralph] start\n")
 
 	// ITERATIONS-DISABLED: per-item attempt bookkeeping.
@@ -121,7 +104,7 @@ func runLoop(ctx context.Context, prompt, prd, progress string, runner commandRu
 		fmt.Printf("[gralph] attempt item=%q\n", label)
 		fmt.Printf("[gralph] claude_output_begin item=%q\n", label)
 
-		invokeErr := invokeClaude(ctx, prompt, prd, progress, runner)
+		invokeErr := invokeClaude(ctx, prompt, prd, runner)
 		if invokeErr != nil {
 			fmt.Printf("[gralph] claude_output_end item=%q status=error\n", label)
 			fmt.Printf("[gralph] invoke_failed item=%q err=%v\n", label, invokeErr)
@@ -202,12 +185,12 @@ func itemLabel(item string) string {
 	return label
 }
 
-func invokeClaude(ctx context.Context, prompt, prd, progress string, runner commandRunner) error {
+func invokeClaude(ctx context.Context, prompt, prd string, runner commandRunner) error {
 	data, err := os.ReadFile(prompt) // #nosec G304 -- path is CLI-provided or derived from validated PRD path
 	if err != nil {
 		return fmt.Errorf("could not read prompt file %q: %w", prompt, err)
 	}
-	combined := string(data) + fmt.Sprintf("\n## Runtime paths\n- PRD: %s\n- Progress: %s\n", prd, progress)
+	combined := string(data) + fmt.Sprintf("\n## Runtime paths\n- PRD: %s\n", prd)
 	return runner(ctx, combined)
 }
 

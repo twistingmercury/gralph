@@ -53,7 +53,7 @@ func testClaudeLoopSignal(t *testing.T, sig os.Signal) {
 	// Generous safety-net timeout: if the signal never terminates gralph
 	// (a real bug, not expected flakiness), the process is still killed and
 	// the test still fails via waitExit rather than hanging the suite.
-	gp := startGralph(t, 30*time.Second, []string{"--prompt=" + prompt, "--prd=" + prd}, env)
+	gp := startGralph(t, 30*time.Second, []string{"--prompt=" + prompt, "--tasks=" + prd}, env)
 
 	// Wait for the fake claude fixture to spawn its descendant and signal
 	// it's set up and blocking before sending the signal.

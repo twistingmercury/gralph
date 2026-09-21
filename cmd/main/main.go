@@ -14,10 +14,10 @@ import (
 )
 
 var (
-	versionFlag  = pflag.Bool("version", false, "Show the current version of gralph")
-	prdFlag      = pflag.String("prd", "", "Required. Path to the PRD.md checklist file that drives the loop")
-	promptFlag   = pflag.String("prompt", "", "Required. Path to the PROMPT.md template file passed to Claude each iteration")
-	progressFlag = pflag.String("progress", "", "Optional. Path to the progress log file (default: <prd dir>/progress.txt)")
+	versionFlag = pflag.BoolP("version", "v", false, "Show the current version of gralph")
+	tasksFlag   = pflag.StringP("tasks", "t", "", "Required. Path to the tasks.yaml checklist file that drives the loop")
+	promptFlag  = pflag.StringP("prompt", "p", "", "Required. Path to the prompt.md template file passed to Claude each iteration")
+
 	// ITERATIONS-DISABLED: iterations flag disabled; the loop now fails fast
 	// after one invocation instead of retrying. Restore alongside
 	// looper.runLoop's maxAttempts parameter and the retry logic it gated.
@@ -32,7 +32,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	if err := looper.Start(ctx, *promptFlag, *prdFlag, *progressFlag); err != nil {
+	if err := looper.Start(ctx, *promptFlag, *tasksFlag); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
@@ -52,8 +52,8 @@ func validateRequiredFlags() {
 	if *promptFlag == "" {
 		missing = append(missing, "--prompt")
 	}
-	if *prdFlag == "" {
-		missing = append(missing, "--prd")
+	if *tasksFlag == "" {
+		missing = append(missing, "--tasks")
 	}
 	if len(missing) == 0 {
 		// ITERATIONS-DISABLED: iterationsFlag bounds check disabled with the flag.

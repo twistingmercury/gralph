@@ -25,30 +25,28 @@ advancing until every item is complete or one is left unfinished.
 ## Usage
 
 ```bash
-gralph --prompt path/to/PROMPT.md --prd path/to/PRD.md [--progress path/to/progress.txt]
+gralph --prompt path/to/PROMPT.md --tasks path/to/PRD.md
 ```
 
-| Flag         | Required | Default                  | Description                                                    |
-| ------------ | -------- | ------------------------ | -------------------------------------------------------------- |
-| `--prompt`   | Yes      | —                        | Path to the PROMPT.md template passed to Claude each iteration |
-| `--prd`      | Yes      | —                        | Path to the PRD.md checklist that drives the loop              |
-| `--progress` | No       | `<prd dir>/progress.txt` | Path to the progress log file                                  |
-| `--version`  | No       | —                        | Print version information and exit                             |
+| Flag               | Required | Description                                                    |
+| ------------------ | -------- | -------------------------------------------------------------- |
+| `--prompt` / `-p`  | Yes      | Path to the prompt template passed to Claude each iteration    |
+| `--tasks` / `-t`   | Yes      | Path to the task checklist that drives the loop                |
+| `--version`        | No       | Print version information and exit                             |
 
 ```bash
 gralph \
-  --prompt scripts/PROMPT.md \
-  --prd scripts/PRD.md
+  --prompt path/to/PROMPT.md \
+  --tasks path/to/PRD.md
 ```
 
-Start a new checklist from [docs/templates/PRD-template.md](docs/templates/PRD-template.md);
-[scripts/PROMPT.md](scripts/PROMPT.md) is a working prompt example.
+Start a new checklist from [docs/templates/PRD-template.md](docs/templates/PRD-template.md).
 
 ## How it works
 
 Each iteration gralph finds the first unchecked item (`- [ ]`) in the PRD file
 and invokes Claude exactly once with the PROMPT.md template appended with the
-runtime paths of the PRD and progress files. After Claude exits, gralph
+runtime path of the PRD file. After Claude exits, gralph
 re-reads the PRD: if the item is gone or changed it is counted as complete and
 the loop advances to the next item, even when Claude exited non-zero. If the
 item is unchanged, gralph prints a failure line and exits with a non-zero

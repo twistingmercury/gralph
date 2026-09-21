@@ -158,7 +158,7 @@ func TestHelpFlag(t *testing.T) {
 
 // TestMissingPrompt verifies that omitting --prompt exits non-zero.
 func TestMissingPrompt(t *testing.T) {
-	result := runCLI(t, "--prd=/tmp/prd.md")
+	result := runCLI(t, "--tasks=/tmp/prd.md")
 	if result.exitCode == 0 {
 		t.Fatal("expected non-zero exit when --prompt is missing")
 	}
@@ -167,14 +167,14 @@ func TestMissingPrompt(t *testing.T) {
 	}
 }
 
-// TestMissingPrd verifies that omitting --prd exits non-zero.
+// TestMissingPrd verifies that omitting --tasks exits non-zero.
 func TestMissingPrd(t *testing.T) {
 	result := runCLI(t, "--prompt=/tmp/prompt.md")
 	if result.exitCode == 0 {
-		t.Fatal("expected non-zero exit when --prd is missing")
+		t.Fatal("expected non-zero exit when --tasks is missing")
 	}
-	if !strings.Contains(result.stderr, "--prd") {
-		t.Errorf("expected stderr to mention --prd; got: %s", result.stderr)
+	if !strings.Contains(result.stderr, "--tasks") {
+		t.Errorf("expected stderr to mention --tasks; got: %s", result.stderr)
 	}
 }
 
@@ -182,7 +182,7 @@ func TestMissingPrd(t *testing.T) {
 func TestMissingBothRequiredFlags(t *testing.T) {
 	result := runCLI(t)
 	if result.exitCode == 0 {
-		t.Fatal("expected non-zero exit when both --prompt and --prd are missing")
+		t.Fatal("expected non-zero exit when both --prompt and --tasks are missing")
 	}
 }
 
@@ -190,7 +190,7 @@ func TestMissingBothRequiredFlags(t *testing.T) {
 func TestNonexistentFiles(t *testing.T) {
 	result := runCLI(t,
 		"--prompt=/nonexistent/prompt.md",
-		"--prd=/nonexistent/prd.md",
+		"--tasks=/nonexistent/prd.md",
 	)
 	if result.exitCode == 0 {
 		t.Fatal("expected non-zero exit when referenced files do not exist")

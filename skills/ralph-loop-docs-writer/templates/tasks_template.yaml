@@ -1,0 +1,37 @@
+# Template for tasks.yaml. SKILL.md holds the field rules and task-scoping
+# guidance; this header covers only how to fill in this file.
+#
+# - Copy the task entry once per task and replace every GENERATE_* token.
+# - Leave `state` empty for new work; Gralph reads an empty state as pending.
+# - Put every instruction the agent needs inside `prompt`. Comments are not
+#   passed to the agent, so drop this header from the generated file.
+tasks:
+  - id: 1
+    name: "GENERATE_SHORT_TASK_TITLE"
+    state: ""
+    prompt: |
+      Objective:
+      GENERATE_ONE_SENTENCE_DELIVERABLE_AND_PROJECT_CONTEXT
+
+      Scope and files:
+      - GENERATE_EXACT_SOURCE_OR_SUPPORTING_PATHS_AND_ALLOWED_CHANGES
+      - GENERATE_RELEVANT_DEPENDENCIES_CONSTRAINTS_AND_NON_GOALS
+
+      Steps:
+      1. Inspect the listed files and relevant project instructions. Verify
+         any prior work against the actual workspace.
+      2. GENERATE_BOUNDED_IMPLEMENTATION_ACTIONS_FOR_THIS_DELIVERABLE
+      3. Run the verification below; record exact results and evidence.
+      4. GENERATE_REQUIRED_RESOURCE_CLEANUP_OR_EXPLICIT_NO_RESOURCES_STATEMENT
+
+      Verification:
+      - Working directory: GENERATE_ACTUAL_VERIFICATION_DIRECTORY
+      - Command: GENERATE_RUNNABLE_COMMAND_THAT_EXITS_ZERO_ON_SUCCESS
+      - Expected outcome: GENERATE_OBSERVABLE_SUCCESS_CONDITION
+
+      Completion criteria:
+      - GENERATE_CONCRETE_DELIVERED_BEHAVIOR_AND_RELEVANT_ACCEPTANCE_CHECKS
+      - Required verification succeeds and task-owned cleanup is verified.
+      - Required source-work commits follow the shared project policy.
+      - Report the task outcome. Do not edit the task file; Gralph records
+        task state.

@@ -30,7 +30,7 @@ func TestClaudeLoop_Success_MultiItem(t *testing.T) {
 		"FAKECLAUDE_ATTEMPT_LOG_FILE": attemptLog,
 	})
 
-	res := runGralph(t, 15*time.Second, []string{"--prompt=" + prompt, "--prd=" + prd}, env)
+	res := runGralph(t, 15*time.Second, []string{"--prompt=" + prompt, "--tasks=" + prd}, env)
 
 	if res.exitCode != 0 {
 		t.Fatalf("expected exit 0, got %d; stdout:\n%s\nstderr:\n%s", res.exitCode, res.stdout, res.stderr)
@@ -62,13 +62,13 @@ func TestClaudeLoop_Success_MultiItem(t *testing.T) {
 	if !strings.Contains(rec.Stdin, promptBody) {
 		t.Errorf("expected recorded stdin to contain the prompt body %q; got:\n%s", promptBody, rec.Stdin)
 	}
-	wantBlock := runtimeBlock(prd, defaultProgressPath(prd))
+	wantBlock := runtimeBlock(prd)
 	if !strings.Contains(rec.Stdin, wantBlock) {
 		t.Errorf("expected recorded stdin to contain the exact runtime paths block %q; got:\n%s", wantBlock, rec.Stdin)
 	}
 
-	if _, err := os.Stat(defaultProgressPath(prd)); err != nil {
-		t.Errorf("expected default progress file to exist: %v", err)
+	if _, err := os.Stat(filepath.Join(filepath.Dir(prd), "progress.txt")); !os.IsNotExist(err) {
+		t.Errorf("expected no progress.txt to be created next to the PRD, stat err: %v", err)
 	}
 }
 
@@ -85,7 +85,7 @@ func TestClaudeLoop_CompletedDespiteNonZeroExit(t *testing.T) {
 		"FAKECLAUDE_EXIT_CODE": "7",
 	})
 
-	res := runGralph(t, 15*time.Second, []string{"--prompt=" + prompt, "--prd=" + prd}, env)
+	res := runGralph(t, 15*time.Second, []string{"--prompt=" + prompt, "--tasks=" + prd}, env)
 
 	if res.exitCode != 0 {
 		t.Fatalf("expected exit 0 when the item changed despite a non-zero claude exit, got %d; stdout:\n%s\nstderr:\n%s", res.exitCode, res.stdout, res.stderr)
@@ -130,7 +130,7 @@ func TestClaudeLoop_FailFast_NonZeroExit(t *testing.T) {
 		"FAKECLAUDE_ATTEMPT_LOG_FILE": attemptLog,
 	})
 
-	res := runGralph(t, 15*time.Second, []string{"--prompt=" + prompt, "--prd=" + prd}, env)
+	res := runGralph(t, 15*time.Second, []string{"--prompt=" + prompt, "--tasks=" + prd}, env)
 
 	if res.exitCode == 0 {
 		t.Fatalf("expected non-zero exit for an unchanged item; stdout:\n%s\nstderr:\n%s", res.stdout, res.stderr)
@@ -180,7 +180,7 @@ func TestClaudeLoop_FailFast_ZeroExit(t *testing.T) {
 		"FAKECLAUDE_ATTEMPT_LOG_FILE": attemptLog,
 	})
 
-	res := runGralph(t, 15*time.Second, []string{"--prompt=" + prompt, "--prd=" + prd}, env)
+	res := runGralph(t, 15*time.Second, []string{"--prompt=" + prompt, "--tasks=" + prd}, env)
 
 	if res.exitCode == 0 {
 		t.Fatalf("expected non-zero exit for an unchanged item even when claude exited 0; stdout:\n%s\nstderr:\n%s", res.stdout, res.stderr)
@@ -225,7 +225,7 @@ func TestClaudeLoop_TildeItemsSkipped(t *testing.T) {
 		"FAKECLAUDE_ATTEMPT_LOG_FILE": attemptLog,
 	})
 
-	res := runGralph(t, 15*time.Second, []string{"--prompt=" + prompt, "--prd=" + prd}, env)
+	res := runGralph(t, 15*time.Second, []string{"--prompt=" + prompt, "--tasks=" + prd}, env)
 
 	if res.exitCode != 0 {
 		t.Fatalf("expected exit 0, got %d; stdout:\n%s\nstderr:\n%s", res.exitCode, res.stdout, res.stderr)
@@ -277,7 +277,7 @@ func TestClaudeMissingFromPath(t *testing.T) {
 	}
 
 	env := gralphEnvWithPath(emptyPathDir, nil)
-	res := runGralph(t, 15*time.Second, []string{"--prompt=" + prompt, "--prd=" + prd}, env)
+	res := runGralph(t, 15*time.Second, []string{"--prompt=" + prompt, "--tasks=" + prd}, env)
 
 	if res.exitCode == 0 {
 		t.Fatalf("expected non-zero exit when claude is missing from PATH; stdout:\n%s\nstderr:\n%s", res.stdout, res.stderr)
