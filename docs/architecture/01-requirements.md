@@ -55,7 +55,7 @@ Developers who want to run Ralph loops on machines without Bash, in Docker conta
 
 ### Technical Constraints
 
-- Go 1.26 is the project's Go version.
+- Go 1.27.1 is the project's Go version.
 - Standard library preferred for all file and process operations.
 - No framework abstractions (no Cobra, no command pattern) — pflag for parsing only.
 - Must compile with `CGO_ENABLED=0` for static cross-compilation.

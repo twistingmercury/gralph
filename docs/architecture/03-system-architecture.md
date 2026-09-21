@@ -46,7 +46,7 @@ graph TB
 
 | Characteristic        | Value                        |
 | --------------------- | ---------------------------- |
-| Language/Runtime      | Go 1.26, statically compiled |
+| Language/Runtime      | Go 1.27.1, statically compiled |
 | Persistence           | None                         |
 | Scaling Model         | N/A — single invocation      |
 | External Dependencies | pflag                        |
@@ -65,7 +65,7 @@ graph TB
 
 | Characteristic        | Value                                                     |
 | --------------------- | --------------------------------------------------------- |
-| Language/Runtime      | Go 1.26                                                   |
+| Language/Runtime      | Go 1.27.1                                                   |
 | Persistence           | PRD.md (read/write), progress.txt (create/append)         |
 | Scaling Model         | Single-threaded, sequential loop                          |
 | External Dependencies | None (standard library only)                              |

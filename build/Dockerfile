@@ -1,4 +1,4 @@
-FROM ghcr.io/twistingmercury/golang-tooling:alpine AS builder
+FROM ghcr.io/twistingmercury/golang-tooling:go1.27.1 AS builder
 
 ARG BUILD_VER
 ARG BUILD_DATE

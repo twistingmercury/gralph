@@ -46,7 +46,7 @@ flowchart TD
 
 ### Builder Stage
 
-The builder stage uses `ghcr.io/twistingmercury/golang-tooling:alpine`, a custom image with Go toolchain, golangci-lint, govulncheck, gosec, and goimports pre-installed. Build arguments inject version metadata:
+The builder stage uses `ghcr.io/twistingmercury/golang-tooling:go1.27.1`, a custom image with Go toolchain, golangci-lint, govulncheck, gosec, and goimports pre-installed. Build arguments inject version metadata:
 
 | Build Arg      | Source in build.sh            | Injected As              |
 | -------------- | ----------------------------- | ------------------------ |
@@ -105,7 +105,7 @@ docker compose -f tests/docker-compose.yaml up --exit-code-from tests
 
 The `docker-compose.yaml` maps to `tests/e2e/Dockerfile`, which:
 
-1. Uses `golang:1.26-alpine` (not the custom tooling image — no linters needed here).
+1. Uses `golang:1.27.1-alpine` (not the custom tooling image — no linters needed here).
 2. Copies the prebuilt `gralph` binary from `.bin/...` into `/usr/local/bin/gralph`.
 3. Copies only the e2e test module, sets `WORKDIR /workspace/tests/e2e`, and runs `go test -v ./...`.
 

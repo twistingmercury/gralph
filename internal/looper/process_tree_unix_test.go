@@ -145,7 +145,10 @@ func unixProcessIsRunning(pid int) bool {
 	}
 	stat, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
 	if err != nil {
-		return true
+		// No /proc (darwin), or the process was reaped between the signal
+		// probe and this read; probe again to tell the two apart.
+		err := syscall.Kill(pid, 0)
+		return err == nil || err == syscall.EPERM
 	}
 	closingParen := strings.LastIndexByte(string(stat), ')')
 	if closingParen == -1 {

@@ -119,7 +119,7 @@ Cross-compiling Go for multiple targets (darwin/amd64, darwin/arm64, linux/amd64
 
 **Decision:**
 
-`build/Dockerfile` uses a builder stage (`ghcr.io/twistingmercury/golang-tooling:alpine`) that includes all required tools. It verifies modules with `go mod verify`, runs linters, scanners, and `go test ./...` before compiling, and exports binaries from a `scratch` stage. `build/build.sh` invokes `docker build --target export --output .bin`, then runs the Docker-based e2e suite.
+`build/Dockerfile` uses a builder stage (`ghcr.io/twistingmercury/golang-tooling:go1.27.1`) that includes all required tools. It verifies modules with `go mod verify`, runs linters, scanners, and `go test ./...` before compiling, and exports binaries from a `scratch` stage. `build/build.sh` invokes `docker build --target export --output .bin`, then runs the Docker-based e2e suite.
 
 **Consequences:**
 
