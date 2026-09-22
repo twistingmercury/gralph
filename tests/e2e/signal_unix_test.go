@@ -1,5 +1,3 @@
-//go:build darwin || linux
-
 package e2e
 
 import (
@@ -11,35 +9,43 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-// TestClaudeLoop_SIGINT_TerminatesDescendantAndLeavesPRDUntouched sends
-// SIGINT to a blocked gralph run and verifies cancellation is honored: a
-// non-zero exit, the PRD untouched, and the claude child's own descendant
+// TestLoop_SIGINT_KillsProcessTree sends SIGINT to a blocked gralph run and
+// verifies cancellation is honored: a non-zero exit, tasks.yaml untouched,
+// the second task never started, and the claude child's own descendant
 // process gone (proving the whole process group was killed, not just the
 // direct child).
-func TestClaudeLoop_SIGINT_TerminatesDescendantAndLeavesPRDUntouched(t *testing.T) {
-	testClaudeLoopSignal(t, os.Interrupt)
+func TestLoop_SIGINT_KillsProcessTree(t *testing.T) {
+	testLoopSignal(t, os.Interrupt)
 }
 
-// TestClaudeLoop_SIGTERM_TerminatesDescendantAndLeavesPRDUntouched is the
-// SIGTERM counterpart of TestClaudeLoop_SIGINT_TerminatesDescendantAndLeavesPRDUntouched.
-func TestClaudeLoop_SIGTERM_TerminatesDescendantAndLeavesPRDUntouched(t *testing.T) {
-	testClaudeLoopSignal(t, syscall.SIGTERM)
+// TestLoop_SIGTERM_KillsProcessTree is the SIGTERM counterpart of
+// TestLoop_SIGINT_KillsProcessTree.
+func TestLoop_SIGTERM_KillsProcessTree(t *testing.T) {
+	testLoopSignal(t, syscall.SIGTERM)
 }
 
-func testClaudeLoopSignal(t *testing.T, sig os.Signal) {
+func testLoopSignal(t *testing.T, sig os.Signal) {
 	t.Helper()
 
 	dir := t.TempDir()
 
-	prd := writePRD(t, dir, "- [ ] Only item: block forever")
-	prompt := writePrompt(t, dir, "Body.\n")
+	promptPath := writePrompt(t, dir, "Body.\n")
+	tasksPath := writeTasksYAML(t, dir, `tasks:
+  - id: 1
+    name: First task
+    prompt: Block forever.
+  - id: 2
+    name: Second task
+    prompt: Should never start.
+`)
 
-	original, err := os.ReadFile(prd)
-	if err != nil {
-		t.Fatalf("read PRD fixture: %v", err)
-	}
+	original, err := os.ReadFile(tasksPath)
+	require.NoError(t, err)
 
 	readyFile := filepath.Join(dir, "ready")
 	descendantPIDFile := filepath.Join(dir, "descendant.pid")
@@ -53,29 +59,23 @@ func testClaudeLoopSignal(t *testing.T, sig os.Signal) {
 	// Generous safety-net timeout: if the signal never terminates gralph
 	// (a real bug, not expected flakiness), the process is still killed and
 	// the test still fails via waitExit rather than hanging the suite.
-	gp := startGralph(t, 30*time.Second, []string{"--prompt=" + prompt, "--prd=" + prd}, env)
+	gp := startGralph(t, 30*time.Second, []string{"--prompt=" + promptPath, "--tasks=" + tasksPath}, env)
 
 	// Wait for the fake claude fixture to spawn its descendant and signal
 	// it's set up and blocking before sending the signal.
 	waitForFile(t, readyFile, 10*time.Second)
 	descendantPID := readPIDFile(t, descendantPIDFile, 5*time.Second)
 
-	if err := gp.cmd.Process.Signal(sig); err != nil {
-		t.Fatalf("send signal to gralph: %v", err)
-	}
+	require.NoError(t, gp.cmd.Process.Signal(sig), "send signal to gralph")
 
 	exitCode := gp.waitExit(t, 10*time.Second)
-	if exitCode == 0 {
-		t.Errorf("expected non-zero exit after cancellation, got 0")
-	}
+	assert.NotEqual(t, 0, exitCode, "expected non-zero exit after cancellation")
 
-	after, err := os.ReadFile(prd)
-	if err != nil {
-		t.Fatalf("read PRD after run: %v", err)
-	}
-	if string(after) != string(original) {
-		t.Errorf("expected PRD to be byte-for-byte unchanged after cancellation\nbefore:\n%s\nafter:\n%s", string(original), string(after))
-	}
+	after, err := os.ReadFile(tasksPath)
+	require.NoError(t, err)
+	assert.Equal(t, string(original), string(after), "expected tasks.yaml to be byte-for-byte unchanged after cancellation")
+
+	assert.NotContains(t, gp.stdout.String(), "Should never start.", "expected the second task's prompt never to be printed")
 
 	waitProcessGone(t, descendantPID, 10*time.Second)
 }
@@ -91,7 +91,7 @@ func waitProcessGone(t *testing.T, pid int, timeout time.Duration) {
 			return
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("descendant process %d is still alive after %v", pid, timeout)
+			require.FailNow(t, fmt.Sprintf("descendant process %d is still alive after %v", pid, timeout))
 		}
 		time.Sleep(50 * time.Millisecond)
 	}

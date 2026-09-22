@@ -8,266 +8,91 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/twistingmercury/gralph/internal/tasks"
 )
 
-// commandRunner is a function that executes claude with the given stdin text.
-type commandRunner func(ctx context.Context, stdin string) error
-
-// ErrCycleFailed indicates that the first open PRD item was unchanged after a
-// single claude invocation. The cycle fails fast: the PRD is left untouched
-// and no further attempts are made for that item.
-var ErrCycleFailed = errors.New("cycle failed")
-
-func defaultClaudeRunner(ctx context.Context, stdin string) error {
-	hideCursor()
-	defer showCursor()
-
-	cmd := exec.CommandContext(ctx, "claude", "--print", "--dangerously-skip-permissions") // #nosec G204 -- command name is a literal, not user-controlled
-	configureProcessTree(cmd)
-	cmd.Stdin = strings.NewReader(stdin)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
-}
-
-func hideCursor() {
-	if !isTerminal(os.Stdout) {
-		return
-	}
-	_, _ = os.Stdout.WriteString("\x1b[?25l")
-}
-
-func showCursor() {
-	if !isTerminal(os.Stdout) {
-		return
-	}
-	_, _ = os.Stdout.WriteString("\x1b[?25h")
-}
-
-func isTerminal(f *os.File) bool {
-	info, err := f.Stat()
+func Start(ctx context.Context, promptFile, tasksFile string) error {
+	prompt, err := getPrompt(promptFile)
 	if err != nil {
-		return false
-	}
-	return (info.Mode() & os.ModeCharDevice) != 0
-}
-
-func Start(ctx context.Context, prompt, prd, progressFile string) error {
-	if _, err := os.Stat(prompt); err != nil {
-		return fmt.Errorf("prompt file %q is not accessible: %w", prompt, err)
-	}
-	if _, err := os.Stat(prd); err != nil {
-		return fmt.Errorf("PRD file %q is not accessible: %w", prd, err)
+		return fmt.Errorf("failed to start loop runner: %s", err)
 	}
 
-	if progressFile == "" {
-		progressFile = filepath.Join(filepath.Dir(prd), "progress.txt")
+	tasklist, err := getTasks(tasksFile)
+	if err != nil {
+		return fmt.Errorf("failed to start loop runner: %s", err)
 	}
 
-	if err := ensureProgressFileExists(progressFile); err != nil {
-		return err
-	}
-
-	if err := runLoop(ctx, prompt, prd, progressFile, defaultClaudeRunner); err != nil {
+	if err := runLoop(ctx, prompt, tasklist); err != nil {
 		return fmt.Errorf("loop error: %w", err)
 	}
 
 	return nil
 }
 
-func ensureProgressFileExists(path string) error {
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY, 0o600) // #nosec G304 -- path is CLI-provided or derived from validated PRD path
+func getTasks(path string) (*tasks.TaskList, error) {
+	if _, err := os.Stat(path); err != nil {
+		return nil, fmt.Errorf("tasks file %q is not accessible: %w", path, err)
+	}
+
+	bytes, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
-		return fmt.Errorf("could not open progress file %q: %w", path, err)
-	}
-	return f.Close()
-}
-
-// ITERATIONS-DISABLED: runLoop took `maxAttempts int` after `progress` and
-// Start passed the value from the removed --iterations flag. Restore the
-// parameter alongside the bookkeeping and retry/abandon blocks below.
-func runLoop(ctx context.Context, prompt, prd, progress string, runner commandRunner) error {
-	fmt.Printf("[gralph] start\n")
-
-	// ITERATIONS-DISABLED: per-item attempt bookkeeping.
-	// currentItem := ""
-	// attempt := 0
-
-	for {
-		item, err := getFirstOpenItem(prd)
-		if err != nil {
-			return fmt.Errorf("could not read PRD: %w", err)
-		}
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-
-		if item == "" {
-			fmt.Printf("[gralph] done\n")
-			return nil
-		}
-
-		// ITERATIONS-DISABLED: attempt counting; the code below then used
-		// currentItem in place of item, and the log line below included
-		// "%d/%d" fed by attempt, maxAttempts.
-		// if item != currentItem {
-		// 	currentItem = item
-		// 	attempt = 1
-		// } else {
-		// 	attempt++
-		// }
-
-		label := itemLabel(item)
-		fmt.Printf("[gralph] attempt item=%q\n", label)
-		fmt.Printf("[gralph] claude_output_begin item=%q\n", label)
-
-		invokeErr := invokeClaude(ctx, prompt, prd, progress, runner)
-		if invokeErr != nil {
-			fmt.Printf("[gralph] claude_output_end item=%q status=error\n", label)
-			fmt.Printf("[gralph] invoke_failed item=%q err=%v\n", label, invokeErr)
-		} else {
-			fmt.Printf("[gralph] claude_output_end item=%q status=ok\n", label)
-		}
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-
-		fmt.Printf("[gralph] check item=%q\n", label)
-
-		itemAfter, err := getFirstOpenItem(prd)
-		if err != nil {
-			return fmt.Errorf("could not read PRD after invocation: %w", err)
-		}
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-
-		if itemAfter != item {
-			fmt.Printf("[gralph] completed item=%q\n", label)
-			// ITERATIONS-DISABLED: reset bookkeeping for the next item.
-			// currentItem = ""
-			// attempt = 0
-			continue
-		}
-
-		// ITERATIONS-DISABLED: the failure handling below ran only when
-		// `attempt >= maxAttempts`, then abandoned the item and continued
-		// instead of returning ErrCycleFailed:
-		// 	if attempt >= maxAttempts {
-		// 		fmt.Printf("[gralph] abandoned item=%q\n", label)
-		// 		if _, err := abandonFirstOpenItem(prd); err != nil {
-		// 			return fmt.Errorf("could not abandon item: %w", err)
-		// 		}
-		// 		currentItem = ""
-		// 		attempt = 0
-		// 		continue
-		// 	}
-		// Below the limit, the item was retried:
-		// 	fmt.Printf("[gralph] retry item=%q next_attempt=%d/%d\n", label, attempt+1, maxAttempts)
-
-		// Fail fast: the first open item is unchanged after exactly one
-		// claude invocation, regardless of exit code. No retry, no PRD
-		// rewrite; the PRD is left untouched so the run can be resumed.
-		fmt.Printf("[gralph] failed item=%q\n", label)
-		if invokeErr != nil {
-			return fmt.Errorf("%w: %s: %w", ErrCycleFailed, label, invokeErr)
-		}
-		return fmt.Errorf("%w: %s", ErrCycleFailed, label)
-	}
-}
-
-func itemLabel(item string) string {
-	label := strings.TrimSpace(item)
-	for _, prefix := range []string{"- [ ]", "- [x]", "- [~]"} {
-		if strings.HasPrefix(label, prefix) {
-			label = strings.TrimSpace(strings.TrimPrefix(label, prefix))
-			break
-		}
+		return nil, fmt.Errorf("yaml tasks file could not be read: %w", err)
 	}
 
-	if idx := strings.Index(label, ":"); idx >= 0 {
-		label = label[:idx]
-	}
-
-	label = strings.TrimSpace(label)
-	label = strings.Trim(label, "*` ")
-	label = strings.ReplaceAll(label, "**", "")
-	label = strings.ReplaceAll(label, "`", "")
-	label = strings.Join(strings.Fields(label), " ")
-
-	if label == "" {
-		return "unnamed item"
-	}
-
-	return label
-}
-
-func invokeClaude(ctx context.Context, prompt, prd, progress string, runner commandRunner) error {
-	data, err := os.ReadFile(prompt) // #nosec G304 -- path is CLI-provided or derived from validated PRD path
+	taskList, err := tasks.ParseTasks(bytes)
 	if err != nil {
-		return fmt.Errorf("could not read prompt file %q: %w", prompt, err)
+		return nil, fmt.Errorf("failed to parse tasks yaml: %w", err)
 	}
-	combined := string(data) + fmt.Sprintf("\n## Runtime paths\n- PRD: %s\n- Progress: %s\n", prd, progress)
-	return runner(ctx, combined)
+
+	return &taskList, nil
 }
 
-func getFirstOpenItem(prdPath string) (string, error) {
-	data, err := os.ReadFile(prdPath) // #nosec G304 -- path is CLI-provided or derived from validated PRD path
-	if err != nil {
-		return "", fmt.Errorf("could not read PRD file %q: %w", prdPath, err)
+func getPrompt(path string) (string, error) {
+	if _, err := os.Stat(path); err != nil {
+		return "", fmt.Errorf("prompt file %q is not accessible: %w", path, err)
 	}
-	for _, line := range strings.Split(string(data), "\n") {
-		if strings.HasPrefix(line, "- [ ]") {
-			return line, nil
+
+	bytes, err := os.ReadFile(filepath.Clean(path))
+	if err != nil {
+		return "", fmt.Errorf("the prompt file could not be read: %w", err)
+	}
+
+	if len(bytes) == 0 {
+		return "", errors.New("the prompt file is empty")
+	}
+
+	prompt := strings.TrimSpace(string(bytes))
+
+	if prompt == "" {
+		return "", errors.New("the prompt file is just whitespace")
+	}
+
+	return string(prompt), nil
+
+}
+
+func runLoop(ctx context.Context, p string, tl *tasks.TaskList) error {
+	const claude = "claude"
+	const print = "--print"
+	const skipPermissions = "--dangerously-skip-permissions"
+
+	for _, task := range tl.Tasks {
+		// formatting it to make it easier to read by a human
+		prompt := fmt.Sprintf("%s\n\n%s\n", p, task.String())
+
+		fmt.Println(prompt)
+
+		cmd := exec.CommandContext(ctx, claude, print, skipPermissions)
+		configureProcessTree(cmd)
+		cmd.Stdin = strings.NewReader(prompt)
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("task %d: %s failed: %w", task.ID, task.Name, err)
 		}
 	}
-	return "", nil
-}
 
-// ITERATIONS-DISABLED: abandonFirstOpenItem rewrote the first open item to
-// "- [~]" once maxAttempts was reached; the loop now fails fast instead of
-// retrying, so nothing calls this anymore. Restore alongside maxAttempts and
-// the retry bookkeeping in runLoop.
-//
-// func abandonFirstOpenItem(prdPath string) (string, error) {
-// 	data, err := os.ReadFile(prdPath) // #nosec G304 -- path is CLI-provided or derived from validated PRD path
-// 	if err != nil {
-// 		return "", fmt.Errorf("could not read PRD file %q: %w", prdPath, err)
-// 	}
-//
-// 	lines := strings.Split(string(data), "\n")
-// 	abandoned := ""
-// 	for i, line := range lines {
-// 		if strings.HasPrefix(line, "- [ ]") {
-// 			abandoned = line
-// 			lines[i] = "- [~]" + line[len("- [ ]"):]
-// 			break
-// 		}
-// 	}
-// 	if abandoned == "" {
-// 		return "", nil
-// 	}
-//
-// 	updated := strings.Join(lines, "\n")
-// 	dir := filepath.Dir(prdPath)
-// 	tmp, err := os.CreateTemp(dir, "prd-*.tmp") // #nosec G306 -- temp file replaced by rename; PRD files are not secret
-// 	if err != nil {
-// 		return "", fmt.Errorf("could not create temp file for PRD update: %w", err)
-// 	}
-// 	tmpName := tmp.Name()
-// 	if _, err := tmp.WriteString(updated); err != nil {
-// 		_ = tmp.Close()
-// 		_ = os.Remove(tmpName) // #nosec G703 -- tmpName is system-generated by os.CreateTemp
-// 		return "", fmt.Errorf("could not write temp PRD file: %w", err)
-// 	}
-// 	if err := tmp.Close(); err != nil {
-// 		_ = os.Remove(tmpName) // #nosec G703 -- tmpName is system-generated by os.CreateTemp
-// 		return "", fmt.Errorf("could not close temp PRD file: %w", err)
-// 	}
-// 	if err := os.Rename(tmpName, prdPath); err != nil { // #nosec G703 -- tmpName is system-generated by os.CreateTemp
-// 		_ = os.Remove(tmpName) // #nosec G703 -- tmpName is system-generated by os.CreateTemp
-// 		return "", fmt.Errorf("could not replace PRD file: %w", err)
-// 	}
-//
-// 	return abandoned, nil
-// }
+	return nil
+}

@@ -4,547 +4,406 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/twistingmercury/gralph/internal/tasks"
 )
 
-func TestStart_MissingPrompt(t *testing.T) {
-	dir := t.TempDir()
-	prd := filepath.Join(dir, "prd.md")
-	if err := os.WriteFile(prd, []byte("# PRD\n"), 0o644); err != nil {
-		t.Fatal(err)
+// recordSeparator must match the constant of the same name in
+// testdata/fakeclaude/main.go.
+const recordSeparator = "\x00---FAKE-CLAUDE-RECORD-SEPARATOR---\x00"
+
+const validTasksYAML = `tasks:
+  - id: 1
+    name: First task
+    prompt: Do the first thing.
+  - id: 2
+    name: Second task
+    prompt: Do the second thing.
+`
+
+// fakeClaudeDir holds the directory containing the compiled fake claude
+// binary for the lifetime of the test binary; it is built once in TestMain
+// rather than per test.
+var fakeClaudeDir string
+
+// TestMain builds the fake claude fixture (testdata/fakeclaude) once before
+// running any test in this package, then cleans it up afterward. Individual
+// tests opt into using it via useFakeClaude.
+func TestMain(m *testing.M) {
+	dir, err := os.MkdirTemp("", "gralph-fakeclaude-")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "fakeclaude: create temp dir:", err)
+		os.Exit(1)
 	}
 
-	err := Start(context.Background(), filepath.Join(dir, "missing.md"), prd, "")
-	if err == nil {
-		t.Fatal("expected error for missing prompt file, got nil")
+	claudeName := "claude"
+
+	buildCmd := exec.Command("go", "build", "-o", filepath.Join(dir, claudeName), "./testdata/fakeclaude")
+	buildCmd.Stdout = os.Stderr
+	buildCmd.Stderr = os.Stderr
+	if err := buildCmd.Run(); err != nil {
+		fmt.Fprintln(os.Stderr, "fakeclaude: build failed:", err)
+		_ = os.RemoveAll(dir)
+		os.Exit(1)
 	}
+
+	fakeClaudeDir = dir
+	code := m.Run()
+	_ = os.RemoveAll(dir)
+	os.Exit(code)
 }
 
-func TestStart_MissingPRD(t *testing.T) {
-	dir := t.TempDir()
-	prompt := filepath.Join(dir, "prompt.md")
-	if err := os.WriteFile(prompt, []byte("# Prompt\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	err := Start(context.Background(), prompt, filepath.Join(dir, "missing.md"), "")
-	if err == nil {
-		t.Fatal("expected error for missing PRD file, got nil")
-	}
+// useFakeClaude prepends the directory holding the fake claude binary to
+// PATH for the duration of the calling test. It uses t.Setenv, so the
+// calling test must not call t.Parallel().
+func useFakeClaude(t *testing.T) {
+	t.Helper()
+	t.Setenv("PATH", fakeClaudeDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
-func TestStart_DerivedProgressPath(t *testing.T) {
-	dir := t.TempDir()
-	prompt := filepath.Join(dir, "prompt.md")
-	prd := filepath.Join(dir, "PRD.md")
-	if err := os.WriteFile(prompt, []byte("# Prompt\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(prd, []byte("# PRD\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+// readFakeClaudeRecords recovers the exact stdin of every fake claude
+// invocation, in call order. A missing or empty record file means claude was
+// never invoked.
+func readFakeClaudeRecords(t *testing.T, path string) []string {
+	t.Helper()
 
-	// PRD has no open items, so runLoop returns nil immediately.
-	// What matters is that file validation passed and progress.txt was
-	// created/appended in the PRD directory.
-	if err := Start(context.Background(), prompt, prd, ""); err != nil {
-		t.Fatalf("unexpected error from Start: %v", err)
-	}
-
-	derived := filepath.Join(dir, "progress.txt")
-	if _, err := os.Stat(derived); err != nil {
-		t.Fatalf("expected progress file at %s to exist, got: %v", derived, err)
-	}
-}
-
-func TestStart_ExplicitProgressPath(t *testing.T) {
-	dir := t.TempDir()
-	prompt := filepath.Join(dir, "prompt.md")
-	prd := filepath.Join(dir, "PRD.md")
-	explicit := filepath.Join(dir, "custom_progress.txt")
-	if err := os.WriteFile(prompt, []byte("# Prompt\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(prd, []byte("# PRD\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := Start(context.Background(), prompt, prd, explicit); err != nil {
-		t.Fatalf("unexpected error from Start: %v", err)
-	}
-
-	if _, err := os.Stat(explicit); err != nil {
-		t.Fatalf("expected explicit progress file at %s to exist, got: %v", explicit, err)
-	}
-}
-
-func TestInvokeClaude(t *testing.T) {
-	t.Run("returns nil on zero exit", func(t *testing.T) {
-		dir := t.TempDir()
-		promptPath := filepath.Join(dir, "prompt.md")
-		if err := os.WriteFile(promptPath, []byte("# Prompt\n"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-
-		stubRunner := func(_ context.Context, _ string) error { return nil }
-
-		if err := invokeClaude(context.Background(), promptPath, "prd.md", "progress.txt", stubRunner); err != nil {
-			t.Fatalf("expected nil error, got: %v", err)
-		}
-	})
-
-	t.Run("returns error on nonzero exit", func(t *testing.T) {
-		dir := t.TempDir()
-		promptPath := filepath.Join(dir, "prompt.md")
-		if err := os.WriteFile(promptPath, []byte("# Prompt\n"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-
-		stubRunner := func(_ context.Context, _ string) error { return errors.New("exit status 1") }
-
-		if err := invokeClaude(context.Background(), promptPath, "prd.md", "progress.txt", stubRunner); err == nil {
-			t.Fatal("expected error, got nil")
-		}
-	})
-
-	t.Run("passes combined prompt to runner", func(t *testing.T) {
-		dir := t.TempDir()
-		promptPath := filepath.Join(dir, "prompt.md")
-		promptContent := "# My Prompt\n"
-		if err := os.WriteFile(promptPath, []byte(promptContent), 0o644); err != nil {
-			t.Fatal(err)
-		}
-
-		prdPath := "/path/to/PRD.md"
-		progressPath := "/path/to/progress.txt"
-
-		var capturedStdin string
-		stubRunner := func(_ context.Context, stdin string) error {
-			capturedStdin = stdin
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
 			return nil
 		}
-
-		if err := invokeClaude(context.Background(), promptPath, prdPath, progressPath, stubRunner); err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-
-		if !strings.Contains(capturedStdin, promptContent) {
-			t.Errorf("expected stdin to contain prompt content, got: %q", capturedStdin)
-		}
-		if !strings.Contains(capturedStdin, "## Runtime paths") {
-			t.Errorf("expected stdin to contain runtime paths header, got: %q", capturedStdin)
-		}
-		if !strings.Contains(capturedStdin, "- PRD: "+prdPath) {
-			t.Errorf("expected stdin to contain PRD path, got: %q", capturedStdin)
-		}
-		if !strings.Contains(capturedStdin, "- Progress: "+progressPath) {
-			t.Errorf("expected stdin to contain Progress path, got: %q", capturedStdin)
-		}
-	})
-
-	t.Run("returns error for missing prompt file", func(t *testing.T) {
-		dir := t.TempDir()
-		called := false
-
-		stubRunner := func(_ context.Context, _ string) error {
-			called = true
-			return nil
-		}
-
-		err := invokeClaude(context.Background(), filepath.Join(dir, "missing.md"), "prd.md", "progress.txt", stubRunner)
-		if err == nil {
-			t.Fatal("expected error for missing prompt file, got nil")
-		}
-		if called {
-			t.Error("expected runner not to be called when prompt file is missing")
-		}
-	})
-}
-
-func TestRunLoop_NoOpenItems(t *testing.T) {
-	dir := t.TempDir()
-	promptPath := filepath.Join(dir, "prompt.md")
-	prdPath := filepath.Join(dir, "prd.md")
-	progressPath := filepath.Join(dir, "progress.txt")
-
-	if err := os.WriteFile(promptPath, []byte("# Prompt\n"), 0o644); err != nil {
-		t.Fatal(err)
+		require.NoError(t, err)
 	}
-	if err := os.WriteFile(prdPath, []byte("# PRD\n\n- [x] Done\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	called := false
-	stubRunner := func(_ context.Context, _ string) error {
-		called = true
+	if len(data) == 0 {
 		return nil
 	}
 
-	if err := runLoop(context.Background(), promptPath, prdPath, progressPath, stubRunner); err != nil {
-		t.Fatalf("expected nil, got: %v", err)
+	parts := strings.Split(string(data), recordSeparator)
+	require.NotEmpty(t, parts)
+	return parts[:len(parts)-1]
+}
+
+func writePromptFile(t *testing.T, dir, content string) string {
+	t.Helper()
+	path := filepath.Join(dir, "prompt.md")
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+	return path
+}
+
+func writeTasksFile(t *testing.T, dir, content string) string {
+	t.Helper()
+	path := filepath.Join(dir, "tasks.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+	return path
+}
+
+func TestStart_MissingPromptFile(t *testing.T) {
+	dir := t.TempDir()
+	tasksPath := writeTasksFile(t, dir, validTasksYAML)
+
+	err := Start(context.Background(), filepath.Join(dir, "missing.md"), tasksPath)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "failed to start loop runner")
+	assert.ErrorContains(t, err, "prompt file")
+}
+
+func TestStart_MissingTasksFile(t *testing.T) {
+	dir := t.TempDir()
+	promptPath := writePromptFile(t, dir, "Do the task.\n")
+
+	err := Start(context.Background(), promptPath, filepath.Join(dir, "missing.yaml"))
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "failed to start loop runner")
+	assert.ErrorContains(t, err, "tasks file")
+}
+
+func TestStart_EmptyPrompt(t *testing.T) {
+	dir := t.TempDir()
+	promptPath := writePromptFile(t, dir, "")
+	tasksPath := writeTasksFile(t, dir, validTasksYAML)
+
+	err := Start(context.Background(), promptPath, tasksPath)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "the prompt file is empty")
+}
+
+func TestStart_WhitespaceOnlyPrompt(t *testing.T) {
+	dir := t.TempDir()
+	promptPath := writePromptFile(t, dir, "  \t\n  ")
+	tasksPath := writeTasksFile(t, dir, validTasksYAML)
+
+	err := Start(context.Background(), promptPath, tasksPath)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "the prompt file is just whitespace")
+}
+
+func TestStart_InvalidTasksYAML(t *testing.T) {
+	dir := t.TempDir()
+	promptPath := writePromptFile(t, dir, "Do the task.\n")
+	tasksPath := writeTasksFile(t, dir, "tasks:\n  - {id: 1, name: a, prompt: p, state: bogus}\n")
+
+	err := Start(context.Background(), promptPath, tasksPath)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "failed to parse tasks yaml")
+}
+
+// TestStart_LoadFailuresBreakTheErrorChain pins that Start wraps getPrompt
+// and getTasks failures with %s, not %w: the underlying sentinel is not
+// reachable via errors.Is/As through Start. This documents the current
+// behavior rather than asserting it as a desired design; production code is
+// not changed to fix it.
+func TestStart_LoadFailuresBreakTheErrorChain(t *testing.T) {
+	dir := t.TempDir()
+	tasksPath := writeTasksFile(t, dir, validTasksYAML)
+
+	err := Start(context.Background(), filepath.Join(dir, "missing.md"), tasksPath)
+	require.Error(t, err)
+	assert.False(t, errors.Is(err, os.ErrNotExist), "expected %%s wrapping in Start to break the error chain")
+}
+
+func TestStart_RunLoopFailureIsWrappedWithLoopErrorPrefix(t *testing.T) {
+	dir := t.TempDir() // empty directory: no claude binary anywhere on PATH
+	t.Setenv("PATH", dir)
+
+	promptPath := writePromptFile(t, dir, "Do the task.\n")
+	tasksPath := writeTasksFile(t, dir, validTasksYAML)
+
+	err := Start(context.Background(), promptPath, tasksPath)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "loop error")
+	assert.ErrorContains(t, err, "task 1: First task failed")
+}
+
+func TestStart_Success(t *testing.T) {
+	useFakeClaude(t)
+	dir := t.TempDir()
+	promptPath := writePromptFile(t, dir, "Follow the plan.\n")
+	tasksPath := writeTasksFile(t, dir, validTasksYAML)
+
+	recordPath := filepath.Join(dir, "record.log")
+	t.Setenv("FAKE_CLAUDE_RECORD", recordPath)
+
+	err := Start(context.Background(), promptPath, tasksPath)
+	require.NoError(t, err)
+
+	records := readFakeClaudeRecords(t, recordPath)
+	assert.Len(t, records, 2, "expected claude invoked once per task")
+}
+
+func TestGetPrompt_MissingFile(t *testing.T) {
+	dir := t.TempDir()
+
+	_, err := getPrompt(filepath.Join(dir, "missing.md"))
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "prompt file")
+	assert.ErrorContains(t, err, "not accessible")
+}
+
+func TestGetPrompt_ReadError(t *testing.T) {
+	// A directory exists (Stat succeeds) but cannot be read as a file.
+	dir := t.TempDir()
+
+	_, err := getPrompt(dir)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "could not be read")
+}
+
+func TestGetPrompt_Empty(t *testing.T) {
+	dir := t.TempDir()
+	path := writePromptFile(t, dir, "")
+
+	_, err := getPrompt(path)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "the prompt file is empty")
+}
+
+func TestGetPrompt_WhitespaceOnly(t *testing.T) {
+	dir := t.TempDir()
+	path := writePromptFile(t, dir, " \t\n ")
+
+	_, err := getPrompt(path)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "the prompt file is just whitespace")
+}
+
+func TestGetPrompt_Success(t *testing.T) {
+	dir := t.TempDir()
+	path := writePromptFile(t, dir, "  Follow the plan.  \n")
+
+	got, err := getPrompt(path)
+	require.NoError(t, err)
+	assert.Equal(t, "Follow the plan.", got)
+}
+
+func TestGetTasks_MissingFile(t *testing.T) {
+	dir := t.TempDir()
+
+	_, err := getTasks(filepath.Join(dir, "missing.yaml"))
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "tasks file")
+	assert.ErrorContains(t, err, "not accessible")
+}
+
+func TestGetTasks_ReadError(t *testing.T) {
+	dir := t.TempDir()
+
+	_, err := getTasks(dir)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "could not be read")
+}
+
+func TestGetTasks_InvalidYAML(t *testing.T) {
+	dir := t.TempDir()
+	path := writeTasksFile(t, dir, "tasks:\n  - {id: 1, name: a, prompt: p, state: bogus}\n")
+
+	_, err := getTasks(path)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "failed to parse tasks yaml")
+}
+
+func TestGetTasks_Success(t *testing.T) {
+	dir := t.TempDir()
+	path := writeTasksFile(t, dir, validTasksYAML)
+
+	got, err := getTasks(path)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+
+	ids := make([]int16, 0, len(got.Tasks))
+	for _, task := range got.Tasks {
+		ids = append(ids, task.ID)
 	}
-	if called {
-		t.Error("expected claudeRunner not to be called when no open items")
+	assert.Equal(t, []int16{1, 2}, ids)
+}
+
+func TestRunLoop_HappyPathInvokesInOrderWithExactStdin(t *testing.T) {
+	useFakeClaude(t)
+	dir := t.TempDir()
+	recordPath := filepath.Join(dir, "record.log")
+	t.Setenv("FAKE_CLAUDE_RECORD", recordPath)
+
+	p := "Follow the runbook."
+	tl := &tasks.TaskList{Tasks: []tasks.Task{
+		{ID: 1, Name: "First", Prompt: "Do the first thing."},
+		{ID: 2, Name: "Second", Prompt: "Do the second thing."},
+		{ID: 3, Name: "Third", Prompt: "Do the third thing."},
+	}}
+
+	err := runLoop(context.Background(), p, tl)
+	require.NoError(t, err)
+
+	records := readFakeClaudeRecords(t, recordPath)
+	require.Len(t, records, 3)
+	for i, task := range tl.Tasks {
+		want := fmt.Sprintf("%s\n\n%s\n", p, task.String())
+		assert.Equal(t, want, records[i], "stdin for task %d must match the wire contract exactly", task.ID)
 	}
 }
 
-func TestRunLoop_LogsHumanReadableItemLabels(t *testing.T) {
+func TestRunLoop_NonZeroExitStopsAtFirstTask(t *testing.T) {
+	useFakeClaude(t)
 	dir := t.TempDir()
-	promptPath := filepath.Join(dir, "prompt.md")
-	prdPath := filepath.Join(dir, "prd.md")
-	progressPath := filepath.Join(dir, "progress.txt")
+	recordPath := filepath.Join(dir, "record.log")
+	t.Setenv("FAKE_CLAUDE_RECORD", recordPath)
+	t.Setenv("FAKE_CLAUDE_EXIT", "1")
 
-	if err := os.WriteFile(promptPath, []byte("# Prompt\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(prdPath, []byte("# PRD\n\n- [ ] **Cycle 1 - Add GetByIDs to pattern repository**: long details here\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	tl := &tasks.TaskList{Tasks: []tasks.Task{
+		{ID: 1, Name: "First", Prompt: "p1"},
+		{ID: 2, Name: "Second", Prompt: "p2"},
+	}}
 
-	stubRunner := func(_ context.Context, _ string) error {
-		return os.WriteFile(prdPath, []byte("# PRD\n\n- [x] **Cycle 1 - Add GetByIDs to pattern repository**: long details here\n"), 0o644) // #nosec G304
-	}
+	err := runLoop(context.Background(), "prompt", tl)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "task 1: First failed")
+
+	var exitErr *exec.ExitError
+	assert.ErrorAs(t, err, &exitErr)
+
+	records := readFakeClaudeRecords(t, recordPath)
+	assert.Len(t, records, 1, "expected the second task never to run")
+}
+
+func TestRunLoop_ClaudeMissingFromPath(t *testing.T) {
+	dir := t.TempDir() // empty directory: no claude binary anywhere on PATH
+	t.Setenv("PATH", dir)
+
+	tl := &tasks.TaskList{Tasks: []tasks.Task{{ID: 1, Name: "Only", Prompt: "p"}}}
+
+	err := runLoop(context.Background(), "prompt", tl)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "task")
+	assert.ErrorContains(t, err, "failed")
+	assert.ErrorIs(t, err, exec.ErrNotFound)
+}
+
+func TestRunLoop_ContextAlreadyCancelled(t *testing.T) {
+	useFakeClaude(t)
+	dir := t.TempDir()
+	recordPath := filepath.Join(dir, "record.log")
+	t.Setenv("FAKE_CLAUDE_RECORD", recordPath)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	tl := &tasks.TaskList{Tasks: []tasks.Task{{ID: 1, Name: "Only", Prompt: "p"}}}
+
+	err := runLoop(ctx, "prompt", tl)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, context.Canceled)
+
+	records := readFakeClaudeRecords(t, recordPath)
+	assert.Empty(t, records, "expected claude never to be invoked")
+}
+
+func TestRunLoop_PrintsPromptToStdout(t *testing.T) {
+	useFakeClaude(t)
+	dir := t.TempDir()
+	t.Setenv("FAKE_CLAUDE_RECORD", filepath.Join(dir, "record.log"))
+
+	tl := &tasks.TaskList{Tasks: []tasks.Task{
+		{ID: 1, Name: "First", Prompt: "Do the first thing."},
+		{ID: 2, Name: "Second", Prompt: "Do the second thing."},
+	}}
 
 	origStdout := os.Stdout
 	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	os.Stdout = w
 
-	runErr := runLoop(context.Background(), promptPath, prdPath, progressPath, stubRunner)
+	runErr := runLoop(context.Background(), "Follow the runbook.", tl)
 
-	if err := w.Close(); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, w.Close())
 	os.Stdout = origStdout
+	require.NoError(t, runErr)
 
 	var buf bytes.Buffer
-	if _, err := buf.ReadFrom(r); err != nil {
-		t.Fatal(err)
-	}
-
-	if runErr != nil {
-		t.Fatalf("expected nil, got: %v", runErr)
-	}
+	_, err = buf.ReadFrom(r)
+	require.NoError(t, err)
 
 	output := buf.String()
-	if !strings.Contains(output, `[gralph] attempt item="Cycle 1 - Add GetByIDs to pattern repository"`) {
-		t.Fatalf("expected shortened attempt log, got:\n%s", output)
-	}
-	if !strings.Contains(output, `[gralph] claude_output_begin item="Cycle 1 - Add GetByIDs to pattern repository"`) {
-		t.Fatalf("expected claude output start marker, got:\n%s", output)
-	}
-	if !strings.Contains(output, `[gralph] claude_output_end item="Cycle 1 - Add GetByIDs to pattern repository" status=ok`) {
-		t.Fatalf("expected claude output end marker, got:\n%s", output)
-	}
-	if strings.Contains(output, "long details here") {
-		t.Fatalf("expected verbose item details to be omitted from logs, got:\n%s", output)
+	for _, task := range tl.Tasks {
+		assert.Contains(t, output, task.String())
 	}
 }
 
-func TestRunLoop_CompletionDetected(t *testing.T) {
+func TestRunLoop_EmptyTaskList(t *testing.T) {
+	useFakeClaude(t)
 	dir := t.TempDir()
-	promptPath := filepath.Join(dir, "prompt.md")
-	prdPath := filepath.Join(dir, "prd.md")
-	progressPath := filepath.Join(dir, "progress.txt")
+	recordPath := filepath.Join(dir, "record.log")
+	t.Setenv("FAKE_CLAUDE_RECORD", recordPath)
 
-	if err := os.WriteFile(promptPath, []byte("# Prompt\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(prdPath, []byte("# PRD\n\n- [ ] Task one\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	err := runLoop(context.Background(), "prompt", &tasks.TaskList{})
+	require.NoError(t, err)
 
-	callCount := 0
-	stubRunner := func(_ context.Context, _ string) error {
-		callCount++
-		return os.WriteFile(prdPath, []byte("# PRD\n\n- [x] Task one\n"), 0o644) // #nosec G304
-	}
-
-	if err := runLoop(context.Background(), promptPath, prdPath, progressPath, stubRunner); err != nil {
-		t.Fatalf("expected nil, got: %v", err)
-	}
-	if callCount != 1 {
-		t.Errorf("expected claudeRunner called once, got %d", callCount)
-	}
-	data, err := os.ReadFile(prdPath) // #nosec G304
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(data), "- [ ]") {
-		t.Error("expected no open items after completion")
-	}
-}
-
-func TestRunLoop_MultipleItemsSucceed(t *testing.T) {
-	dir := t.TempDir()
-	promptPath := filepath.Join(dir, "prompt.md")
-	prdPath := filepath.Join(dir, "prd.md")
-	progressPath := filepath.Join(dir, "progress.txt")
-
-	if err := os.WriteFile(promptPath, []byte("# Prompt\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(prdPath, []byte("# PRD\n\n- [ ] First task\n- [ ] Second task\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	callCount := 0
-	stubRunner := func(_ context.Context, _ string) error {
-		callCount++
-		switch callCount {
-		case 1:
-			return os.WriteFile(prdPath, []byte("# PRD\n\n- [x] First task\n- [ ] Second task\n"), 0o644) // #nosec G304
-		case 2:
-			return os.WriteFile(prdPath, []byte("# PRD\n\n- [x] First task\n- [x] Second task\n"), 0o644)
-		default:
-			return nil
-		}
-	}
-
-	if err := runLoop(context.Background(), promptPath, prdPath, progressPath, stubRunner); err != nil {
-		t.Fatalf("expected nil, got: %v", err)
-	}
-	if callCount != 2 {
-		t.Errorf("expected claudeRunner called twice, got %d", callCount)
-	}
-
-	data, err := os.ReadFile(prdPath) // #nosec G304
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(data), "- [ ]") {
-		t.Errorf("expected no open items after both tasks completed, got:\n%s", string(data))
-	}
-}
-
-func TestRunLoop_UnchangedItemFailsCycle(t *testing.T) {
-	dir := t.TempDir()
-	promptPath := filepath.Join(dir, "prompt.md")
-	prdPath := filepath.Join(dir, "prd.md")
-	progressPath := filepath.Join(dir, "progress.txt")
-
-	const prdContent = "# PRD\n\n- [ ] Stubborn task\n"
-	if err := os.WriteFile(promptPath, []byte("# Prompt\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(prdPath, []byte(prdContent), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	callCount := 0
-	stubRunner := func(_ context.Context, _ string) error {
-		callCount++
-		return nil // never modifies the PRD
-	}
-
-	err := runLoop(context.Background(), promptPath, prdPath, progressPath, stubRunner)
-	if !errors.Is(err, ErrCycleFailed) {
-		t.Fatalf("expected ErrCycleFailed, got: %v", err)
-	}
-	if callCount != 1 {
-		t.Errorf("expected claudeRunner called exactly once, got %d", callCount)
-	}
-
-	data, err := os.ReadFile(prdPath) // #nosec G304
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(data) != prdContent {
-		t.Errorf("expected PRD to be left untouched, got:\n%s", string(data))
-	}
-}
-
-func TestRunLoop_UnchangedItemNextItemNeverStarted(t *testing.T) {
-	dir := t.TempDir()
-	promptPath := filepath.Join(dir, "prompt.md")
-	prdPath := filepath.Join(dir, "prd.md")
-	progressPath := filepath.Join(dir, "progress.txt")
-
-	if err := os.WriteFile(promptPath, []byte("# Prompt\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(prdPath, []byte("# PRD\n\n- [ ] First task\n- [ ] Second task\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	var capturedPrompts []string
-	stubRunner := func(_ context.Context, prompt string) error {
-		capturedPrompts = append(capturedPrompts, prompt)
-		return nil // never modifies the PRD
-	}
-
-	err := runLoop(context.Background(), promptPath, prdPath, progressPath, stubRunner)
-	if !errors.Is(err, ErrCycleFailed) {
-		t.Fatalf("expected ErrCycleFailed, got: %v", err)
-	}
-	if len(capturedPrompts) != 1 {
-		t.Fatalf("expected exactly one invocation, got %d", len(capturedPrompts))
-	}
-}
-
-func TestRunLoop_ChangedItemWithRunnerErrorContinues(t *testing.T) {
-	dir := t.TempDir()
-	promptPath := filepath.Join(dir, "prompt.md")
-	prdPath := filepath.Join(dir, "prd.md")
-	progressPath := filepath.Join(dir, "progress.txt")
-
-	if err := os.WriteFile(promptPath, []byte("# Prompt\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(prdPath, []byte("# PRD\n\n- [ ] Task one\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	callCount := 0
-	stubRunner := func(_ context.Context, _ string) error {
-		callCount++
-		// The runner reports a nonzero-exit style error, but it still edited
-		// the PRD before failing (e.g. claude made the change, then errored).
-		if err := os.WriteFile(prdPath, []byte("# PRD\n\n- [x] Task one\n"), 0o644); err != nil {
-			return err
-		}
-		return errors.New("exit status 1")
-	}
-
-	if err := runLoop(context.Background(), promptPath, prdPath, progressPath, stubRunner); err != nil {
-		t.Fatalf("expected nil (cycle completes despite runner error since item changed), got: %v", err)
-	}
-	if callCount != 1 {
-		t.Errorf("expected claudeRunner called once, got %d", callCount)
-	}
-}
-
-func TestRunLoop_CancellationReturnsContextErrorAndLeavesPRDUntouched(t *testing.T) {
-	dir := t.TempDir()
-	promptPath := filepath.Join(dir, "prompt.md")
-	prdPath := filepath.Join(dir, "prd.md")
-	progressPath := filepath.Join(dir, "progress.txt")
-
-	const prdContent = "# PRD\n\n- [ ] Task one\n"
-	if err := os.WriteFile(promptPath, []byte("# Prompt\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(prdPath, []byte(prdContent), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	stubRunner := func(_ context.Context, _ string) error {
-		cancel()
-		return context.Canceled
-	}
-
-	err := runLoop(ctx, promptPath, prdPath, progressPath, stubRunner)
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("expected context.Canceled, got: %v", err)
-	}
-
-	data, err := os.ReadFile(prdPath) // #nosec G304
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(data) != prdContent {
-		t.Errorf("expected PRD to be left untouched, got:\n%s", string(data))
-	}
-}
-
-func TestGetFirstOpenItem(t *testing.T) {
-	dir := t.TempDir()
-
-	tests := []struct {
-		name     string
-		content  string
-		wantLine string
-		wantErr  bool
-		usePath  string // if non-empty, use this path instead of writing content
-	}{
-		{
-			name:     "returns first open item from multiple",
-			content:  "# PRD\n\n- [x] Done item\n- [ ] First open item\n- [ ] Second open item\n",
-			wantLine: "- [ ] First open item",
-		},
-		{
-			name:     "returns empty string when no open items",
-			content:  "# PRD\n\n- [x] Done item\n- [~] Abandoned item\n",
-			wantLine: "",
-		},
-		{
-			name:     "returns correct open item with mixed states",
-			content:  "# PRD\n\n- [x] Completed\n- [~] Abandoned\n- [ ] Open one\n- [ ] Open two\n",
-			wantLine: "- [ ] Open one",
-		},
-		{
-			name:    "returns error for nonexistent file",
-			usePath: filepath.Join(dir, "nonexistent.md"),
-			wantErr: true,
-		},
-		{
-			name:     "returns open item preceded by headers and content",
-			content:  "# Title\n\n## Objective\n\nSome prose here.\n\n## Plan\n\n- [x] Already done\n- [ ] First real task\n",
-			wantLine: "- [ ] First real task",
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			path := tc.usePath
-			if path == "" {
-				path = filepath.Join(dir, tc.name+".md")
-				if err := os.WriteFile(path, []byte(tc.content), 0o644); err != nil {
-					t.Fatal(err)
-				}
-			}
-
-			got, err := getFirstOpenItem(path)
-			if tc.wantErr {
-				if err == nil {
-					t.Fatal("expected error, got nil")
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if got != tc.wantLine {
-				t.Errorf("got %q, want %q", got, tc.wantLine)
-			}
-		})
-	}
-}
-
-func TestItemLabel(t *testing.T) {
-	tests := []struct {
-		name string
-		item string
-		want string
-	}{
-		{
-			name: "strips checklist marker and details",
-			item: "- [ ] **Cycle 1 - Add GetByIDs to pattern repository**: long details here",
-			want: "Cycle 1 - Add GetByIDs to pattern repository",
-		},
-		{
-			name: "collapses whitespace",
-			item: "- [ ]   `Cycle 2`   :   more details",
-			want: "Cycle 2",
-		},
-		{
-			name: "falls back for empty item",
-			item: "- [ ]   ",
-			want: "unnamed item",
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := itemLabel(tc.item); got != tc.want {
-				t.Fatalf("got %q, want %q", got, tc.want)
-			}
-		})
-	}
+	records := readFakeClaudeRecords(t, recordPath)
+	assert.Empty(t, records)
 }

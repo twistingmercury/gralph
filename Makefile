@@ -1,4 +1,4 @@
-.PHONY: build help install uninstall local test e2e build-local
+.PHONY: build help install uninstall local test build-local
 
 GIT_COMMIT := $(shell git rev-parse --short=8 HEAD 2>/dev/null || echo "unknown")
 GIT_TAG := $(shell git describe --tags --abbrev=0 2>/dev/null || echo "dev")
@@ -23,20 +23,17 @@ local: ## Performs only a local build of gralph
 build: ## Performs a full build of gralph (Docker-based; use `make local` for a quick local binary)
 	./build/build.sh
 
-install: ## Install gralph to $GOBIN
+install: local ## Install gralph to $GOBIN
 	cp ${LOCAL_BUILD}/gralph ${GOBIN}/gralph
 
 uninstall: ## Uninstall gralph to $GOBIN
 	rm ${GOBIN}/gralph
 
-test: ## Runs unit tests only (internal packages). Run `make e2e` for integration tests.
+test: ## Runs unit tests only (internal packages). The e2e suite runs in a container via `make build`.
 	go test -v ./internal/...
 
-e2e: local ## Runs e2e integration tests locally against the built binary
-	cd tests/e2e && GRALPH_BINARY=${LOCAL_BUILD}/gralph go test -v .
-
-analyze: ## Run linters, formatters, security scanners, etc
-	goimports -w .
-	golangci-lint run
+analyze: ## Run linters, formatters, security scanners on production code (no tests/ or *_test.go)
+	goimports -w cmd internal
+	golangci-lint run --tests=false ./...
 	govulncheck ./cmd/... ./internal/...
 	gosec -quiet -exclude-dir=tests ./...
