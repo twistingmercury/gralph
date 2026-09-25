@@ -15,7 +15,7 @@ scope, verification, and commit policies.
 ## How Gralph uses the pair
 
 Gralph works through `tasks.yaml` in file order. It skips `completed` tasks; for
-each `pending` or `failed` task it combines the shared prompt with that task's
+each `pending` task it combines the shared prompt with that task's
 `prompt` and hands the result to a new Claude Code session. Every session starts
 with no memory of earlier tasks, so the pair must carry everything the session
 needs.
@@ -27,8 +27,9 @@ Gralph owns `state` and writes it back to `tasks.yaml`. The session never edits
 the file. To remove a task without running it, delete it from the file; there is
 no `abandoned` state. Gralph decides the outcome from the JSON result line the
 shared prompt asks for at the end of the session's output. A missing or invalid
-result line, or a non-zero exit, marks the task `failed`. Running Gralph again
-re-runs `failed` tasks, so fixing a failed task means editing its `prompt`.
+result line, or a non-zero exit, marks the task `failed`. Gralph refuses to run
+while any task is `failed`; a person fixes the cause (often by editing the
+task's `prompt`) and resets its `state` to `pending` by hand.
 
 A `tasks.yaml` that does not match the rules below is invalid and Gralph
 refuses to run it. There is no migration from other formats or older states.

@@ -144,18 +144,18 @@ func TestRunLoop_NonZeroExitUsesJSONErrorNotExitStatus(t *testing.T) {
 	assert.Equal(t, "boom", saved.Tasks[0].Error)
 }
 
-// TestRunLoop_ClearsErrorWhenPreviouslyFailedTaskNowCompletes proves a task
-// retried after an earlier failure has its stored error cleared, and that
-// the cleared error is omitted from the saved yaml rather than written as an
+// TestRunLoop_ClearsStaleErrorWhenTaskCompletes proves a pending task
+// carrying a stale error has it cleared once it completes, and that the
+// cleared error is omitted from the saved yaml rather than written as an
 // empty string.
-func TestRunLoop_ClearsErrorWhenPreviouslyFailedTaskNowCompletes(t *testing.T) {
+func TestRunLoop_ClearsStaleErrorWhenTaskCompletes(t *testing.T) {
 	useFakeClaude(t)
 	dir := t.TempDir()
 	tasksPath := filepath.Join(dir, "tasks.yaml")
 	t.Setenv("FAKE_CLAUDE_RECORD", filepath.Join(dir, "record.log"))
 
 	tl := &tasks.TaskList{Tasks: []tasks.Task{
-		{ID: 1, Name: "Only", Prompt: "p", State: tasks.FailedState, Error: "exit status 1"},
+		{ID: 1, Name: "Only", Prompt: "p", State: tasks.PendingState, Error: "exit status 1"},
 	}}
 
 	err := runLoop(context.Background(), "prompt", tl, tasksPath)

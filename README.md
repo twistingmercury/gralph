@@ -79,7 +79,7 @@ The text Claude receives is:
 
 Claude's own output passes straight through to gralph's stdout and stderr. Gralph
 skips tasks with `state: completed` (printing `task <id>: <name> already
-completed, skipping`). For pending and failed tasks, gralph reads the last
+completed, skipping`). For pending tasks, gralph reads the last
 non-blank line of Claude's output (skipping lines that are only code fences).
 If that line is valid JSON with `state: "completed"` and the session exits zero,
 gralph marks the task `completed` and writes the file. Otherwise, gralph marks
@@ -100,7 +100,8 @@ the design is documented from [docs/architecture/00-overview.md](docs/architectu
 - **`claude` must be on PATH**: gralph calls `claude --print --dangerously-skip-permissions` directly; the Claude CLI must be installed and accessible.
 - **Permission checks are bypassed**: `--dangerously-skip-permissions` lets Claude run without user interaction. Treat the prompt and task files as code you are choosing to execute, and do not run gralph against untrusted ones.
 - **Each session starts cold**: a session sees only the shared prompt and its one task. Anything it needs to know about earlier tasks must be in those two texts or in the repository.
-- **Completed tasks are skipped**: gralph runs only pending and failed tasks. Running gralph again after a failure re-runs that failed task and any remaining pending ones.
+- **Completed tasks are skipped**: gralph runs only pending tasks.
+- **Failed tasks block the run**: gralph refuses to start while any task is `failed`, naming each one, launching no session and leaving the file untouched. Fix the cause, then set the task's `state` to `pending` (or `completed`) by hand before running again.
 - **Signal handling**: SIGINT (Ctrl-C) or SIGTERM cancels the current Claude session and stops the run. The entire Claude process group is terminated, so nothing Claude spawned outlives gralph.
 - **Unix only**: gralph runs on Linux, macOS, and the BSDs. Windows is not supported.
 

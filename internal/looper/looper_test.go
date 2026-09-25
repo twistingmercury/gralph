@@ -485,26 +485,41 @@ func TestRunLoop_SkipsCompletedTasks(t *testing.T) {
 	assert.Equal(t, tasks.CompletedState, saved.Tasks[1].State, "the pending task is now completed")
 }
 
-// TestRunLoop_RerunsPreviouslyFailedTask proves a task left in the failed
-// state from an earlier run is retried, not skipped.
-func TestRunLoop_RerunsPreviouslyFailedTask(t *testing.T) {
+// TestStart_RefusesWhenAnyTaskFailed proves Start refuses to run while any
+// task is failed: it names every failed task, never invokes claude, and
+// leaves the tasks file byte-for-byte unchanged.
+func TestStart_RefusesWhenAnyTaskFailed(t *testing.T) {
 	useFakeClaude(t)
 	dir := t.TempDir()
 	recordPath := filepath.Join(dir, "record.log")
-	tasksPath := filepath.Join(dir, "tasks.yaml")
 	t.Setenv("FAKE_CLAUDE_RECORD", recordPath)
 
-	tl := &tasks.TaskList{Tasks: []tasks.Task{
-		{ID: 1, Name: "Only", Prompt: "p1", State: tasks.FailedState},
-	}}
+	promptPath := writePromptFile(t, dir, "Follow the plan.\n")
+	content := `tasks:
+  - id: 1
+    name: First task
+    prompt: Do the first thing.
+  - id: 2
+    name: Second task
+    prompt: Do the second thing.
+    state: failed
+    error: boom
+  - id: 3
+    name: Third task
+    prompt: Do the third thing.
+    state: failed
+`
+	tasksPath := writeTasksFile(t, dir, content)
 
-	err := runLoop(context.Background(), "prompt", tl, tasksPath)
-	require.NoError(t, err)
+	err := Start(context.Background(), promptPath, tasksPath)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "manual intervention")
+	assert.ErrorContains(t, err, "set each one's state to pending")
+	assert.ErrorContains(t, err, "task 2: Second task; task 3: Third task")
+	assert.NotContains(t, err.Error(), "task 1:")
 
-	records := readFakeClaudeRecords(t, recordPath)
-	assert.Len(t, records, 1, "a previously failed task must be run again")
-
-	saved := readSavedTasks(t, tasksPath)
-	require.Len(t, saved.Tasks, 1)
-	assert.Equal(t, tasks.CompletedState, saved.Tasks[0].State, "a retried task that now succeeds is saved as completed")
+	assert.Empty(t, readFakeClaudeRecords(t, recordPath), "claude must never be invoked")
+	data, readErr := os.ReadFile(tasksPath)
+	require.NoError(t, readErr)
+	assert.Equal(t, content, string(data), "the tasks file must be unchanged")
 }

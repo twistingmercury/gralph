@@ -25,6 +25,16 @@ func Start(ctx context.Context, promptFile, tasksFile string) error {
 		return fmt.Errorf("failed to start loop runner: %s", err)
 	}
 
+	var failed []string
+	for _, task := range tasklist.Tasks {
+		if task.State == tasks.FailedState {
+			failed = append(failed, fmt.Sprintf("task %d: %s", task.ID, task.Name))
+		}
+	}
+	if len(failed) > 0 {
+		return fmt.Errorf("failed to start loop runner: failed tasks need manual intervention (fix the cause and set each one's state to pending): %s", strings.Join(failed, "; "))
+	}
+
 	if err := runLoop(ctx, prompt, tasklist, tasksFile); err != nil {
 		return fmt.Errorf("loop error: %w", err)
 	}

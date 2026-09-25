@@ -1,6 +1,7 @@
 package e2e
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -79,10 +80,11 @@ func TestLoop_RunsEveryTaskInOrder(t *testing.T) {
 	assertNoTmpFile(t, tasksPath)
 }
 
-// TestLoop_FailedTaskReRunsAndCompletes verifies that a task left in the
-// failed state by a prior run is re-run (not skipped) on a later gralph
-// invocation, and is written back as completed once claude exits 0 for it.
-func TestLoop_FailedTaskReRunsAndCompletes(t *testing.T) {
+// TestLoop_FailedTaskRefusesToRun verifies that a task file containing a
+// failed task is refused before any work starts: gralph exits non-zero,
+// names the failed task, never invokes claude, and leaves the task file
+// byte-for-byte unchanged with no temporary file behind.
+func TestLoop_FailedTaskRefusesToRun(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 
@@ -91,24 +93,29 @@ func TestLoop_FailedTaskReRunsAndCompletes(t *testing.T) {
   - id: 1
     name: First task
     prompt: Do the first thing.
+  - id: 2
+    name: Second task
+    prompt: Do the second thing.
     state: failed
+    error: boom
 `
 	tasksPath := writeTasksYAML(t, dir, tasksYAML)
 
-	recordFile := filepath.Join(dir, "record.ndjson")
+	attemptLog := filepath.Join(dir, "attempts.log")
 	env := gralphEnv(fakeClaudeDir, map[string]string{
-		"FAKECLAUDE_RECORD_FILE": recordFile,
+		"FAKECLAUDE_ATTEMPT_LOG_FILE": attemptLog,
 	})
 
 	res := runGralph(t, 15*time.Second, []string{"--prompt=" + promptPath, "--tasks=" + tasksPath}, env)
-	require.Equal(t, 0, res.exitCode, "stdout:\n%s\nstderr:\n%s", res.stdout, res.stderr)
 
-	records := readFakeClaudeRecords(t, recordFile)
-	require.Len(t, records, 1, "expected the previously failed task to be re-run rather than skipped")
+	require.NotEqual(t, 0, res.exitCode, "stdout:\n%s\nstderr:\n%s", res.stdout, res.stderr)
+	assert.Contains(t, res.stderr, "manual intervention")
+	assert.Contains(t, res.stderr, "task 2: Second task")
+	assert.Equal(t, 0, countAttempts(t, attemptLog), "expected claude never invoked")
 
-	after := readTasksYAML(t, tasksPath)
-	states := taskStates(after)
-	assert.Equal(t, "completed", states[1], "expected the re-run task to be written back as completed")
+	raw, err := os.ReadFile(tasksPath)
+	require.NoError(t, err)
+	assert.Equal(t, tasksYAML, string(raw), "expected the task file to be unchanged")
 
 	assertNoTmpFile(t, tasksPath)
 }
