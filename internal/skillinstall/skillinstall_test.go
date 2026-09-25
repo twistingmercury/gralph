@@ -1,9 +1,13 @@
 package skillinstall
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -55,4 +59,38 @@ func TestInstall_ReplacesExistingFolder(t *testing.T) {
 
 	assert.NoFileExists(t, stray)
 	assert.FileExists(t, filepath.Join(dest, "SKILL.md"))
+}
+
+func TestHash_Format(t *testing.T) {
+	got, err := Hash()
+	require.NoError(t, err)
+	assert.Regexp(t, regexp.MustCompile(`^sha256:[0-9a-f]{64}$`), got)
+}
+
+func TestHash_Stable(t *testing.T) {
+	first, err := Hash()
+	require.NoError(t, err)
+	second, err := Hash()
+	require.NoError(t, err)
+	assert.Equal(t, first, second)
+}
+
+func TestHash_MatchesIndependentWalk(t *testing.T) {
+	h := sha256.New()
+	err := fs.WalkDir(skills.FS, skillName, func(path string, d fs.DirEntry, err error) error {
+		require.NoError(t, err)
+		if d.IsDir() {
+			return nil
+		}
+		data, err := skills.FS.ReadFile(path)
+		require.NoError(t, err)
+		h.Write([]byte(strings.TrimPrefix(path, skillName+"/")))
+		h.Write(data)
+		return nil
+	})
+	require.NoError(t, err)
+
+	got, err := Hash()
+	require.NoError(t, err)
+	assert.Equal(t, "sha256:"+hex.EncodeToString(h.Sum(nil)), got)
 }
