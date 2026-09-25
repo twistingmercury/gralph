@@ -42,6 +42,24 @@ func Start(ctx context.Context, promptFile, tasksFile string) error {
 	return nil
 }
 
+// DryRun validates tasksFile with the same checks Start uses and reports on
+// it to w without launching claude or writing any file.
+func DryRun(w io.Writer, tasksFile string) error {
+	tasklist, err := getTasks(tasksFile)
+	if err != nil {
+		return err
+	}
+
+	for _, task := range tasklist.Tasks {
+		if task.State == tasks.FailedState {
+			_, _ = fmt.Fprintf(w, "❌ \033[1;31mtask %d: %s is failed and needs manual intervention before execution\033[0m\n", task.ID, task.Name)
+		}
+	}
+
+	_, _ = fmt.Fprintf(w, "%s is valid\n", tasksFile)
+	return nil
+}
+
 func getTasks(path string) (*tasks.TaskList, error) {
 	if _, err := os.Stat(path); err != nil {
 		return nil, fmt.Errorf("tasks file %q is not accessible: %w", path, err)

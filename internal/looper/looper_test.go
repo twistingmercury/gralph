@@ -523,3 +523,55 @@ func TestStart_RefusesWhenAnyTaskFailed(t *testing.T) {
 	require.NoError(t, readErr)
 	assert.Equal(t, content, string(data), "the tasks file must be unchanged")
 }
+
+func TestDryRun_ValidFile(t *testing.T) {
+	dir := t.TempDir()
+	tasksPath := writeTasksFile(t, dir, validTasksYAML)
+
+	var out bytes.Buffer
+	require.NoError(t, DryRun(&out, tasksPath))
+	assert.Equal(t, tasksPath+" is valid\n", out.String())
+}
+
+func TestDryRun_InvalidFile(t *testing.T) {
+	dir := t.TempDir()
+	tasksPath := writeTasksFile(t, dir, "tasks:\n  - {id: 1, name: a, prompt: p, state: bogus}\n")
+
+	var out bytes.Buffer
+	err := DryRun(&out, tasksPath)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "failed to parse tasks yaml")
+	assert.Empty(t, out.String())
+}
+
+// TestDryRun_FlagsFailedTasks pins the exact flag line, colour codes
+// included, and that a file with failed tasks is still reported valid.
+func TestDryRun_FlagsFailedTasks(t *testing.T) {
+	dir := t.TempDir()
+	content := `tasks:
+  - id: 1
+    name: First task
+    prompt: Do the first thing.
+    state: failed
+    error: boom
+  - id: 2
+    name: Second task
+    prompt: Do the second thing.
+  - id: 3
+    name: Third task
+    prompt: Do the third thing.
+    state: failed
+`
+	tasksPath := writeTasksFile(t, dir, content)
+
+	var out bytes.Buffer
+	require.NoError(t, DryRun(&out, tasksPath))
+	want := "❌ \033[1;31mtask 1: First task is failed and needs manual intervention before execution\033[0m\n" +
+		"❌ \033[1;31mtask 3: Third task is failed and needs manual intervention before execution\033[0m\n" +
+		tasksPath + " is valid\n"
+	assert.Equal(t, want, out.String())
+
+	data, err := os.ReadFile(tasksPath)
+	require.NoError(t, err)
+	assert.Equal(t, content, string(data), "the tasks file must be unchanged")
+}

@@ -30,9 +30,16 @@ gralph --prompt path/to/prompt.md --tasks path/to/tasks.yaml
 
 | Flag               | Required | Description                                            |
 | ------------------ | -------- | ------------------------------------------------------ |
-| `--prompt` / `-p`  | Yes      | Path to the shared prompt sent to Claude for every task |
+| `--prompt` / `-p`  | Yes, unless `--dry-run` | Path to the shared prompt sent to Claude for every task |
 | `--tasks` / `-t`   | Yes      | Path to the YAML task list that drives the loop        |
+| `--dry-run`        | No       | Validate the task file and report on it without running anything |
 | `--version` / `-v` | No       | Print version information and exit                     |
+
+`gralph -t tasks.yaml --dry-run` checks the task file with the same rules a
+real run uses, without launching Claude or writing any file. `--prompt` is
+ignored. An invalid file prints the error to stderr and exits non-zero. A valid
+file prints a red `❌` line for each `failed` task (which a real run would
+refuse), then `<tasks path> is valid`, and exits zero.
 
 A task file is a `tasks` sequence. Each task has a unique positive integer `id`,
 a `name` (unique, ignoring case and surrounding whitespace), a `prompt`, and an
