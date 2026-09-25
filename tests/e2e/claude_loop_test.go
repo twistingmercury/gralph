@@ -283,7 +283,7 @@ func TestStart_AbandonedStateRejected(t *testing.T) {
 
 	require.NotEqual(t, 0, res.exitCode, "stdout:\n%s\nstderr:\n%s", res.stdout, res.stderr)
 	assert.Contains(t, res.stderr, "failed to start loop runner")
-	assert.Contains(t, res.stderr, "task id 1 has an invalid state: abandoned")
+	assert.Contains(t, res.stderr, `tasks[0] (id 1): state: must be pending, completed, or failed, got "abandoned"`)
 	assert.Equal(t, 0, countAttempts(t, attemptLog), "expected claude never invoked")
 }
 
