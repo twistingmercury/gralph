@@ -33,6 +33,7 @@ gralph --prompt path/to/prompt.md --tasks path/to/tasks.yaml
 | `--prompt` / `-p`  | Yes, unless `--dry-run` | Path to the shared prompt sent to Claude for every task |
 | `--tasks` / `-t`   | Yes      | Path to the YAML task list that drives the loop        |
 | `--dry-run`        | No       | Validate the task file and report on it without running anything |
+| `--install-skill`  | No       | Install the bundled `gralph-docs-writer` skill for Claude Code and exit |
 | `--version` / `-v` | No       | Print version information and exit                     |
 
 `gralph -t tasks.yaml --dry-run` checks the task file with the same rules a
@@ -69,8 +70,11 @@ it is read as `pending`. An optional `error` field may be present when a task
 has failed; gralph writes it, never the session. Gralph runs tasks in file
 order — `id` identifies a task, it does not order them. The
 `gralph-docs-writer` skill in [skills/](skills/gralph-docs-writer/SKILL.md)
-generates a task file and shared prompt for a project;
-`scripts/install_skill.sh` installs it.
+generates a task file and shared prompt for a project. It is embedded in the
+binary: `gralph --install-skill` replaces `~/.claude/skills/gralph-docs-writer/`
+with the copy matching that binary's version and prints the path.
+`scripts/install_skill.sh` installs the working-tree copy instead, for
+development.
 
 ## How it works
 
