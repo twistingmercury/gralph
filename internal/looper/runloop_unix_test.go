@@ -22,6 +22,7 @@ func TestRunLoop_CancelMidTaskStopsQuickly(t *testing.T) {
 	dir := t.TempDir()
 	recordPath := filepath.Join(dir, "record.log")
 	readyPath := filepath.Join(dir, "ready")
+	tasksPath := filepath.Join(dir, "tasks.yaml")
 	t.Setenv("FAKE_CLAUDE_RECORD", recordPath)
 	t.Setenv("FAKE_CLAUDE_BLOCK", "1")
 	t.Setenv("FAKE_CLAUDE_READY", readyPath)
@@ -31,12 +32,15 @@ func TestRunLoop_CancelMidTaskStopsQuickly(t *testing.T) {
 		{ID: 2, Name: "Second", Prompt: "p2"},
 	}}
 
+	tasksYAML := "tasks:\n  - {id: 1, name: First, prompt: p1, state: pending}\n  - {id: 2, name: Second, prompt: p2, state: pending}\n"
+	require.NoError(t, os.WriteFile(tasksPath, []byte(tasksYAML), 0o600))
+
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- runLoop(ctx, "prompt", tl)
+		errCh <- runLoop(ctx, "prompt", tl, tasksPath)
 	}()
 
 	require.Eventually(t, func() bool {
@@ -56,4 +60,8 @@ func TestRunLoop_CancelMidTaskStopsQuickly(t *testing.T) {
 
 	records := readFakeClaudeRecords(t, recordPath)
 	assert.Empty(t, records, "expected claude never to record an invocation (killed while blocked)")
+
+	gotTasksYAML, err := os.ReadFile(tasksPath)
+	require.NoError(t, err)
+	assert.Equal(t, tasksYAML, string(gotTasksYAML), "the tasks file must be byte-for-byte unchanged after a mid-task cancel")
 }

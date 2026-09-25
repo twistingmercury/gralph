@@ -1,8 +1,11 @@
 package tasks
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -10,7 +13,7 @@ import (
 
 const (
 	PendingState   = "pending"
-	AbandonedState = "abandoned"
+	FailedState    = "failed"
 	CompletedState = "completed"
 )
 
@@ -19,6 +22,7 @@ type Task struct {
 	Name   string `yaml:"name" validate:"required"`
 	Prompt string `yaml:"prompt" validate:"required"`
 	State  string `yaml:"state"`
+	Error  string `yaml:"error,omitempty"`
 }
 
 type TaskList struct {
@@ -78,6 +82,33 @@ func ParseTasks(yml []byte) (TaskList, error) {
 	}
 
 	return taskList, nil
+}
+
+// SaveTasks writes tl to path as YAML via a temporary file that is renamed
+// over path, so a failed save leaves the original file untouched.
+func SaveTasks(path string, tl TaskList) error {
+	var buf bytes.Buffer
+	enc := yaml.NewEncoder(&buf)
+	enc.SetIndent(2)
+	if err := enc.Encode(tl); err != nil {
+		return fmt.Errorf("failed to encode tasks: %w", err)
+	}
+	if err := enc.Close(); err != nil {
+		return fmt.Errorf("failed to encode tasks: %w", err)
+	}
+
+	cleanPath := filepath.Clean(path)
+	tmpPath := cleanPath + ".tmp"
+	if err := os.WriteFile(tmpPath, buf.Bytes(), 0o600); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("failed to save tasks to %q: %w", cleanPath, err)
+	}
+	if err := os.Rename(tmpPath, cleanPath); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("failed to save tasks to %q: %w", cleanPath, err)
+	}
+
+	return nil
 }
 
 func idsAreUnique(t TaskList) (bool, Task) {
@@ -142,7 +173,7 @@ func idsArePositive(t TaskList) (bool, Task) {
 func statesAreValid(t TaskList) (bool, Task) {
 	for _, task := range t.Tasks {
 		switch {
-		case task.State != PendingState && task.State != CompletedState && task.State != AbandonedState:
+		case task.State != PendingState && task.State != CompletedState && task.State != FailedState:
 			return false, task
 		}
 	}

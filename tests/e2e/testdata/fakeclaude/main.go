@@ -33,6 +33,17 @@
 //	FAKECLAUDE_READY_FILE          path to write this process's own PID once
 //	                                setup is complete and it is about to
 //	                                block or exit
+//	FAKE_CLAUDE_OUTPUT             session-result stdout content, checked via
+//	                                os.LookupEnv so it is honored even when set
+//	                                to the empty string. If present, its value
+//	                                is written verbatim to stdout before
+//	                                exiting (letting a test control the
+//	                                session-result line gralph parses,
+//	                                including invalid/missing/fenced cases).
+//	                                If absent, the default is
+//	                                `{"state":"completed","error":""}` on a
+//	                                zero exit code and nothing on a non-zero
+//	                                exit code.
 package main
 
 import (
@@ -120,6 +131,13 @@ func main() {
 		}
 		exitCode = code
 	}
+
+	if out, ok := os.LookupEnv("FAKE_CLAUDE_OUTPUT"); ok {
+		fmt.Fprint(os.Stdout, out)
+	} else if exitCode == 0 {
+		fmt.Fprint(os.Stdout, `{"state":"completed","error":""}`+"\n")
+	}
+
 	os.Exit(exitCode)
 }
 

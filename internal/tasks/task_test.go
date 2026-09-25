@@ -1,6 +1,8 @@
 package tasks
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -79,7 +81,7 @@ func TestParseTasks_PreservesFileOrder(t *testing.T) {
 	yml := []byte(`tasks:
   - {id: 30, name: c, prompt: p, state: pending}
   - {id: 10, name: a, prompt: p, state: completed}
-  - {id: 20, name: b, prompt: p, state: abandoned}
+  - {id: 20, name: b, prompt: p, state: failed}
 `)
 
 	got, err := ParseTasks(yml)
@@ -119,11 +121,20 @@ func TestStateConstants(t *testing.T) {
 	// existing task file.
 	assert.Equal(t, "pending", PendingState)
 	assert.Equal(t, "completed", CompletedState)
-	assert.Equal(t, "abandoned", AbandonedState)
+	assert.Equal(t, "failed", FailedState)
+}
+
+// TestParseTasks_RejectsAbandonedState pins that the retired "abandoned"
+// state is no longer valid: it must fail validation like any other unknown
+// state, not be silently accepted.
+func TestParseTasks_RejectsAbandonedState(t *testing.T) {
+	_, err := ParseTasks([]byte("tasks:\n  - {id: 1, name: a, prompt: p, state: abandoned}\n"))
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "task id 1 has an invalid state: abandoned")
 }
 
 func TestParseTasks_AcceptsEveryValidState(t *testing.T) {
-	for _, state := range []string{PendingState, CompletedState, AbandonedState} {
+	for _, state := range []string{PendingState, CompletedState, FailedState} {
 		t.Run(state, func(t *testing.T) {
 			got, err := ParseTasks([]byte("tasks:\n  - {id: 1, name: a, prompt: p, state: " + state + "}\n"))
 			require.NoError(t, err)
@@ -166,8 +177,8 @@ func TestParseTasks_NormalizesStateCaseAndWhitespace(t *testing.T) {
 		{written: "\" pending \"", want: PendingState},
 		{written: "Completed", want: CompletedState},
 		{written: "\"\\tCOMPLETED\\n\"", want: CompletedState},
-		{written: "Abandoned", want: AbandonedState},
-		{written: "\"  aBaNdOnEd  \"", want: AbandonedState},
+		{written: "Failed", want: FailedState},
+		{written: "\"  fAiLeD  \"", want: FailedState},
 	}
 
 	for _, tt := range tests {
@@ -184,7 +195,7 @@ func TestParseTasks_DefaultsOnlyTheEmptyStates(t *testing.T) {
 	yml := []byte(`tasks:
   - {id: 1, name: a, prompt: p, state: completed}
   - {id: 2, name: b, prompt: p}
-  - {id: 3, name: c, prompt: p, state: abandoned}
+  - {id: 3, name: c, prompt: p, state: failed}
   - {id: 4, name: d, prompt: p}
 `)
 
@@ -195,7 +206,7 @@ func TestParseTasks_DefaultsOnlyTheEmptyStates(t *testing.T) {
 	for _, task := range got.Tasks {
 		states = append(states, task.State)
 	}
-	assert.Equal(t, []string{CompletedState, PendingState, AbandonedState, PendingState}, states)
+	assert.Equal(t, []string{CompletedState, PendingState, FailedState, PendingState}, states)
 }
 
 func TestParseTasks_DoesNotAlterNameOrPrompt(t *testing.T) {
@@ -536,7 +547,7 @@ func TestStatesAreValid(t *testing.T) {
 	ok, task := statesAreValid(TaskList{Tasks: []Task{
 		{ID: 1, State: PendingState},
 		{ID: 2, State: CompletedState},
-		{ID: 3, State: AbandonedState},
+		{ID: 3, State: FailedState},
 	}})
 	assert.True(t, ok)
 	assert.Equal(t, Task{}, task)
@@ -556,7 +567,7 @@ func TestNormalizeState(t *testing.T) {
 		{ID: 1, State: ""},
 		{ID: 2, State: "  "},
 		{ID: 3, State: "Completed"},
-		{ID: 4, State: " ABANDONED\t"},
+		{ID: 4, State: " FAILED\t"},
 		{ID: 5, State: PendingState},
 		{ID: 6, State: " Bogus "},
 		{ID: 7, State: "Com Pleted"},
@@ -568,7 +579,7 @@ func TestNormalizeState(t *testing.T) {
 		{ID: 1, State: PendingState},
 		{ID: 2, State: PendingState},
 		{ID: 3, State: CompletedState},
-		{ID: 4, State: AbandonedState},
+		{ID: 4, State: FailedState},
 		{ID: 5, State: PendingState},
 		{ID: 6, State: "bogus"},
 		{ID: 7, State: "com pleted"},
@@ -576,4 +587,116 @@ func TestNormalizeState(t *testing.T) {
 	assert.Equal(t, want, list.Tasks, "every task is normalized in place; unknown values are cleaned but left for validation to reject")
 
 	assert.NotPanics(t, func() { normalizeState(&TaskList{}) })
+}
+
+func TestParseTasks_ReadsErrorField(t *testing.T) {
+	got, err := ParseTasks([]byte("tasks:\n  - {id: 1, name: a, prompt: p, state: failed, error: boom}\n"))
+	require.NoError(t, err)
+	require.Len(t, got.Tasks, 1)
+	assert.Equal(t, "boom", got.Tasks[0].Error)
+}
+
+func TestSaveTasks_ErrorRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "tasks.yaml")
+
+	want := TaskList{Tasks: []Task{
+		{ID: 1, Name: "First", Prompt: "p", State: FailedState, Error: "exit status 1"},
+	}}
+
+	require.NoError(t, SaveTasks(path, want))
+
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+
+	got, err := ParseTasks(data)
+	require.NoError(t, err)
+	assert.Equal(t, want, got, "the error message must round-trip verbatim")
+}
+
+func TestSaveTasks_OmitsEmptyError(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "tasks.yaml")
+
+	want := TaskList{Tasks: []Task{
+		{ID: 1, Name: "First", Prompt: "p", State: CompletedState, Error: ""},
+	}}
+	require.NoError(t, SaveTasks(path, want))
+
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.NotContains(t, string(data), "error:", "an empty error must be omitted from the saved yaml entirely")
+
+	got, err := ParseTasks(data)
+	require.NoError(t, err)
+	assert.Equal(t, want, got)
+}
+
+func TestSaveTasks_RoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "tasks.yaml")
+
+	want := TaskList{Tasks: []Task{
+		{ID: 3, Name: "Third", Prompt: "Do the third thing.\nAcross\nmultiple lines.\n", State: FailedState},
+		{ID: 1, Name: "First", Prompt: "Do the first thing.", State: PendingState},
+		{ID: 2, Name: "Second", Prompt: "Do the second thing.", State: CompletedState},
+	}}
+
+	require.NoError(t, SaveTasks(path, want))
+
+	_, statErr := os.Stat(path + ".tmp")
+	assert.True(t, os.IsNotExist(statErr), "no .tmp file should remain after a successful save")
+
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+
+	got, err := ParseTasks(data)
+	require.NoError(t, err)
+	assert.Equal(t, want, got, "ids, names, multi-line prompts, states, and file order must round-trip")
+}
+
+func TestSaveTasks_OverwritesExistingFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "tasks.yaml")
+	require.NoError(t, os.WriteFile(path, []byte("stale contents"), 0o600))
+
+	want := TaskList{Tasks: []Task{{ID: 1, Name: "Only", Prompt: "p", State: CompletedState}}}
+	require.NoError(t, SaveTasks(path, want))
+
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+
+	got, err := ParseTasks(data)
+	require.NoError(t, err)
+	assert.Equal(t, want, got)
+}
+
+func TestSaveTasks_PathIsDirectory(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "tasks.yaml")
+	require.NoError(t, os.Mkdir(target, 0o700))
+
+	err := SaveTasks(target, TaskList{Tasks: []Task{{ID: 1, Name: "a", Prompt: "p", State: PendingState}}})
+	require.Error(t, err)
+
+	_, statErr := os.Stat(target + ".tmp")
+	assert.True(t, os.IsNotExist(statErr), "no .tmp file should remain after a failed save")
+}
+
+func TestSaveTasks_TargetDirNotWritable(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: directory permissions are not enforced")
+	}
+
+	dir := t.TempDir()
+	roDir := filepath.Join(dir, "ro")
+	require.NoError(t, os.Mkdir(roDir, 0o500))
+	t.Cleanup(func() { _ = os.Chmod(roDir, 0o700) })
+
+	path := filepath.Join(roDir, "tasks.yaml")
+	err := SaveTasks(path, TaskList{Tasks: []Task{{ID: 1, Name: "a", Prompt: "p", State: PendingState}}})
+	require.Error(t, err)
+
+	_, statErr := os.Stat(path + ".tmp")
+	assert.True(t, os.IsNotExist(statErr), "no .tmp file should remain after a failed save")
 }

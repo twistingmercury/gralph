@@ -74,6 +74,7 @@ func testLoopSignal(t *testing.T, sig os.Signal) {
 	after, err := os.ReadFile(tasksPath)
 	require.NoError(t, err)
 	assert.Equal(t, string(original), string(after), "expected tasks.yaml to be byte-for-byte unchanged after cancellation")
+	assertNoTmpFile(t, tasksPath)
 
 	assert.NotContains(t, gp.stdout.String(), "Should never start.", "expected the second task's prompt never to be printed")
 

@@ -1,9 +1,11 @@
 package looper
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -23,7 +25,7 @@ func Start(ctx context.Context, promptFile, tasksFile string) error {
 		return fmt.Errorf("failed to start loop runner: %s", err)
 	}
 
-	if err := runLoop(ctx, prompt, tasklist); err != nil {
+	if err := runLoop(ctx, prompt, tasklist, tasksFile); err != nil {
 		return fmt.Errorf("loop error: %w", err)
 	}
 
@@ -72,12 +74,19 @@ func getPrompt(path string) (string, error) {
 
 }
 
-func runLoop(ctx context.Context, p string, tl *tasks.TaskList) error {
+func runLoop(ctx context.Context, p string, tl *tasks.TaskList, tasksFile string) error {
 	const claude = "claude"
 	const print = "--print"
 	const skipPermissions = "--dangerously-skip-permissions"
 
-	for _, task := range tl.Tasks {
+	for i := range tl.Tasks {
+		task := &tl.Tasks[i]
+
+		if task.State == tasks.CompletedState {
+			fmt.Printf("task %d: %s already completed, skipping\n", task.ID, task.Name)
+			continue
+		}
+
 		// formatting it to make it easier to read by a human
 		prompt := fmt.Sprintf("%s\n\n%s\n", p, task.String())
 
@@ -86,12 +95,35 @@ func runLoop(ctx context.Context, p string, tl *tasks.TaskList) error {
 		cmd := exec.CommandContext(ctx, claude, print, skipPermissions)
 		configureProcessTree(cmd)
 		cmd.Stdin = strings.NewReader(prompt)
-		cmd.Stdout = os.Stdout
+
+		var out bytes.Buffer
+		cmd.Stdout = io.MultiWriter(os.Stdout, &out)
 		cmd.Stderr = os.Stderr
 
-		if err := cmd.Run(); err != nil {
-			return fmt.Errorf("task %d: %s failed: %w", task.ID, task.Name, err)
+		runErr := cmd.Run()
+
+		if runErr != nil && ctx.Err() != nil {
+			// Cancelled by SIGINT/SIGTERM: leave the task's state and the
+			// tasks file untouched so a re-run picks up where it left off.
+			return fmt.Errorf("task %d: %s failed: %w", task.ID, task.Name, runErr)
 		}
+
+		state, errMsg := outcome(runErr, lastResultLine(out.String()))
+		task.State = state
+		task.Error = errMsg
+
+		if state == tasks.CompletedState {
+			if err := tasks.SaveTasks(tasksFile, *tl); err != nil {
+				return fmt.Errorf("task %d: %s: failed to save task state: %w", task.ID, task.Name, err)
+			}
+			continue
+		}
+
+		runFailure := fmt.Errorf("task %d: %s failed: %s", task.ID, task.Name, errMsg)
+		if saveErr := tasks.SaveTasks(tasksFile, *tl); saveErr != nil {
+			return errors.Join(runFailure, saveErr)
+		}
+		return runFailure
 	}
 
 	return nil

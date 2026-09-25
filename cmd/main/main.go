@@ -15,8 +15,8 @@ import (
 
 var (
 	versionFlag = pflag.BoolP("version", "v", false, "Show the current version of gralph")
-	tasksFlag   = pflag.StringP("tasks", "t", "", "Required. Path to the tasks.yaml checklist file that drives the loop")
-	promptFlag  = pflag.StringP("prompt", "p", "", "Required. Path to the prompt.md template file passed to Claude each iteration")
+	tasksFlag   = pflag.StringP("tasks", "t", "", "Required. Path to the tasks.yaml task list that drives the loop")
+	promptFlag  = pflag.StringP("prompt", "p", "", "Required. Path to the prompt.md shared prompt passed to Claude with every task")
 )
 
 func main() {
