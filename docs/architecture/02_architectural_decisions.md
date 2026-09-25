@@ -1,8 +1,8 @@
 # Gralph — Architectural Decisions
 
-> **Version**: v02
+> **Version**: v03
 > **Date**: 2026-09-25
-> **Notes**: Skill renamed to gralph-docs-writer; ADR-009 embeds the skill and adds `--install-skill`.
+> **Notes**: ADR-010 adds the installed-skill version check: `--install-skill` stamps VERSION with a content hash, and runs and dry-runs refuse to start on a missing or stale skill.
 
 [Back to Overview](00_overview.md) | [Back to Project README](../../README.md)
 
@@ -35,6 +35,7 @@ Each architectural decision is recorded as an ADR with the following structure:
 | 007   | Unix only, process group lifecycle management  | Accepted | 2026-09-25 |
 | 008   | Docker-first CI: build, test, e2e in container | Accepted | 2026-09-25 |
 | 009   | Embed the skill, install with --install-skill  | Accepted | 2026-09-25 |
+| 010   | Refuse to run with a stale installed skill     | Accepted | 2026-09-25 |
 
 ## Decisions
 
@@ -287,6 +288,39 @@ The `gralph-docs-writer` skill generates task files that must satisfy the parser
 - Any local edits to the installed skill folder are lost on reinstall
 - Skill changes ship only with a new binary; a stale install is not detected during normal runs
 - Two install paths exist (flag for users, script for development)
+
+---
+
+### ADR-010: Refuse to run with a stale installed skill
+
+**Status:** Accepted
+
+**Context:**
+
+ADR-009 ties the embedded skill to the binary, but nothing checked the installed copy: the installed `gralph-docs-writer` skill went stale more than once after gralph was upgraded or the skill changed. The skill's field rules must match the parser in `internal/tasks`, so a stale skill generates task files the current gralph may reject or read differently.
+
+**Decision:**
+
+`--install-skill` writes a `VERSION` file into `~/.claude/skills/gralph-docs-writer` holding two lines: the gralph version and a SHA-256 content hash of the embedded skill (`sha256:<hex>`, computed over each file's relative path and bytes in `fs.WalkDir` order). Normal runs and `--dry-run` call `skillinstall.Check` after the flag checks and refuse to start (exit 1) when the skill folder is missing or its `VERSION` hash differs from the binary's, telling the user to run `gralph --install-skill`. The stored version is informational only, used in the error message.
+
+A content hash was chosen over the version tag or the git commit:
+
+- A version tag misses skill changes made between releases, so development builds would accept a stale skill.
+- A commit changes on unrelated edits, forcing reinstalls when the skill did not change, and its length differs between `make local` and `make build`, so the same source would stamp different values.
+- The content hash changes exactly when the embedded skill changes, independent of how the binary was built.
+
+**Consequences:**
+
+*Positive:*
+- A stale or missing skill is caught before any task runs, with a one-line fix in the error
+- Reinstalls are required only when the skill content actually changes
+- Local and release builds of the same source agree on the hash
+
+*Negative:*
+- Every run and dry-run needs the skill installed, even when the user never generates task files with it
+- Local edits to the installed skill make every run fail until `--install-skill` overwrites them
+- Tests that run gralph need a `HOME` with the skill installed (the e2e suite's `skillHome`)
+- `scripts/install_skill.sh` writes no `VERSION`, so a development install fails the check until `--install-skill` is run
 
 ---
 
