@@ -25,7 +25,8 @@ tasks:
 
       Verification:
       - Working directory: GENERATE_ACTUAL_VERIFICATION_DIRECTORY
-      - Command: GENERATE_RUNNABLE_COMMAND_THAT_EXITS_ZERO_ON_SUCCESS
+      - Quality gates: GENERATE_AGREED_QUALITY_GATE_COMMANDS
+      - Task checks: GENERATE_TASK_SPECIFIC_COMMANDS_OR_NONE
       - Expected outcome: GENERATE_OBSERVABLE_SUCCESS_CONDITION
 
       Completion criteria:

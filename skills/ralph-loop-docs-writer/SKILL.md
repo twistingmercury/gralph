@@ -50,7 +50,17 @@ in place when authorized.
    and Git policies. Do not add automatic commits where none are required.
 2. Read [the YAML task template](templates/tasks_template.yaml) and
    [the prompt template](templates/prompt_template.md).
-3. Write `tasks.yaml` with a top-level `tasks` sequence holding at least one
+3. Interview the user about quality gates before drafting tasks. Propose the
+   gates the repository already has (tests, linters, formatters, security
+   scanners, builds, end-to-end suites) as runnable commands, then ask which
+   ones every task must pass and what to add. Ask one question at a time.
+   Every task's Verification lists the agreed gates, plus its own
+   task-specific checks.
+4. Draft the task list and show the user a summary, one line per task:
+   `<id>: <name> - <one short sentence>`. Nothing else goes in the summary.
+   Ask whether they approve it or want changes. Revise and show the summary
+   again until they approve. Write neither file before approval.
+5. Write `tasks.yaml` with a top-level `tasks` sequence holding at least one
    task. Each task has a stable positive integer `id` (at most 32767), a
    nonblank `name`, a nonblank block-scalar `prompt`, and an optional `state`.
    IDs are unique and independent of order; Gralph runs tasks in file order.
@@ -60,24 +70,25 @@ in place when authorized.
    write it; preserve it if present when updating an existing file. Write no
    other keys: Gralph ignores them when reading and drops them the first time
    it saves the file.
-4. Put scope, steps, runnable verification, and completion criteria inside each
-   task's prompt. Preserve project-specific instructions. YAML comments are not
-   durable task instructions: they never reach the session. Gralph rewrites the
-   task file with every state change, so comments and custom formatting are not
-   preserved.
-5. Write `prompt.md` from the prompt template. Replace every `GENERATE_*` token
+6. Put scope, steps, the agreed quality gates, task-specific verification, and
+   completion criteria inside each task's prompt. Preserve project-specific
+   instructions. YAML comments are not durable task instructions: they never
+   reach the session. Gralph rewrites the task file with every state change,
+   so comments and custom formatting are not preserved.
+7. Write `prompt.md` from the prompt template. Replace every `GENERATE_*` token
    with project content and actual paths: full build/test commands and the
    project's commit policy, since the session sees only this prompt and one
    task. Keep commits conditional on the project's authorization. Keep the
    Rules and Finish sections as written so the pair works without this skill
-   installed. Keep generic rules out of task prompts; they live once, in
-   `prompt.md`.
-6. Check YAML syntax and the field rules in step 3 for every task, including
-   completed and failed ones. An empty `tasks` sequence is an error. Check
-   paths, runnable verification commands, safe cleanup instructions, and
-   preservation of project policies. Confirm no `GENERATE_*` token remains in
-   either file.
-7. Report both output paths and the checks performed. Do not launch the loop
+   installed. Apart from the quality gates, keep generic rules out of task
+   prompts; they live once, in `prompt.md`.
+8. Validate `tasks.yaml` with `gralph -t <tasks.yaml> --dry-run`: it applies
+   the same rules a real run does and exits non-zero on an invalid file. If
+   `gralph` is not installed, check YAML syntax and the field rules in step 5
+   by hand. Also check paths, runnable verification commands, safe cleanup
+   instructions, and preservation of project policies, and confirm no
+   `GENERATE_*` token remains in either file.
+9. Report both output paths and the checks performed. Do not launch the loop
    merely to validate generated files.
 
 ## Task scope

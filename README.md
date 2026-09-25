@@ -1,7 +1,7 @@
 # Gralph
 
 > **Maturity Level**: Emerging - under active development; the CLI contract has already changed between minor versions
-> **Version**: v0.6.0
+> **Version**: v0.6.2
 
 > - **Emerging**: Prototype, not production-ready, expect breaking changes
 > - **Basic**: Production-ready but actively evolving, expect minor version changes
@@ -101,7 +101,7 @@ original) with every state change. Comments and custom formatting are not
 preserved; each task's state is made explicit.
 
 Background on the approach is in [docs/gralph-concept.md](docs/gralph-concept.md);
-the design is documented from [docs/architecture/00-overview.md](docs/architecture/00-overview.md).
+the design is documented from [docs/architecture/00_overview_v01.md](docs/architecture/00_overview_v01.md).
 
 ## Key Considerations
 
