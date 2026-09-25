@@ -11,13 +11,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestLoop_RunsEveryTaskInOrder drives gralph through a tasks.yaml with three
-// tasks in mixed states (completed, pending, abandoned) using the fake
-// claude fixture, and asserts the full happy path: gralph runs every task in
-// file order regardless of state (there is no state filtering today), one
-// invocation per task, and the exact stdin gralph sends to claude for each
-// invocation matches the documented wire contract. gralph never writes
-// tasks.yaml today, so the file must be byte-identical afterward.
+// TestLoop_RunsEveryTaskInOrder drives gralph through a tasks.yaml with
+// three tasks in mixed states (completed, pending, and one with no explicit
+// state, which normalizes to pending) using the fake claude fixture, and
+// asserts the full happy path: the completed task is skipped entirely (no
+// claude invocation, its prompt never echoed, just the skip message on
+// stdout), the non-completed tasks run in file order with the exact
+// documented stdin wire contract, and once every invocation exits 0 the
+// tasks.yaml on disk is rewritten with every task marked completed.
 func TestLoop_RunsEveryTaskInOrder(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -37,11 +38,9 @@ func TestLoop_RunsEveryTaskInOrder(t *testing.T) {
   - id: 3
     name: Third task
     prompt: Do the third thing.
-    state: abandoned
+    state: pending
 `
 	tasksPath := writeTasksYAML(t, dir, tasksYAML)
-	original, err := os.ReadFile(tasksPath)
-	require.NoError(t, err)
 
 	recordFile := filepath.Join(dir, "record.ndjson")
 	env := gralphEnv(fakeClaudeDir, map[string]string{
@@ -51,8 +50,11 @@ func TestLoop_RunsEveryTaskInOrder(t *testing.T) {
 	res := runGralph(t, 15*time.Second, []string{"--prompt=" + promptPath, "--tasks=" + tasksPath}, env)
 	require.Equal(t, 0, res.exitCode, "stdout:\n%s\nstderr:\n%s", res.stdout, res.stderr)
 
+	assert.Contains(t, res.stdout, "task 1: First task already completed, skipping")
+	assert.NotContains(t, res.stdout, "Do the first thing.", "expected the completed task's prompt never to be printed")
+
 	records := readFakeClaudeRecords(t, recordFile)
-	require.Len(t, records, 3, "expected claude invoked once per task, in file order")
+	require.Len(t, records, 2, "expected claude invoked only for the non-completed tasks, in file order")
 
 	wantArgv := []string{"--print", "--dangerously-skip-permissions"}
 	wantTasks := []struct {
@@ -60,7 +62,6 @@ func TestLoop_RunsEveryTaskInOrder(t *testing.T) {
 		name   string
 		prompt string
 	}{
-		{1, "First task", "Do the first thing."},
 		{2, "Second task", "Do the second thing."},
 		{3, "Third task", "Do the third thing."},
 	}
@@ -69,15 +70,64 @@ func TestLoop_RunsEveryTaskInOrder(t *testing.T) {
 		assert.Equal(t, expectedStdin(sharedPrompt, want.id, want.name, want.prompt), records[i].Stdin, "stdin for invocation %d must match the wire contract exactly", i)
 	}
 
-	after, err := os.ReadFile(tasksPath)
+	after := readTasksYAML(t, tasksPath)
+	require.Len(t, after.Tasks, 3)
+	states := taskStates(after)
+	assert.Equal(t, "completed", states[1], "expected the already-completed task to remain completed")
+	assert.Equal(t, "completed", states[2], "expected the second task to be written back as completed")
+	assert.Equal(t, "completed", states[3], "expected the third task to be written back as completed")
+
+	assertNoTmpFile(t, tasksPath)
+}
+
+// TestLoop_FailedTaskRefusesToRun verifies that a task file containing a
+// failed task is refused before any work starts: gralph prints the task
+// summary table on stdout, exits non-zero, never invokes claude, and leaves the task file
+// byte-for-byte unchanged with no temporary file behind.
+func TestLoop_FailedTaskRefusesToRun(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	promptPath := writePrompt(t, dir, "Body.\n")
+	tasksYAML := `tasks:
+  - id: 1
+    name: First task
+    prompt: Do the first thing.
+  - id: 2
+    name: Second task
+    prompt: Do the second thing.
+    state: failed
+    error: boom
+`
+	tasksPath := writeTasksYAML(t, dir, tasksYAML)
+
+	attemptLog := filepath.Join(dir, "attempts.log")
+	env := gralphEnv(fakeClaudeDir, map[string]string{
+		"FAKECLAUDE_ATTEMPT_LOG_FILE": attemptLog,
+	})
+
+	res := runGralph(t, 15*time.Second, []string{"--prompt=" + promptPath, "--tasks=" + tasksPath}, env)
+
+	require.NotEqual(t, 0, res.exitCode, "stdout:\n%s\nstderr:\n%s", res.stdout, res.stderr)
+	assert.Contains(t, res.stdout, "Some tasks failed previous runs:\n")
+	assert.Contains(t, res.stdout, "   1  PENDING  \033[0m  First task\n")
+	assert.Contains(t, res.stdout, "❌  2  \033[1;91mFAILED   \033[0m  Second task  \033[1;91m← Needs review!\033[0m\n")
+	assert.Contains(t, res.stderr, "fix the failed tasks and set their state to pending before running")
+	assert.Equal(t, 0, countAttempts(t, attemptLog), "expected claude never invoked")
+
+	raw, err := os.ReadFile(tasksPath)
 	require.NoError(t, err)
-	assert.Equal(t, string(original), string(after), "gralph must never write tasks.yaml")
+	assert.Equal(t, tasksYAML, string(raw), "expected the task file to be unchanged")
+
+	assertNoTmpFile(t, tasksPath)
 }
 
 // TestLoop_StopsOnFirstFailure covers the fail-fast branch: when claude exits
 // non-zero on the first task, gralph exits non-zero, reports the failing
 // task by id and name, invokes claude exactly once, and never starts (or
-// prints the prompt for) the second task.
+// prints the prompt for) the second task. It also asserts the write-back
+// contract: the failing task is saved as failed and the unstarted task is
+// left untouched as pending.
 func TestLoop_StopsOnFirstFailure(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -106,6 +156,13 @@ func TestLoop_StopsOnFirstFailure(t *testing.T) {
 
 	assert.Equal(t, 1, countAttempts(t, attemptLog), "expected claude invoked exactly once")
 	assert.NotContains(t, res.stdout, "Do the second thing.", "expected the second task's prompt never to be printed")
+
+	after := readTasksYAML(t, tasksPath)
+	states := taskStates(after)
+	assert.Equal(t, "failed", states[1], "expected the failing task to be written back as failed")
+	assert.Equal(t, "pending", states[2], "expected the unstarted task to remain pending")
+
+	assertNoTmpFile(t, tasksPath)
 }
 
 // TestLoop_PromptEchoedToStdout verifies gralph prints the exact combined
@@ -208,6 +265,35 @@ func TestStart_InvalidTaskState(t *testing.T) {
 `)
 
 	assertStartupFailure(t, dir, promptPath, tasksPath)
+}
+
+// TestStart_AbandonedStateRejected verifies that "abandoned" -- a state
+// value that is no longer valid -- fails startup via the same invalid-state
+// error as any other unrecognized value, naming the offending task id and
+// state, and that claude is never invoked.
+func TestStart_AbandonedStateRejected(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	promptPath := writePrompt(t, dir, "Body.\n")
+	tasksPath := writeTasksYAML(t, dir, `tasks:
+  - id: 1
+    name: First task
+    prompt: Do the thing.
+    state: abandoned
+`)
+
+	attemptLog := filepath.Join(dir, "attempts.log")
+	env := gralphEnv(fakeClaudeDir, map[string]string{
+		"FAKECLAUDE_ATTEMPT_LOG_FILE": attemptLog,
+	})
+
+	res := runGralph(t, 15*time.Second, []string{"--prompt=" + promptPath, "--tasks=" + tasksPath}, env)
+
+	require.NotEqual(t, 0, res.exitCode, "stdout:\n%s\nstderr:\n%s", res.stdout, res.stderr)
+	assert.Contains(t, res.stderr, "failed to start loop runner")
+	assert.Contains(t, res.stderr, `tasks[0] (id 1): state: must be pending, completed, or failed, got "abandoned"`)
+	assert.Equal(t, 0, countAttempts(t, attemptLog), "expected claude never invoked")
 }
 
 // TestStart_EmptyTaskList verifies that a tasks.yaml with no tasks fails

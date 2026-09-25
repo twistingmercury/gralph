@@ -1,7 +1,7 @@
 # Gralph
 
 > **Maturity Level**: Emerging - under active development; the CLI contract has already changed between minor versions
-> **Version**: v0.6.0
+> **Version**: v0.6.2
 
 > - **Emerging**: Prototype, not production-ready, expect breaking changes
 > - **Basic**: Production-ready but actively evolving, expect minor version changes
@@ -30,9 +30,18 @@ gralph --prompt path/to/prompt.md --tasks path/to/tasks.yaml
 
 | Flag               | Required | Description                                            |
 | ------------------ | -------- | ------------------------------------------------------ |
-| `--prompt` / `-p`  | Yes      | Path to the shared prompt sent to Claude for every task |
+| `--prompt` / `-p`  | Yes, unless `--dry-run` | Path to the shared prompt sent to Claude for every task |
 | `--tasks` / `-t`   | Yes      | Path to the YAML task list that drives the loop        |
+| `--dry-run`        | No       | Validate the task file and report on it without running anything |
 | `--version` / `-v` | No       | Print version information and exit                     |
+
+`gralph -t tasks.yaml --dry-run` checks the task file with the same rules a
+real run uses, without launching Claude or writing any file. `--prompt` is
+ignored. An invalid file prints the error to stderr and exits non-zero. A valid
+file prints a table of each task's id, state, and name, and exits zero. If any
+task is `failed` (which a real run would refuse), the table follows `Some tasks
+failed previous runs:` and each failed row ends in `← Needs review!`; otherwise
+the table is followed by `<tasks path> is valid`.
 
 A task file is a `tasks` sequence. Each task has a unique positive integer `id`,
 a `name` (unique, ignoring case and surrounding whitespace), a `prompt`, and an
@@ -55,11 +64,13 @@ tasks:
       Add the HTTP handler using the repository from task 1.
 ```
 
-`state` is `pending`, `completed`, or `abandoned`; leave it out for new work and
-it is read as `pending`. Gralph runs tasks in file order — `id` identifies a
-task, it does not order them. The `ralph-loop-docs-writer` skill in
-[skills/](skills/ralph-loop-docs-writer/SKILL.md) generates a task file and
-shared prompt for a project; `scripts/install_skill.sh` installs it.
+`state` is `pending`, `completed`, or `failed`; leave it out for new work and
+it is read as `pending`. An optional `error` field may be present when a task
+has failed; gralph writes it, never the session. Gralph runs tasks in file
+order — `id` identifies a task, it does not order them. The
+`ralph-loop-docs-writer` skill in [skills/](skills/ralph-loop-docs-writer/SKILL.md)
+generates a task file and shared prompt for a project;
+`scripts/install_skill.sh` installs it.
 
 ## How it works
 
@@ -75,17 +86,22 @@ The text Claude receives is:
 <task prompt>
 ```
 
-Claude's own output passes straight through to gralph's stdout and stderr. If
-the session exits non-zero, gralph reports `task <id>: <name> failed` and exits
-non-zero; later tasks do not run. There are no retries. When every task's
-session has exited zero, gralph exits zero.
+Claude's own output passes straight through to gralph's stdout and stderr. Gralph
+skips tasks with `state: completed` (printing `task <id>: <name> already
+completed, skipping`). For pending tasks, gralph reads the last
+non-blank line of Claude's output (skipping lines that are only code fences).
+If that line is valid JSON with `state: "completed"` and the session exits zero,
+gralph marks the task `completed` and writes the file. Otherwise, gralph marks
+the task `failed`, writes the file, reports `task <id>: <name> failed: <error>`
+(from the JSON `error` field or the exit code if missing), and exits non-zero;
+later tasks do not run. When every task succeeds, gralph exits zero and returns.
 
-Gralph does not yet act on `state` or write it back: every task in the file is
-run, and the file is never modified. Selecting only pending tasks and recording
-completion is the next step.
+The task file is rewritten atomically (write to temporary file, rename over
+original) with every state change. Comments and custom formatting are not
+preserved; each task's state is made explicit.
 
 Background on the approach is in [docs/gralph-concept.md](docs/gralph-concept.md);
-the design is documented from [docs/architecture/00-overview.md](docs/architecture/00-overview.md).
+the design is documented from [docs/architecture/00_overview_v01.md](docs/architecture/00_overview_v01.md).
 
 ## Key Considerations
 
@@ -93,7 +109,8 @@ the design is documented from [docs/architecture/00-overview.md](docs/architectu
 - **`claude` must be on PATH**: gralph calls `claude --print --dangerously-skip-permissions` directly; the Claude CLI must be installed and accessible.
 - **Permission checks are bypassed**: `--dangerously-skip-permissions` lets Claude run without user interaction. Treat the prompt and task files as code you are choosing to execute, and do not run gralph against untrusted ones.
 - **Each session starts cold**: a session sees only the shared prompt and its one task. Anything it needs to know about earlier tasks must be in those two texts or in the repository.
-- **One session per task**: a failing task stops the run. Fix the cause and run gralph again.
+- **Completed tasks are skipped**: gralph runs only pending tasks.
+- **Failed tasks block the run**: gralph refuses to start while any task is `failed`, printing the same task summary table as `--dry-run` and exiting 1, launching no session and leaving the file untouched. Fix the cause, then set the task's `state` to `pending` (or `completed`) by hand before running again.
 - **Signal handling**: SIGINT (Ctrl-C) or SIGTERM cancels the current Claude session and stops the run. The entire Claude process group is terminated, so nothing Claude spawned outlives gralph.
 - **Unix only**: gralph runs on Linux, macOS, and the BSDs. Windows is not supported.
 

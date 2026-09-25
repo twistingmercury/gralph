@@ -15,14 +15,23 @@ import (
 
 var (
 	versionFlag = pflag.BoolP("version", "v", false, "Show the current version of gralph")
-	tasksFlag   = pflag.StringP("tasks", "t", "", "Required. Path to the tasks.yaml checklist file that drives the loop")
-	promptFlag  = pflag.StringP("prompt", "p", "", "Required. Path to the prompt.md template file passed to Claude each iteration")
+	tasksFlag   = pflag.StringP("tasks", "t", "", "Required. Path to the tasks.yaml task list that drives the loop")
+	promptFlag  = pflag.StringP("prompt", "p", "", "Required unless --dry-run. Path to the prompt.md shared prompt passed to Claude with every task")
+	dryRunFlag  = pflag.Bool("dry-run", false, "Validate the tasks file and report failed tasks without running anything")
 )
 
 func main() {
 	pflag.Parse()
 	checkVersion()
 	validateRequiredFlags()
+
+	if *dryRunFlag {
+		if err := looper.DryRun(os.Stdout, *tasksFlag); err != nil {
+			_, _ = fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -44,7 +53,7 @@ func checkVersion() {
 
 func validateRequiredFlags() {
 	var missing []string
-	if *promptFlag == "" {
+	if *promptFlag == "" && !*dryRunFlag {
 		missing = append(missing, "--prompt")
 	}
 

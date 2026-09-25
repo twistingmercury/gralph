@@ -2,9 +2,8 @@
 name: ralph-loop-docs-writer
 description: >-
   Use when creating or updating the tasks.yaml task list and shared prompt.md
-  that Gralph feeds to Claude Code, when breaking a build plan or PRD into
-  Gralph loop tasks, or when migrating a Markdown PRD checklist to Gralph's
-  YAML task format.
+  that Gralph feeds to Claude Code, or when breaking a build plan or PRD into
+  Gralph loop tasks.
 ---
 
 # Ralph Loop Docs
@@ -15,16 +14,25 @@ scope, verification, and commit policies.
 
 ## How Gralph uses the pair
 
-Gralph works through `tasks.yaml` in file order. For each pending task it
-combines the shared prompt with that task's `prompt` and hands the result to a
-new Claude Code session. Every session starts with no memory of earlier tasks,
-so the pair must carry everything the session needs.
+Gralph works through `tasks.yaml` in file order. It skips `completed` tasks; for
+each `pending` task it combines the shared prompt with that task's
+`prompt` and hands the result to a new Claude Code session. Every session starts
+with no memory of earlier tasks, so the pair must carry everything the session
+needs.
 
 Each task gets one session. There is no retry and no `--iterations` flag, so
 scope every task to what a single session can finish and verify.
 
-Gralph owns `state`; the session never edits `tasks.yaml`. `abandoned` is set
-by a person to make Gralph pass over a task.
+Gralph owns `state` and writes it back to `tasks.yaml`. The session never edits
+the file. To remove a task without running it, delete it from the file; there is
+no `abandoned` state. Gralph decides the outcome from the JSON result line the
+shared prompt asks for at the end of the session's output. A missing or invalid
+result line, or a non-zero exit, marks the task `failed`. Gralph refuses to run
+while any task is `failed`; a person fixes the cause (often by editing the
+task's `prompt`) and resets its `state` to `pending` by hand.
+
+A `tasks.yaml` that does not match the rules below is invalid and Gralph
+refuses to run it. There is no migration from other formats or older states.
 
 ## Published-document preservation
 
@@ -42,27 +50,45 @@ in place when authorized.
    and Git policies. Do not add automatic commits where none are required.
 2. Read [the YAML task template](templates/tasks_template.yaml) and
    [the prompt template](templates/prompt_template.md).
-3. Write `tasks.yaml` with a top-level `tasks` sequence holding at least one
+3. Interview the user about quality gates before drafting tasks. Propose the
+   gates the repository already has (tests, linters, formatters, security
+   scanners, builds, end-to-end suites) as runnable commands, then ask which
+   ones every task must pass and what to add. Ask one question at a time.
+   Every task's Verification lists the agreed gates, plus its own
+   task-specific checks.
+4. Draft the task list and show the user a summary, one line per task:
+   `<id>: <name> - <one short sentence>`. Nothing else goes in the summary.
+   Ask whether they approve it or want changes. Revise and show the summary
+   again until they approve. Write neither file before approval.
+5. Write `tasks.yaml` with a top-level `tasks` sequence holding at least one
    task. Each task has a stable positive integer `id` (at most 32767), a
    nonblank `name`, a nonblank block-scalar `prompt`, and an optional `state`.
    IDs are unique and independent of order; Gralph runs tasks in file order.
    Names are unique ignoring case and surrounding whitespace. `state` is
-   `pending`, `completed`, or `abandoned`; leave it empty for new work, which
-   Gralph reads as `pending`. Gralph ignores any other key.
-4. Put scope, steps, runnable verification, and completion criteria inside each
-   task's prompt. Preserve project-specific instructions. YAML comments are not
-   durable task instructions: they never reach the session, and rewriting the
-   file may discard them.
-5. Write `prompt.md` from the prompt template. Replace every `GENERATE_*` token
-   with project content and actual paths, and omit the template's generator
-   guidance. Keep every execution section so the generated pair works without
-   this skill installed.
-6. Check YAML syntax and the field rules in step 3 for every task, including
-   completed and abandoned ones. An empty `tasks` sequence is an error. Check
-   paths, runnable verification commands, safe cleanup instructions, and
-   preservation of project policies. Confirm no `GENERATE_*` token remains in
-   either file.
-7. Report both output paths and the checks performed. Do not launch the loop
+   `pending`, `completed`, or `failed`; leave it empty for new work, which
+   Gralph reads as `pending`. The optional `error` field is gralph-only: never
+   write it; preserve it if present when updating an existing file. Write no
+   other keys: Gralph ignores them when reading and drops them the first time
+   it saves the file.
+6. Put scope, steps, the agreed quality gates, task-specific verification, and
+   completion criteria inside each task's prompt. Preserve project-specific
+   instructions. YAML comments are not durable task instructions: they never
+   reach the session. Gralph rewrites the task file with every state change,
+   so comments and custom formatting are not preserved.
+7. Write `prompt.md` from the prompt template. Replace every `GENERATE_*` token
+   with project content and actual paths: full build/test commands and the
+   project's commit policy, since the session sees only this prompt and one
+   task. Keep commits conditional on the project's authorization. Keep the
+   Rules and Finish sections as written so the pair works without this skill
+   installed. Apart from the quality gates, keep generic rules out of task
+   prompts; they live once, in `prompt.md`.
+8. Validate `tasks.yaml` with `gralph -t <tasks.yaml> --dry-run`: it applies
+   the same rules a real run does and exits non-zero on an invalid file. If
+   `gralph` is not installed, check YAML syntax and the field rules in step 5
+   by hand. Also check paths, runnable verification commands, safe cleanup
+   instructions, and preservation of project policies, and confirm no
+   `GENERATE_*` token remains in either file.
+9. Report both output paths and the checks performed. Do not launch the loop
    merely to validate generated files.
 
 ## Task scope
@@ -77,20 +103,4 @@ independent goals. Verification commands must fit the target repository; do
 not invent passes or require source tests for documentation-only changes.
 
 Honor project policies for source commits, and never instruct the session to
-edit or commit `tasks.yaml`. Preserve existing progress and history files.
-
-## Explicit migration
-
-Installing this skill does not migrate existing projects. Migrate only when
-requested. Inventory the old input before editing: written task IDs, sequence,
-full instructions, policies, and states. Map Markdown `[ ]` to `pending`,
-`[x]`/`[X]` to `completed`, and `[~]` to `abandoned`. Preserve existing YAML
-states, IDs, order, and prompts.
-
-Report ambiguous or duplicate IDs and conflicting old/new pairs; stop that
-migration instead of silently renumbering or choosing one file as
-authoritative. Do not infer completion from logs or prose. Compare source and
-target inventories before updating links: every task must retain its identity,
-meaning, and state. Retain the original Markdown task history and existing
-progress/history files. Update the shared prompt and invocation examples
-together only after reconciliation.
+edit or commit `tasks.yaml`.

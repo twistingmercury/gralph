@@ -13,6 +13,11 @@
 //	                    forever, instead of reading stdin, recording it, and
 //	                    exiting
 //	FAKE_CLAUDE_READY   path to write a ready marker to just before blocking
+//	FAKE_CLAUDE_OUTPUT  if set (even to the empty string), its value is
+//	                    written verbatim to stdout before exiting, instead of
+//	                    the default result line. This lets a test control
+//	                    exactly what runLoop sees as the session's result
+//	                    line, including malformed or fenced output.
 package main
 
 import (
@@ -58,7 +63,26 @@ func main() {
 		}
 		exitCode = code
 	}
+
+	writeOutput(exitCode)
+
 	os.Exit(exitCode)
+}
+
+// writeOutput writes fake claude's stdout result line. When FAKE_CLAUDE_OUTPUT
+// is set, even to the empty string, its value is written verbatim and no
+// default is synthesized. Otherwise a default result line is produced so
+// tests that don't care about the result line are unaffected: a completed
+// result line on a zero exit, nothing on a non-zero exit.
+func writeOutput(exitCode int) {
+	if out, ok := os.LookupEnv("FAKE_CLAUDE_OUTPUT"); ok {
+		fmt.Print(out)
+		return
+	}
+
+	if exitCode == 0 {
+		fmt.Println(`{"state":"completed","error":""}`)
+	}
 }
 
 // writeUnderRoot and appendUnderRoot confine file access to the directory

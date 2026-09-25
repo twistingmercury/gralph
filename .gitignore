@@ -3,6 +3,7 @@
 bin/
 out/
 coverage.out
+.local/
 
 # Local agent and tool state
 .claude/settings.local.json
