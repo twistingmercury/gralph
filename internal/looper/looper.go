@@ -1,6 +1,7 @@
 package looper
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -95,12 +96,11 @@ func runLoop(ctx context.Context, p string, tl *tasks.TaskList, tasksFile string
 		configureProcessTree(cmd)
 		cmd.Stdin = strings.NewReader(prompt)
 
-		lastLine := newLastLineWriter()
-		cmd.Stdout = io.MultiWriter(os.Stdout, lastLine)
+		var out bytes.Buffer
+		cmd.Stdout = io.MultiWriter(os.Stdout, &out)
 		cmd.Stderr = os.Stderr
 
 		runErr := cmd.Run()
-		lastLine.Finalize()
 
 		if runErr != nil && ctx.Err() != nil {
 			// Cancelled by SIGINT/SIGTERM: leave the task's state and the
@@ -108,7 +108,7 @@ func runLoop(ctx context.Context, p string, tl *tasks.TaskList, tasksFile string
 			return fmt.Errorf("task %d: %s failed: %w", task.ID, task.Name, runErr)
 		}
 
-		state, errMsg := outcome(runErr, lastLine.LastLine())
+		state, errMsg := outcome(runErr, lastResultLine(out.String()))
 		task.State = state
 		task.Error = errMsg
 
@@ -119,7 +119,7 @@ func runLoop(ctx context.Context, p string, tl *tasks.TaskList, tasksFile string
 			continue
 		}
 
-		runFailure := newTaskFailure(task.ID, task.Name, errMsg, runErr)
+		runFailure := fmt.Errorf("task %d: %s failed: %s", task.ID, task.Name, errMsg)
 		if saveErr := tasks.SaveTasks(tasksFile, *tl); saveErr != nil {
 			return errors.Join(runFailure, saveErr)
 		}
@@ -128,25 +128,3 @@ func runLoop(ctx context.Context, p string, tl *tasks.TaskList, tasksFile string
 
 	return nil
 }
-
-// taskFailure is the error runLoop returns for a failed task. Its message is
-// always built from the same errMsg that was saved to task.Error, so the
-// returned error and the persisted state never disagree; Unwrap exposes the
-// underlying exec error (if any), so errors.Is/As (e.g. *exec.ExitError,
-// exec.ErrNotFound) stay reachable through it even when errMsg came from the
-// session's JSON result line instead of runErr.
-type taskFailure struct {
-	msg    string
-	runErr error
-}
-
-func newTaskFailure(id int16, name, errMsg string, runErr error) error {
-	return &taskFailure{
-		msg:    fmt.Sprintf("task %d: %s failed: %s", id, name, errMsg),
-		runErr: runErr,
-	}
-}
-
-func (e *taskFailure) Error() string { return e.msg }
-
-func (e *taskFailure) Unwrap() error { return e.runErr }

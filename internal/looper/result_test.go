@@ -98,6 +98,51 @@ func TestParseResult(t *testing.T) {
 	}
 }
 
+func TestLastResultLine(t *testing.T) {
+	tests := []struct {
+		name   string
+		output string
+		want   string
+	}{
+		{
+			name:   "plain last line",
+			output: "first\nsecond\n",
+			want:   "second",
+		},
+		{
+			name:   "trailing blank lines are skipped",
+			output: "result\n\n\n   \n",
+			want:   "result",
+		},
+		{
+			name:   "crlf line endings",
+			output: "first\r\nsecond\r\n",
+			want:   "second",
+		},
+		{
+			name:   "closing fence is skipped",
+			output: "```json\n{\"state\":\"completed\",\"error\":\"\"}\n```\n",
+			want:   `{"state":"completed","error":""}`,
+		},
+		{
+			name:   "no trailing newline",
+			output: "no newline at all",
+			want:   "no newline at all",
+		},
+		{
+			name:   "empty output",
+			output: "",
+			want:   "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, lastResultLine(tt.output))
+		})
+	}
+}
+
 func TestOutcome(t *testing.T) {
 	exitErr := errors.New("exit status 1")
 

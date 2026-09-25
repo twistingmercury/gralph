@@ -33,6 +33,22 @@ func parseResult(line string) (state, errMsg string, ok bool) {
 	return state, strings.TrimSpace(r.Error), true
 }
 
+// lastResultLine returns the last non-blank, non-fence-marker line of
+// output, trimmed of surrounding whitespace. It is meant to find a claude
+// session's trailing JSON result line even when that line is wrapped in a
+// Markdown code fence.
+func lastResultLine(output string) string {
+	lines := strings.Split(output, "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := strings.TrimSpace(lines[i])
+		if line == "" || strings.HasPrefix(line, "```") {
+			continue
+		}
+		return line
+	}
+	return ""
+}
+
 // outcome resolves the state and error message to persist for a task run,
 // given the exec error (nil on a zero exit) and the last non-blank line of
 // the session's stdout. Cancellation is the caller's responsibility: outcome

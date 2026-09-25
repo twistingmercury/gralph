@@ -3,7 +3,6 @@ package looper
 import (
 	"context"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"testing"
 
@@ -123,8 +122,7 @@ func TestRunLoop_ResultLineOutcomes(t *testing.T) {
 // TestRunLoop_NonZeroExitUsesJSONErrorNotExitStatus proves that when a
 // session exits non-zero but still emits a valid result line with a
 // non-blank error, the message runLoop returns (and task.Error) is the JSON
-// error text, not the generic "exit status N" text — while the exec error
-// itself stays reachable via errors.As for callers that care about it.
+// error text, not the generic "exit status N" text.
 func TestRunLoop_NonZeroExitUsesJSONErrorNotExitStatus(t *testing.T) {
 	useFakeClaude(t)
 	dir := t.TempDir()
@@ -139,9 +137,6 @@ func TestRunLoop_NonZeroExitUsesJSONErrorNotExitStatus(t *testing.T) {
 	require.Error(t, err)
 	assert.Equal(t, "task 1: First task failed: boom", err.Error())
 	assert.NotContains(t, err.Error(), "exit status", "the JSON error must replace the generic exit status text")
-
-	var exitErr *exec.ExitError
-	assert.ErrorAs(t, err, &exitErr, "the underlying exec error must stay reachable via errors.As")
 
 	saved := readSavedTasks(t, tasksPath)
 	require.Len(t, saved.Tasks, 1)

@@ -345,9 +345,7 @@ func TestRunLoop_NonZeroExitStopsAtFirstTask(t *testing.T) {
 	err := runLoop(context.Background(), "prompt", tl, tasksPath)
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "task 1: First failed")
-
-	var exitErr *exec.ExitError
-	assert.ErrorAs(t, err, &exitErr)
+	assert.ErrorContains(t, err, "exit status 1")
 
 	records := readFakeClaudeRecords(t, recordPath)
 	assert.Len(t, records, 1, "expected the second task never to run")
@@ -369,7 +367,7 @@ func TestRunLoop_ClaudeMissingFromPath(t *testing.T) {
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "task")
 	assert.ErrorContains(t, err, "failed")
-	assert.ErrorIs(t, err, exec.ErrNotFound)
+	assert.ErrorContains(t, err, "executable file not found")
 
 	saved := readSavedTasks(t, tasksPath)
 	require.Len(t, saved.Tasks, 1)

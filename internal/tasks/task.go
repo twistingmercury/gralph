@@ -1,6 +1,7 @@
 package tasks
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -83,51 +84,28 @@ func ParseTasks(yml []byte) (TaskList, error) {
 	return taskList, nil
 }
 
-// SaveTasks writes tl to path as YAML, replacing any existing file
-// atomically: it encodes to a temporary file in the same directory, then
-// renames the temporary file over path. If anything fails, the temporary
-// file is removed and the original file (if any) is left untouched.
+// SaveTasks writes tl to path as YAML via a temporary file that is renamed
+// over path, so a failed save leaves the original file untouched.
 func SaveTasks(path string, tl TaskList) error {
+	var buf bytes.Buffer
+	enc := yaml.NewEncoder(&buf)
+	enc.SetIndent(2)
+	if err := enc.Encode(tl); err != nil {
+		return fmt.Errorf("failed to encode tasks: %w", err)
+	}
+	if err := enc.Close(); err != nil {
+		return fmt.Errorf("failed to encode tasks: %w", err)
+	}
+
 	cleanPath := filepath.Clean(path)
 	tmpPath := cleanPath + ".tmp"
-
-	if err := writeTasksTmp(tmpPath, tl); err != nil {
+	if err := os.WriteFile(tmpPath, buf.Bytes(), 0o600); err != nil {
 		_ = os.Remove(tmpPath)
 		return fmt.Errorf("failed to save tasks to %q: %w", cleanPath, err)
 	}
-
 	if err := os.Rename(tmpPath, cleanPath); err != nil {
 		_ = os.Remove(tmpPath)
-		return fmt.Errorf("failed to replace tasks file %q: %w", cleanPath, err)
-	}
-
-	return nil
-}
-
-// writeTasksTmp encodes tl as YAML into tmpPath, creating or truncating it.
-// The caller is responsible for removing tmpPath on error.
-func writeTasksTmp(tmpPath string, tl TaskList) error {
-	f, err := os.OpenFile(filepath.Clean(tmpPath), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
-	if err != nil {
-		return fmt.Errorf("failed to create temp tasks file: %w", err)
-	}
-
-	enc := yaml.NewEncoder(f)
-	enc.SetIndent(2)
-
-	if err := enc.Encode(tl); err != nil {
-		_ = enc.Close()
-		_ = f.Close()
-		return fmt.Errorf("failed to encode tasks yaml: %w", err)
-	}
-
-	if err := enc.Close(); err != nil {
-		_ = f.Close()
-		return fmt.Errorf("failed to flush tasks yaml: %w", err)
-	}
-
-	if err := f.Close(); err != nil {
-		return fmt.Errorf("failed to close temp tasks file: %w", err)
+		return fmt.Errorf("failed to save tasks to %q: %w", cleanPath, err)
 	}
 
 	return nil
