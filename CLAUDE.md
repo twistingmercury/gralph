@@ -29,7 +29,6 @@ Easy to get wrong:
 - `tests/e2e` is a **separate Go module**; `go test ./...` from the root never runs it.
 - A native e2e run can print a **cached pass** after the binary changed (Go's test cache does not track the exec'd binary); always pass `-count=1`. A failed signal test run natively can leave a sleeping fake `claude` behind — harmless in the container, where the suite belongs.
 - `make install` only copies `.bin/local/gralph`. Run `make local install`, or the installed binary and its `--version` are stale.
-- `build/build.sh` runs `docker compose up` **without `--build`**, so a local `make build` can pass e2e against a stale image. Force it: `docker compose -f tests/docker-compose.yaml up --build --exit-code-from tests`.
 - `make build` runs lint, govulncheck, gosec, and unit tests **inside** `build/Dockerfile`, so any of them fails CI. Reproduce with `docker build --target builder -f build/Dockerfile .`. Its `-X` version ldflags must stay in sync with the Makefile's.
 - Both fake `claude` executables print a completed result line by default on exit 0; override with `FAKE_CLAUDE_OUTPUT` to customize stdout.
 
