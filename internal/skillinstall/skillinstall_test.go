@@ -108,3 +108,41 @@ func TestHash_MatchesIndependentWalk(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "sha256:"+hex.EncodeToString(h.Sum(nil)), got)
 }
+
+func TestCheck_NotInstalled(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	err := Check()
+	require.Error(t, err)
+	assert.Equal(t, "the gralph-docs-writer skill is not installed.\nRun: gralph --install-skill", err.Error())
+}
+
+func TestCheck_VersionMissing(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	dest, err := Install()
+	require.NoError(t, err)
+	require.NoError(t, os.Remove(filepath.Join(dest, "VERSION")))
+
+	err = Check()
+	require.Error(t, err)
+	assert.Equal(t, "the gralph-docs-writer skill is outdated (installed by unknown, this is gralph "+version.Version()+").\nRun: gralph --install-skill", err.Error())
+}
+
+func TestCheck_HashDiffers(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	dest, err := Install()
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(dest, "VERSION"), []byte("v0.1.0\nsha256:old\n"), 0o600))
+
+	err = Check()
+	require.Error(t, err)
+	assert.Equal(t, "the gralph-docs-writer skill is outdated (installed by v0.1.0, this is gralph "+version.Version()+").\nRun: gralph --install-skill", err.Error())
+}
+
+func TestCheck_FreshInstall(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	_, err := Install()
+	require.NoError(t, err)
+
+	assert.NoError(t, Check())
+}

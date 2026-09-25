@@ -4,6 +4,8 @@ package skillinstall
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -83,4 +85,38 @@ func Hash() (string, error) {
 		return "", err
 	}
 	return "sha256:" + hex.EncodeToString(h.Sum(nil)), nil
+}
+
+// Check returns nil when ~/.claude/skills/gralph-docs-writer/VERSION exists
+// and its second line equals Hash(); otherwise it returns an error telling
+// the user to run gralph --install-skill.
+func Check() error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+	dest := filepath.Join(home, ".claude", "skills", skillName)
+
+	if _, err := os.Stat(dest); errors.Is(err, fs.ErrNotExist) {
+		return errors.New("the gralph-docs-writer skill is not installed.\nRun: gralph --install-skill")
+	} else if err != nil {
+		return err
+	}
+
+	hash, err := Hash()
+	if err != nil {
+		return err
+	}
+
+	installedBy := "unknown"
+	if data, err := fs.ReadFile(os.DirFS(dest), "VERSION"); err == nil {
+		lines := strings.Split(string(data), "\n")
+		if lines[0] != "" {
+			installedBy = lines[0]
+		}
+		if len(lines) > 1 && lines[1] == hash {
+			return nil
+		}
+	}
+	return fmt.Errorf("the gralph-docs-writer skill is outdated (installed by %s, this is gralph %s).\nRun: gralph --install-skill", installedBy, version.Version())
 }
