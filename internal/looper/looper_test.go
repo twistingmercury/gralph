@@ -486,7 +486,7 @@ func TestRunLoop_SkipsCompletedTasks(t *testing.T) {
 }
 
 // TestStart_RefusesWhenAnyTaskFailed proves Start refuses to run while any
-// task is failed: it names every failed task, never invokes claude, and
+// task is failed: it returns the fix-and-reset error, never invokes claude, and
 // leaves the tasks file byte-for-byte unchanged.
 func TestStart_RefusesWhenAnyTaskFailed(t *testing.T) {
 	useFakeClaude(t)
@@ -513,10 +513,7 @@ func TestStart_RefusesWhenAnyTaskFailed(t *testing.T) {
 
 	err := Start(context.Background(), promptPath, tasksPath)
 	require.Error(t, err)
-	assert.ErrorContains(t, err, "manual intervention")
-	assert.ErrorContains(t, err, "set each one's state to pending")
-	assert.ErrorContains(t, err, "task 2: Second task; task 3: Third task")
-	assert.NotContains(t, err.Error(), "task 1:")
+	assert.EqualError(t, err, "fix the failed tasks and set their state to pending before running")
 
 	assert.Empty(t, readFakeClaudeRecords(t, recordPath), "claude must never be invoked")
 	data, readErr := os.ReadFile(tasksPath)

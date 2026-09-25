@@ -110,7 +110,7 @@ the design is documented from [docs/architecture/00-overview.md](docs/architectu
 - **Permission checks are bypassed**: `--dangerously-skip-permissions` lets Claude run without user interaction. Treat the prompt and task files as code you are choosing to execute, and do not run gralph against untrusted ones.
 - **Each session starts cold**: a session sees only the shared prompt and its one task. Anything it needs to know about earlier tasks must be in those two texts or in the repository.
 - **Completed tasks are skipped**: gralph runs only pending tasks.
-- **Failed tasks block the run**: gralph refuses to start while any task is `failed`, naming each one, launching no session and leaving the file untouched. Fix the cause, then set the task's `state` to `pending` (or `completed`) by hand before running again.
+- **Failed tasks block the run**: gralph refuses to start while any task is `failed`, printing the same task summary table as `--dry-run` and exiting 1, launching no session and leaving the file untouched. Fix the cause, then set the task's `state` to `pending` (or `completed`) by hand before running again.
 - **Signal handling**: SIGINT (Ctrl-C) or SIGTERM cancels the current Claude session and stops the run. The entire Claude process group is terminated, so nothing Claude spawned outlives gralph.
 - **Unix only**: gralph runs on Linux, macOS, and the BSDs. Windows is not supported.
 
