@@ -1,6 +1,6 @@
 # Product Requirements Document: [Project Title]
 
-*Gralph processes cycles in this document from top to bottom. Checklist markers are significant: `- [ ]` (open), `- [x]` (complete), `- [~]` (abandoned). Each cycle must be small, independently verifiable, and assigned to exactly one agent.*
+*Gralph does not read this document. The `ralph-loop-docs-writer` skill turns its Implementation Plan into `tasks.yaml` (one task per cycle, in order) and `prompt.md`, which Gralph runs. Each cycle must be small, independently verifiable, and assigned to exactly one agent.*
 
 ## Objective
 
@@ -78,7 +78,7 @@ If a cycle takes more than one agent, split it into separate cycles.
 <!--
 Example of a well-written cycle:
 
-- [ ] **Cycle 1 - Parse migration file format and detect applied migrations**: Implement parser to discover migration files and read applied migrations from the database.
+- **Cycle 1 - Parse migration file format and detect applied migrations**: Implement parser to discover migration files and read applied migrations from the database.
   - Agent: `go-software-engineer`
   - Files: `internal/migration/parser.go`, `internal/migration/parser_test.go`
   - Steps:
@@ -98,7 +98,7 @@ Key points:
 - Done: observable exit condition, not a restatement of steps
 -->
 
-- [ ] **Cycle 1 - <short title>**: <one-sentence description of what this cycle delivers>.
+- **Cycle 1 - <short title>**: <one-sentence description of what this cycle delivers>.
   - Agent: `<agent-name>`
   - Files: `<file>`
   - Steps:
@@ -110,28 +110,28 @@ Key points:
 ## Risks and Mitigations
 
 <!--
-Flag the most common gralph failure mode: cycles that loop indefinitely because they never reach their Done condition.
+Flag the most common gralph failure mode: a task's single session cannot reach its Done condition, so the task is marked failed and the run stops.
 This happens when Done is vague ("system works"), when verification is disconnected from Done,
-or when the cycle is too large and gets stuck on unrelated problems.
+or when the cycle is too large for one session and gets stuck on unrelated problems.
 
 Include worked examples of Risk / Mitigation pairs.
 -->
 
 <!-- Replace these examples with risks specific to your project. -->
 
-- *Risk: The `Done` condition for a cycle is too vague to evaluate, causing Claude to loop indefinitely without completing the item.*
+- *Risk: The `Done` condition for a cycle is too vague to evaluate, so the session cannot tell whether it finished and the task fails.*
   - *Mitigation: Write `Done` as a concrete, observable state tied to the `Verify` command — not a restatement of intent.*
 
-- *Risk: Dry-run mode is incomplete and loop cycles get stuck debugging whether a change actually happened.*
+- *Risk: Dry-run mode is incomplete and sessions get stuck debugging whether a change actually happened.*
   - *Mitigation: Implement dry-run as a parsed-but-not-executed path early in Cycle 2; verify in unit tests that dry-run queries the database but does not write.*
 
 ## Definition of Done
 
 <!--
-This is the global exit condition for the entire loop.
-When all cycles above are checked AND all conditions below are true, gralph stops and declares success.
+This is the global exit condition for the whole plan.
+The work is done when every generated task is completed AND all conditions below are true.
 
-Make each condition concrete and verifiable — not a restatement of the cycle checklist.
+Make each condition concrete and verifiable — not a restatement of the cycle list.
 Example of bad: "Cycles are complete" (not verifiable).
 Example of good: "go test ./... passes and all binaries build" (observable command).
 -->

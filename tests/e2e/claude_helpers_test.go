@@ -14,7 +14,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v3"
 )
 
 // fakeClaudeRecord mirrors the JSON record written by
@@ -265,6 +267,66 @@ func waitForFile(t *testing.T, path string, timeout time.Duration) []byte {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
+}
+
+// taskFixture and taskListFixture mirror the on-disk tasks.yaml schema
+// (gralph's internal/tasks.Task) for e2e assertions. Tests parse the
+// resulting YAML rather than asserting on exact bytes, since gralph
+// re-marshals the whole file on every write-back (comments/formatting are
+// not preserved and every task gets an explicit state key).
+type taskFixture struct {
+	ID     int    `yaml:"id"`
+	Name   string `yaml:"name"`
+	Prompt string `yaml:"prompt"`
+	State  string `yaml:"state"`
+	Error  string `yaml:"error,omitempty"`
+}
+
+type taskListFixture struct {
+	Tasks []taskFixture `yaml:"tasks"`
+}
+
+// readTasksYAML reads and parses a tasks.yaml file's current on-disk state.
+func readTasksYAML(t *testing.T, path string) taskListFixture {
+	t.Helper()
+
+	data, err := os.ReadFile(path)
+	require.NoError(t, err, "read tasks file %s", path)
+
+	var list taskListFixture
+	require.NoError(t, yaml.Unmarshal(data, &list), "parse tasks yaml %s", path)
+	return list
+}
+
+// taskStates returns a map from task ID to its current state, for concise
+// assertions against readTasksYAML output.
+func taskStates(list taskListFixture) map[int]string {
+	states := make(map[int]string, len(list.Tasks))
+	for _, task := range list.Tasks {
+		states[task.ID] = task.State
+	}
+	return states
+}
+
+// taskErrors returns a map from task ID to its current error field, for
+// concise assertions against readTasksYAML output.
+func taskErrors(list taskListFixture) map[int]string {
+	errs := make(map[int]string, len(list.Tasks))
+	for _, task := range list.Tasks {
+		errs[task.ID] = task.Error
+	}
+	return errs
+}
+
+// assertNoTmpFile asserts that no atomic-write temp file (<tasksPath>.tmp)
+// was left behind next to tasksPath, i.e. a save either fully completed
+// (temp file renamed over the original) or never started.
+func assertNoTmpFile(t *testing.T, tasksPath string) {
+	t.Helper()
+
+	tmpPath := tasksPath + ".tmp"
+	_, err := os.Stat(tmpPath)
+	assert.True(t, os.IsNotExist(err), "expected no leftover temp file %s", tmpPath)
 }
 
 // readPIDFile waits for a fixture-written PID file to appear and parses it.

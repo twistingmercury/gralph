@@ -3,6 +3,8 @@ package tasks
 import (
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -10,7 +12,7 @@ import (
 
 const (
 	PendingState   = "pending"
-	AbandonedState = "abandoned"
+	FailedState    = "failed"
 	CompletedState = "completed"
 )
 
@@ -19,6 +21,7 @@ type Task struct {
 	Name   string `yaml:"name" validate:"required"`
 	Prompt string `yaml:"prompt" validate:"required"`
 	State  string `yaml:"state"`
+	Error  string `yaml:"error,omitempty"`
 }
 
 type TaskList struct {
@@ -78,6 +81,56 @@ func ParseTasks(yml []byte) (TaskList, error) {
 	}
 
 	return taskList, nil
+}
+
+// SaveTasks writes tl to path as YAML, replacing any existing file
+// atomically: it encodes to a temporary file in the same directory, then
+// renames the temporary file over path. If anything fails, the temporary
+// file is removed and the original file (if any) is left untouched.
+func SaveTasks(path string, tl TaskList) error {
+	cleanPath := filepath.Clean(path)
+	tmpPath := cleanPath + ".tmp"
+
+	if err := writeTasksTmp(tmpPath, tl); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("failed to save tasks to %q: %w", cleanPath, err)
+	}
+
+	if err := os.Rename(tmpPath, cleanPath); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("failed to replace tasks file %q: %w", cleanPath, err)
+	}
+
+	return nil
+}
+
+// writeTasksTmp encodes tl as YAML into tmpPath, creating or truncating it.
+// The caller is responsible for removing tmpPath on error.
+func writeTasksTmp(tmpPath string, tl TaskList) error {
+	f, err := os.OpenFile(filepath.Clean(tmpPath), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		return fmt.Errorf("failed to create temp tasks file: %w", err)
+	}
+
+	enc := yaml.NewEncoder(f)
+	enc.SetIndent(2)
+
+	if err := enc.Encode(tl); err != nil {
+		_ = enc.Close()
+		_ = f.Close()
+		return fmt.Errorf("failed to encode tasks yaml: %w", err)
+	}
+
+	if err := enc.Close(); err != nil {
+		_ = f.Close()
+		return fmt.Errorf("failed to flush tasks yaml: %w", err)
+	}
+
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("failed to close temp tasks file: %w", err)
+	}
+
+	return nil
 }
 
 func idsAreUnique(t TaskList) (bool, Task) {
@@ -142,7 +195,7 @@ func idsArePositive(t TaskList) (bool, Task) {
 func statesAreValid(t TaskList) (bool, Task) {
 	for _, task := range t.Tasks {
 		switch {
-		case task.State != PendingState && task.State != CompletedState && task.State != AbandonedState:
+		case task.State != PendingState && task.State != CompletedState && task.State != FailedState:
 			return false, task
 		}
 	}
