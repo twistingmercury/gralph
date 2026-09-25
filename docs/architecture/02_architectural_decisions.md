@@ -1,10 +1,10 @@
 # Gralph — Architectural Decisions
 
-> **Version**: v01
+> **Version**: v02
 > **Date**: 2026-09-25
-> **Notes**: Realigned to the v0.6.2 design.
+> **Notes**: Skill renamed to gralph-docs-writer; ADR-009 embeds the skill and adds `--install-skill`.
 
-[Back to Overview](00_overview_v01.md) | [Back to Project README](../../README.md)
+[Back to Overview](00_overview.md) | [Back to Project README](../../README.md)
 
 ## Table of Contents
 
@@ -34,6 +34,7 @@ Each architectural decision is recorded as an ADR with the following structure:
 | 006   | Failed task blocks run until manual reset      | Accepted | 2026-09-25 |
 | 007   | Unix only, process group lifecycle management  | Accepted | 2026-09-25 |
 | 008   | Docker-first CI: build, test, e2e in container | Accepted | 2026-09-25 |
+| 009   | Embed the skill, install with --install-skill  | Accepted | 2026-09-25 |
 
 ## Decisions
 
@@ -75,7 +76,7 @@ Task definitions need to be:
 2. Human-readable without special tooling
 3. Safe: a corrupted file should be rejected entirely, not partially loaded
 
-Early designs considered PR Markdown checklists, JSON, and config-file overrides. YAML was chosen because the ralph-loop-docs-writer skill already generates tasks.yaml + prompt.md pairs, and YAML parsing is a known quantity in Go.
+Early designs considered PR Markdown checklists, JSON, and config-file overrides. YAML was chosen because the gralph-docs-writer skill already generates tasks.yaml + prompt.md pairs, and YAML parsing is a known quantity in Go.
 
 **Decision:**
 
@@ -263,4 +264,30 @@ The Makefile's `local` target builds a native binary. The `build` target runs `b
 
 ---
 
-**Next:** [System Architecture](03_system_architecture_v01.md)
+### ADR-009: Embed the skill, install with --install-skill
+
+**Status:** Accepted
+
+**Context:**
+
+The `gralph-docs-writer` skill generates task files that must satisfy the parser in `internal/tasks`. Installing it with `scripts/install_skill.sh` requires a checkout of the repository, and nothing ties the installed copy to the gralph binary in use, so the skill and the parser can drift apart.
+
+**Decision:**
+
+`skills/embed.go` embeds the whole `skills/gralph-docs-writer` folder (SKILL.md and templates/) in the binary with `//go:embed`. The `--install-skill` flag runs before the `--prompt`/`--tasks` checks: `internal/skillinstall` resolves the home directory with `os.UserHomeDir`, removes `~/.claude/skills/gralph-docs-writer`, writes every embedded file under it preserving the layout, prints the path, and exits 0 (1 on error). There is no override flag or env var. `scripts/install_skill.sh` stays for development, installing the working-tree copy.
+
+**Consequences:**
+
+*Positive:*
+- The installed skill always matches the binary's version and parser rules
+- Installing needs only the binary, not a repository checkout
+- Reinstalling is clean: stale files from an older skill are removed
+
+*Negative:*
+- Any local edits to the installed skill folder are lost on reinstall
+- Skill changes ship only with a new binary; a stale install is not detected during normal runs
+- Two install paths exist (flag for users, script for development)
+
+---
+
+**Next:** [System Architecture](03_system_architecture.md)

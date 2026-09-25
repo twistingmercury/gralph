@@ -105,7 +105,7 @@ original) with every state change. Comments and custom formatting are not
 preserved; each task's state is made explicit.
 
 Background on the approach is in [docs/gralph-concept.md](docs/gralph-concept.md);
-the design is documented from [docs/architecture/00_overview_v02.md](docs/architecture/00_overview_v02.md).
+the design is documented from [docs/architecture/00_overview.md](docs/architecture/00_overview.md).
 
 ## Key Considerations
 

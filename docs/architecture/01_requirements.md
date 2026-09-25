@@ -4,7 +4,7 @@
 > **Date**: 2026-09-25
 > **Notes**: Skill renamed to gralph-docs-writer.
 
-[Back to Overview](00_overview_v02.md) | [Back to Project README](../../README.md)
+[Back to Overview](00_overview.md) | [Back to Project README](../../README.md)
 
 ## Table of Contents
 

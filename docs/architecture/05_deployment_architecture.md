@@ -4,7 +4,7 @@
 > **Date**: 2026-09-25
 > **Notes**: Realigned to the v0.6.2 design.
 
-[Back to Overview](00_overview_v01.md) | [Back to Project README](../../README.md)
+[Back to Overview](00_overview.md) | [Back to Project README](../../README.md)
 
 ## Table of Contents
 
@@ -161,4 +161,4 @@ All non-trivial code paths are exercised:
 
 Tests pin the combined-prompt wire contract (shared + task format) via golden assertions.
 
-**Next:** [Back to Overview](00_overview_v01.md)
+**Next:** [Back to Overview](00_overview.md)
