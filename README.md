@@ -38,8 +38,10 @@ gralph --prompt path/to/prompt.md --tasks path/to/tasks.yaml
 `gralph -t tasks.yaml --dry-run` checks the task file with the same rules a
 real run uses, without launching Claude or writing any file. `--prompt` is
 ignored. An invalid file prints the error to stderr and exits non-zero. A valid
-file prints a red `❌` line for each `failed` task (which a real run would
-refuse), then `<tasks path> is valid`, and exits zero.
+file prints a table of each task's id, state, and name, and exits zero. If any
+task is `failed` (which a real run would refuse), the table follows `Some tasks
+failed previous runs:` and each failed row ends in `← Needs review!`; otherwise
+the table is followed by `<tasks path> is valid`.
 
 A task file is a `tasks` sequence. Each task has a unique positive integer `id`,
 a `name` (unique, ignoring case and surrounding whitespace), a `prompt`, and an

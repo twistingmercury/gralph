@@ -52,12 +52,43 @@ func DryRun(w io.Writer, tasksFile string) error {
 
 	for _, task := range tasklist.Tasks {
 		if task.State == tasks.FailedState {
-			_, _ = fmt.Fprintf(w, "❌ \033[1;31mtask %d: %s is failed and needs manual intervention before execution\033[0m\n", task.ID, task.Name)
+			_, _ = fmt.Fprintln(w, "Some tasks failed previous runs:")
+			printTasks(w, tasklist)
+			return nil
 		}
 	}
 
+	printTasks(w, tasklist)
 	_, _ = fmt.Fprintf(w, "%s is valid\n", tasksFile)
 	return nil
+}
+
+// printTasks writes a summary table of tl's tasks to w: id, state (green when
+// completed, red when failed), and name, with failed rows flagged for review.
+func printTasks(w io.Writer, tl *tasks.TaskList) {
+	const colorRed = "\033[1;91m"
+	const colorGrn = "\033[92m"
+	const colorRst = "\033[0m"
+
+	idWidth := len("ID")
+	for _, task := range tl.Tasks {
+		idWidth = max(idWidth, len(fmt.Sprint(task.ID)))
+	}
+	stateWidth := len(tasks.CompletedState)
+
+	_, _ = fmt.Fprintf(w, "   %*s  %-*s  NAME\n", idWidth, "ID", stateWidth, "STATE")
+	_, _ = fmt.Fprintf(w, "   %s  %s  %s\n", strings.Repeat("-", idWidth), strings.Repeat("-", stateWidth), strings.Repeat("-", 4))
+	for _, task := range tl.Tasks {
+		emoji, color, note := "  ", "", ""
+		switch task.State {
+		case tasks.FailedState:
+			emoji, color = "❌", colorRed
+			note = "  " + colorRed + "← Needs review!" + colorRst
+		case tasks.CompletedState:
+			emoji, color = "✅", colorGrn
+		}
+		_, _ = fmt.Fprintf(w, "%s %*d  %s%-*s%s  %s%s\n", emoji, idWidth, task.ID, color, stateWidth, strings.ToUpper(task.State), colorRst, task.Name, note)
+	}
 }
 
 func getTasks(path string) (*tasks.TaskList, error) {

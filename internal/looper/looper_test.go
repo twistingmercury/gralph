@@ -530,7 +530,37 @@ func TestDryRun_ValidFile(t *testing.T) {
 
 	var out bytes.Buffer
 	require.NoError(t, DryRun(&out, tasksPath))
-	assert.Equal(t, tasksPath+" is valid\n", out.String())
+	want := "   ID  STATE      NAME\n" +
+		"   --  ---------  ----\n" +
+		"    1  PENDING  \033[0m  First task\n" +
+		"    2  PENDING  \033[0m  Second task\n" +
+		tasksPath + " is valid\n"
+	assert.Equal(t, want, out.String())
+}
+
+// TestDryRun_NoFailedTasksTable pins the exact table, colour codes included,
+// for completed and pending tasks, with a 3-digit id widening the ID column.
+func TestDryRun_NoFailedTasksTable(t *testing.T) {
+	dir := t.TempDir()
+	content := `tasks:
+  - id: 1
+    name: First task
+    prompt: Do the first thing.
+    state: completed
+  - id: 123
+    name: Second task
+    prompt: Do the second thing.
+`
+	tasksPath := writeTasksFile(t, dir, content)
+
+	var out bytes.Buffer
+	require.NoError(t, DryRun(&out, tasksPath))
+	want := "    ID  STATE      NAME\n" +
+		"   ---  ---------  ----\n" +
+		"✅   1  \033[92mCOMPLETED\033[0m  First task\n" +
+		"   123  PENDING  \033[0m  Second task\n" +
+		tasksPath + " is valid\n"
+	assert.Equal(t, want, out.String())
 }
 
 func TestDryRun_InvalidFile(t *testing.T) {
@@ -544,31 +574,35 @@ func TestDryRun_InvalidFile(t *testing.T) {
 	assert.Empty(t, out.String())
 }
 
-// TestDryRun_FlagsFailedTasks pins the exact flag line, colour codes
-// included, and that a file with failed tasks is still reported valid.
+// TestDryRun_FlagsFailedTasks pins the exact table, colour codes included,
+// for a mix of completed, pending, and failed tasks with a 3-digit id, and
+// that a file with failed tasks is still accepted.
 func TestDryRun_FlagsFailedTasks(t *testing.T) {
 	dir := t.TempDir()
 	content := `tasks:
   - id: 1
     name: First task
     prompt: Do the first thing.
-    state: failed
-    error: boom
+    state: completed
   - id: 2
     name: Second task
     prompt: Do the second thing.
-  - id: 3
+    state: failed
+    error: boom
+  - id: 100
     name: Third task
     prompt: Do the third thing.
-    state: failed
 `
 	tasksPath := writeTasksFile(t, dir, content)
 
 	var out bytes.Buffer
 	require.NoError(t, DryRun(&out, tasksPath))
-	want := "❌ \033[1;31mtask 1: First task is failed and needs manual intervention before execution\033[0m\n" +
-		"❌ \033[1;31mtask 3: Third task is failed and needs manual intervention before execution\033[0m\n" +
-		tasksPath + " is valid\n"
+	want := "Some tasks failed previous runs:\n" +
+		"    ID  STATE      NAME\n" +
+		"   ---  ---------  ----\n" +
+		"✅   1  \033[92mCOMPLETED\033[0m  First task\n" +
+		"❌   2  \033[1;91mFAILED   \033[0m  Second task  \033[1;91m← Needs review!\033[0m\n" +
+		"   100  PENDING  \033[0m  Third task\n"
 	assert.Equal(t, want, out.String())
 
 	data, err := os.ReadFile(tasksPath)

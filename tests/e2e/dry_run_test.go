@@ -41,7 +41,11 @@ func TestDryRun_ValidFile(t *testing.T) {
 	})
 
 	require.Equal(t, 0, res.exitCode, "stdout:\n%s\nstderr:\n%s", res.stdout, res.stderr)
-	assert.Equal(t, tasksPath+" is valid\n", res.stdout)
+	want := "   ID  STATE      NAME\n" +
+		"   --  ---------  ----\n" +
+		"    1  PENDING  \033[0m  First task\n" +
+		tasksPath + " is valid\n"
+	assert.Equal(t, want, res.stdout)
 }
 
 func TestDryRun_InvalidFile(t *testing.T) {
@@ -68,13 +72,16 @@ func TestDryRun_FlagsFailedTaskAndExitsZero(t *testing.T) {
     state: failed
     error: boom
 `
-	res, tasksPath := runDryRun(t, tasksYAML, func(p string) []string {
+	res, _ := runDryRun(t, tasksYAML, func(p string) []string {
 		return []string{"-t", p, "--dry-run"}
 	})
 
 	require.Equal(t, 0, res.exitCode, "stdout:\n%s\nstderr:\n%s", res.stdout, res.stderr)
-	want := "❌ \033[1;31mtask 2: Second task is failed and needs manual intervention before execution\033[0m\n" +
-		tasksPath + " is valid\n"
+	want := "Some tasks failed previous runs:\n" +
+		"   ID  STATE      NAME\n" +
+		"   --  ---------  ----\n" +
+		"    1  PENDING  \033[0m  First task\n" +
+		"❌  2  \033[1;91mFAILED   \033[0m  Second task  \033[1;91m← Needs review!\033[0m\n"
 	assert.Equal(t, want, res.stdout)
 }
 
@@ -85,7 +92,11 @@ func TestDryRun_IgnoresNonexistentPrompt(t *testing.T) {
 	})
 
 	require.Equal(t, 0, res.exitCode, "stdout:\n%s\nstderr:\n%s", res.stdout, res.stderr)
-	assert.Equal(t, tasksPath+" is valid\n", res.stdout)
+	want := "   ID  STATE      NAME\n" +
+		"   --  ---------  ----\n" +
+		"    1  PENDING  \033[0m  First task\n" +
+		tasksPath + " is valid\n"
+	assert.Equal(t, want, res.stdout)
 }
 
 func TestDryRun_MissingTasksFlag(t *testing.T) {
