@@ -98,9 +98,16 @@ committed on its own. The session that runs it sees only the shared prompt and
 that one task, so a task must not refer to future tasks, leave work for a
 later task to finish, or depend on anything a later task will add. It may
 build on what earlier tasks delivered, because that work is already in the
-repository; order tasks so that holds. Keep task prompts focused and split
-independent goals. Verification commands must fit the target repository; do
-not invent passes or require source tests for documentation-only changes.
+repository; order tasks so that holds. Verification commands must fit the
+target repository; do not invent passes or require source tests for
+documentation-only changes.
+
+Make each task small enough that a person can verify it from its commit alone:
+one focused change, a short diff, and a runnable check that shows it works.
+Split a larger change into a sequence of such steps, each passing the agreed
+quality gates on its own. When one step would break the gates until another
+lands, put the prerequisite step first (for example, update test fixtures
+before the change that needs them).
 
 Honor project policies for source commits, and never instruct the session to
 edit or commit `tasks.yaml`.

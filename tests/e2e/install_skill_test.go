@@ -29,6 +29,13 @@ func TestInstallSkill(t *testing.T) {
 	assert.FileExists(t, filepath.Join(dest, "templates", "tasks_template.yaml"))
 	assert.FileExists(t, filepath.Join(dest, "templates", "prompt_template.md"))
 
+	stamp, err := os.ReadFile(filepath.Join(dest, "VERSION"))
+	require.NoError(t, err)
+	lines := strings.Split(strings.TrimSuffix(string(stamp), "\n"), "\n")
+	require.Len(t, lines, 2, "VERSION:\n%s", stamp)
+	assert.NotEmpty(t, lines[0])
+	assert.True(t, strings.HasPrefix(lines[1], "sha256:"), "VERSION second line: %q", lines[1])
+
 	stray := filepath.Join(dest, "stray.txt")
 	require.NoError(t, os.WriteFile(stray, []byte("stale"), 0o600))
 

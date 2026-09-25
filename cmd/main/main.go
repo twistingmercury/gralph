@@ -28,6 +28,11 @@ func main() {
 	checkInstallSkill()
 	validateRequiredFlags()
 
+	if err := skillinstall.Check(); err != nil {
+		_, _ = fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+
 	if *dryRunFlag {
 		if err := looper.DryRun(os.Stdout, *tasksFlag); err != nil {
 			_, _ = fmt.Fprintf(os.Stderr, "error: %v\n", err)

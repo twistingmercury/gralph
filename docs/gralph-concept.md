@@ -22,4 +22,4 @@ This ensures each task starts fresh (no context bleed) while tracking progress a
 ## Learn More
 
 - [README.md](../README.md) — Usage and overview
-- [docs/architecture/00_overview_v01.md](./architecture/00_overview_v01.md) — Full architecture
+- [docs/architecture/00_overview.md](./architecture/00_overview.md) — Full architecture
