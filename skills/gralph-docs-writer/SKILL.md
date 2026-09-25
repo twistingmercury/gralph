@@ -1,5 +1,5 @@
 ---
-name: ralph-loop-docs-writer
+name: gralph-docs-writer
 description: >-
   Use when creating or updating the tasks.yaml task list and shared prompt.md
   that Gralph feeds to Claude Code, or when breaking a build plan or PRD into

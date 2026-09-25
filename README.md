@@ -68,7 +68,7 @@ tasks:
 it is read as `pending`. An optional `error` field may be present when a task
 has failed; gralph writes it, never the session. Gralph runs tasks in file
 order — `id` identifies a task, it does not order them. The
-`ralph-loop-docs-writer` skill in [skills/](skills/ralph-loop-docs-writer/SKILL.md)
+`gralph-docs-writer` skill in [skills/](skills/gralph-docs-writer/SKILL.md)
 generates a task file and shared prompt for a project;
 `scripts/install_skill.sh` installs it.
 
@@ -101,7 +101,7 @@ original) with every state change. Comments and custom formatting are not
 preserved; each task's state is made explicit.
 
 Background on the approach is in [docs/gralph-concept.md](docs/gralph-concept.md);
-the design is documented from [docs/architecture/00_overview_v01.md](docs/architecture/00_overview_v01.md).
+the design is documented from [docs/architecture/00_overview_v02.md](docs/architecture/00_overview_v02.md).
 
 ## Key Considerations
 
