@@ -1,6 +1,7 @@
 package e2e
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -79,10 +80,11 @@ func TestLoop_RunsEveryTaskInOrder(t *testing.T) {
 	assertNoTmpFile(t, tasksPath)
 }
 
-// TestLoop_FailedTaskReRunsAndCompletes verifies that a task left in the
-// failed state by a prior run is re-run (not skipped) on a later gralph
-// invocation, and is written back as completed once claude exits 0 for it.
-func TestLoop_FailedTaskReRunsAndCompletes(t *testing.T) {
+// TestLoop_FailedTaskRefusesToRun verifies that a task file containing a
+// failed task is refused before any work starts: gralph prints the task
+// summary table on stdout, exits non-zero, never invokes claude, and leaves the task file
+// byte-for-byte unchanged with no temporary file behind.
+func TestLoop_FailedTaskRefusesToRun(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 
@@ -91,24 +93,31 @@ func TestLoop_FailedTaskReRunsAndCompletes(t *testing.T) {
   - id: 1
     name: First task
     prompt: Do the first thing.
+  - id: 2
+    name: Second task
+    prompt: Do the second thing.
     state: failed
+    error: boom
 `
 	tasksPath := writeTasksYAML(t, dir, tasksYAML)
 
-	recordFile := filepath.Join(dir, "record.ndjson")
+	attemptLog := filepath.Join(dir, "attempts.log")
 	env := gralphEnv(fakeClaudeDir, map[string]string{
-		"FAKECLAUDE_RECORD_FILE": recordFile,
+		"FAKECLAUDE_ATTEMPT_LOG_FILE": attemptLog,
 	})
 
 	res := runGralph(t, 15*time.Second, []string{"--prompt=" + promptPath, "--tasks=" + tasksPath}, env)
-	require.Equal(t, 0, res.exitCode, "stdout:\n%s\nstderr:\n%s", res.stdout, res.stderr)
 
-	records := readFakeClaudeRecords(t, recordFile)
-	require.Len(t, records, 1, "expected the previously failed task to be re-run rather than skipped")
+	require.NotEqual(t, 0, res.exitCode, "stdout:\n%s\nstderr:\n%s", res.stdout, res.stderr)
+	assert.Contains(t, res.stdout, "Some tasks failed previous runs:\n")
+	assert.Contains(t, res.stdout, "   1  PENDING  \033[0m  First task\n")
+	assert.Contains(t, res.stdout, "❌  2  \033[1;91mFAILED   \033[0m  Second task  \033[1;91m← Needs review!\033[0m\n")
+	assert.Contains(t, res.stderr, "fix the failed tasks and set their state to pending before running")
+	assert.Equal(t, 0, countAttempts(t, attemptLog), "expected claude never invoked")
 
-	after := readTasksYAML(t, tasksPath)
-	states := taskStates(after)
-	assert.Equal(t, "completed", states[1], "expected the re-run task to be written back as completed")
+	raw, err := os.ReadFile(tasksPath)
+	require.NoError(t, err)
+	assert.Equal(t, tasksYAML, string(raw), "expected the task file to be unchanged")
 
 	assertNoTmpFile(t, tasksPath)
 }
@@ -283,7 +292,7 @@ func TestStart_AbandonedStateRejected(t *testing.T) {
 
 	require.NotEqual(t, 0, res.exitCode, "stdout:\n%s\nstderr:\n%s", res.stdout, res.stderr)
 	assert.Contains(t, res.stderr, "failed to start loop runner")
-	assert.Contains(t, res.stderr, "task id 1 has an invalid state: abandoned")
+	assert.Contains(t, res.stderr, `tasks[0] (id 1): state: must be pending, completed, or failed, got "abandoned"`)
 	assert.Equal(t, 0, countAttempts(t, attemptLog), "expected claude never invoked")
 }
 

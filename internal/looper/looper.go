@@ -25,11 +25,68 @@ func Start(ctx context.Context, promptFile, tasksFile string) error {
 		return fmt.Errorf("failed to start loop runner: %s", err)
 	}
 
+	for _, task := range tasklist.Tasks {
+		if task.State == tasks.FailedState {
+			fmt.Println("Some tasks failed previous runs:")
+			printTasks(os.Stdout, tasklist)
+			return errors.New("fix the failed tasks and set their state to pending before running")
+		}
+	}
+
 	if err := runLoop(ctx, prompt, tasklist, tasksFile); err != nil {
 		return fmt.Errorf("loop error: %w", err)
 	}
 
 	return nil
+}
+
+// DryRun validates tasksFile with the same checks Start uses and reports on
+// it to w without launching claude or writing any file.
+func DryRun(w io.Writer, tasksFile string) error {
+	tasklist, err := getTasks(tasksFile)
+	if err != nil {
+		return err
+	}
+
+	for _, task := range tasklist.Tasks {
+		if task.State == tasks.FailedState {
+			_, _ = fmt.Fprintln(w, "Some tasks failed previous runs:")
+			printTasks(w, tasklist)
+			return nil
+		}
+	}
+
+	printTasks(w, tasklist)
+	_, _ = fmt.Fprintf(w, "%s is valid\n", tasksFile)
+	return nil
+}
+
+// printTasks writes a summary table of tl's tasks to w: id, state (green when
+// completed, red when failed), and name, with failed rows flagged for review.
+func printTasks(w io.Writer, tl *tasks.TaskList) {
+	const colorRed = "\033[1;91m"
+	const colorGrn = "\033[92m"
+	const colorRst = "\033[0m"
+
+	idWidth := len("ID")
+	for _, task := range tl.Tasks {
+		idWidth = max(idWidth, len(fmt.Sprint(task.ID)))
+	}
+	stateWidth := len(tasks.CompletedState)
+
+	_, _ = fmt.Fprintf(w, "   %*s  %-*s  NAME\n", idWidth, "ID", stateWidth, "STATE")
+	_, _ = fmt.Fprintf(w, "   %s  %s  %s\n", strings.Repeat("-", idWidth), strings.Repeat("-", stateWidth), strings.Repeat("-", 4))
+	for _, task := range tl.Tasks {
+		emoji, color, note := "  ", "", ""
+		switch task.State {
+		case tasks.FailedState:
+			emoji, color = "❌", colorRed
+			note = "  " + colorRed + "← Needs review!" + colorRst
+		case tasks.CompletedState:
+			emoji, color = "✅", colorGrn
+		}
+		_, _ = fmt.Fprintf(w, "%s %*d  %s%-*s%s  %s%s\n", emoji, idWidth, task.ID, color, stateWidth, strings.ToUpper(task.State), colorRst, task.Name, note)
+	}
 }
 
 func getTasks(path string) (*tasks.TaskList, error) {

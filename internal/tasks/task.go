@@ -34,54 +34,142 @@ func (t Task) String() string {
 	return strings.TrimSpace(str)
 }
 
-func taskEmpty() Task {
-	return Task{
-		ID:     0,
-		Name:   "",
-		Prompt: "",
-		State:  "",
-	}
+// allowedTags are the tags yaml.v3 resolves on its own; any other tag,
+// explicit or custom, is rejected before anything is decoded.
+var allowedTags = map[string]bool{
+	"!!str": true, "!!int": true, "!!float": true, "!!bool": true, "!!null": true,
+	"!!map": true, "!!seq": true, "!!timestamp": true, "!!merge": true,
 }
 
+// ParseTasks parses and validates a task file. Any invalid element rejects the
+// whole file; errors name the task as tasks[<index>] (id <id>) and the field.
 func ParseTasks(yml []byte) (TaskList, error) {
-	var taskList TaskList
-	err := yaml.Unmarshal(yml, &taskList)
-
-	if err != nil {
+	var doc yaml.Node
+	if err := yaml.Unmarshal(yml, &doc); err != nil {
 		return TaskList{}, fmt.Errorf("failed to parse yaml tasks: %w", err)
 	}
 
-	if len(taskList.Tasks) == 0 {
-		return TaskList{}, errors.New("the list of tasks is empty")
+	if err := checkTags(&doc); err != nil {
+		return TaskList{}, err
 	}
 
-	if ok, task := idsArePositive(taskList); !ok {
-		return TaskList{}, fmt.Errorf("task named '%s' has an invalid ID of %d", task.Name, task.ID)
+	var seq *yaml.Node
+	if len(doc.Content) > 0 && doc.Content[0].Kind == yaml.MappingNode {
+		root := doc.Content[0].Content
+		for i := 0; i+1 < len(root); i += 2 {
+			if root[i].Value != "tasks" {
+				continue
+			}
+			if seq != nil {
+				return TaskList{}, errors.New("tasks: duplicate key")
+			}
+			seq = root[i+1]
+		}
+	}
+	switch {
+	case seq == nil:
+		return TaskList{}, errors.New("tasks: is required")
+	case seq.Kind != yaml.SequenceNode:
+		return TaskList{}, errors.New("tasks: must be a sequence")
+	case len(seq.Content) == 0:
+		return TaskList{}, errors.New("tasks: must contain at least one task")
 	}
 
-	if ok, task := idsAreUnique(taskList); !ok {
-		return TaskList{}, fmt.Errorf("task named '%s' duplicates id %d", task.Name, task.ID)
-	}
-
-	if ok, task := namesAreNotWhitespace(taskList); !ok {
-		return TaskList{}, fmt.Errorf("task id %d name is empty or whitespace", task.ID)
-	}
-
-	if ok, task := namesAreUnique(taskList); !ok {
-		return TaskList{}, fmt.Errorf("task id %d duplicates the task name '%s'", task.ID, task.Name)
-	}
-
-	if ok, task := promptsAreNotWhitespace(taskList); !ok {
-		return TaskList{}, fmt.Errorf("task id %d prompt is empty or whitespace", task.ID)
-	}
-
-	normalizeState(&taskList)
-
-	if ok, task := statesAreValid(taskList); !ok {
-		return TaskList{}, fmt.Errorf("task id %d has an invalid state: %s", task.ID, task.State)
+	var taskList TaskList
+	ids := make(map[int16]int)
+	names := make(map[string]int)
+	for i, el := range seq.Content {
+		task, where, err := parseTask(i, el)
+		if err != nil {
+			return TaskList{}, err
+		}
+		if j, dup := ids[task.ID]; dup {
+			return TaskList{}, fmt.Errorf("%s: id: duplicates tasks[%d]", where, j)
+		}
+		ids[task.ID] = i
+		name := strings.TrimSpace(strings.ToLower(task.Name))
+		if j, dup := names[name]; dup {
+			return TaskList{}, fmt.Errorf("%s: name: duplicates the name of tasks[%d]", where, j)
+		}
+		names[name] = i
+		taskList.Tasks = append(taskList.Tasks, task)
 	}
 
 	return taskList, nil
+}
+
+// parseTask checks element i of the tasks sequence and decodes it. It returns
+// the task's location, tasks[<i>] (id <id>), for the caller's own errors.
+func parseTask(i int, el *yaml.Node) (Task, string, error) {
+	where := fmt.Sprintf("tasks[%d]", i)
+	if el.Kind == yaml.AliasNode {
+		el = el.Alias
+	}
+	if el.Kind != yaml.MappingNode {
+		return Task{}, where, fmt.Errorf("%s: must be a mapping", where)
+	}
+
+	fields := make(map[string]*yaml.Node)
+	for j := 0; j+1 < len(el.Content); j += 2 {
+		key, value := el.Content[j].Value, el.Content[j+1]
+		if _, dup := fields[key]; dup {
+			return Task{}, where, fmt.Errorf("%s: %s: duplicate key", where, key)
+		}
+		if value.Kind == yaml.AliasNode {
+			value = value.Alias
+		}
+		fields[key] = value
+	}
+
+	var id int16
+	idNode := fields["id"]
+	if idNode == nil {
+		return Task{}, where, fmt.Errorf("%s: id: is required", where)
+	}
+	if idNode.Kind != yaml.ScalarNode || idNode.Tag != "!!int" || idNode.Decode(&id) != nil || id <= 0 {
+		return Task{}, where, fmt.Errorf("%s: id: must be a positive integer no greater than 32767", where)
+	}
+	where = fmt.Sprintf("%s (id %d)", where, id)
+
+	for _, field := range []string{"name", "prompt", "state", "error"} {
+		node := fields[field]
+		required := field == "name" || field == "prompt"
+		switch {
+		case node == nil && required:
+			return Task{}, where, fmt.Errorf("%s: %s: is required", where, field)
+		case node == nil:
+		case node.Kind != yaml.ScalarNode || node.Tag != "!!str":
+			return Task{}, where, fmt.Errorf("%s: %s: must be a string", where, field)
+		case required && strings.TrimSpace(node.Value) == "":
+			return Task{}, where, fmt.Errorf("%s: %s: must not be empty or whitespace", where, field)
+		case field == "state" && node.Value != "" && node.Value != PendingState &&
+			node.Value != CompletedState && node.Value != FailedState:
+			return Task{}, where, fmt.Errorf("%s: state: must be pending, completed, or failed, got %q", where, node.Value)
+		}
+	}
+
+	var task Task
+	if err := el.Decode(&task); err != nil {
+		return Task{}, where, fmt.Errorf("%s: %w", where, err)
+	}
+	if task.State == "" {
+		task.State = PendingState
+	}
+
+	return task, where, nil
+}
+
+// checkTags rejects any node carrying a tag outside allowedTags.
+func checkTags(n *yaml.Node) error {
+	if n.Kind != yaml.DocumentNode && n.Kind != yaml.AliasNode && n.Kind != 0 && !allowedTags[n.Tag] {
+		return fmt.Errorf("line %d: tag %s is not allowed", n.Line, n.Tag)
+	}
+	for _, c := range n.Content {
+		if err := checkTags(c); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // SaveTasks writes tl to path as YAML via a temporary file that is renamed
@@ -109,84 +197,4 @@ func SaveTasks(path string, tl TaskList) error {
 	}
 
 	return nil
-}
-
-func idsAreUnique(t TaskList) (bool, Task) {
-	seen := make(map[int16]struct{})
-
-	for _, task := range t.Tasks {
-		if _, exists := seen[task.ID]; exists {
-			return false, task
-		}
-		seen[task.ID] = struct{}{}
-	}
-
-	return true, taskEmpty()
-}
-
-func namesAreUnique(t TaskList) (bool, Task) {
-	seen := make(map[string]struct{})
-
-	for _, task := range t.Tasks {
-		name := strings.TrimSpace(strings.ToLower(task.Name))
-		if _, exists := seen[name]; exists {
-			return false, task
-		}
-		seen[name] = struct{}{}
-	}
-
-	return true, taskEmpty()
-}
-
-func namesAreNotWhitespace(t TaskList) (bool, Task) {
-	for _, task := range t.Tasks {
-		prompt := strings.TrimSpace(task.Name)
-		if len(prompt) == 0 {
-			return false, task
-		}
-	}
-
-	return true, taskEmpty()
-}
-
-func promptsAreNotWhitespace(t TaskList) (bool, Task) {
-	for _, task := range t.Tasks {
-		prompt := strings.TrimSpace(task.Prompt)
-		if len(prompt) == 0 {
-			return false, task
-		}
-	}
-
-	return true, taskEmpty()
-}
-
-func idsArePositive(t TaskList) (bool, Task) {
-	for _, task := range t.Tasks {
-		if task.ID <= 0 {
-			return false, task
-		}
-	}
-
-	return true, taskEmpty()
-}
-
-func statesAreValid(t TaskList) (bool, Task) {
-	for _, task := range t.Tasks {
-		switch {
-		case task.State != PendingState && task.State != CompletedState && task.State != FailedState:
-			return false, task
-		}
-	}
-
-	return true, taskEmpty()
-}
-
-func normalizeState(t *TaskList) {
-	for i, task := range t.Tasks {
-		state := strings.ToLower(strings.TrimSpace(task.State))
-		if len(state) == 0 {
-			state = PendingState
-		}
-		t.Tasks[i].State = state
-	}
 }

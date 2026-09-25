@@ -485,26 +485,124 @@ func TestRunLoop_SkipsCompletedTasks(t *testing.T) {
 	assert.Equal(t, tasks.CompletedState, saved.Tasks[1].State, "the pending task is now completed")
 }
 
-// TestRunLoop_RerunsPreviouslyFailedTask proves a task left in the failed
-// state from an earlier run is retried, not skipped.
-func TestRunLoop_RerunsPreviouslyFailedTask(t *testing.T) {
+// TestStart_RefusesWhenAnyTaskFailed proves Start refuses to run while any
+// task is failed: it returns the fix-and-reset error, never invokes claude, and
+// leaves the tasks file byte-for-byte unchanged.
+func TestStart_RefusesWhenAnyTaskFailed(t *testing.T) {
 	useFakeClaude(t)
 	dir := t.TempDir()
 	recordPath := filepath.Join(dir, "record.log")
-	tasksPath := filepath.Join(dir, "tasks.yaml")
 	t.Setenv("FAKE_CLAUDE_RECORD", recordPath)
 
-	tl := &tasks.TaskList{Tasks: []tasks.Task{
-		{ID: 1, Name: "Only", Prompt: "p1", State: tasks.FailedState},
-	}}
+	promptPath := writePromptFile(t, dir, "Follow the plan.\n")
+	content := `tasks:
+  - id: 1
+    name: First task
+    prompt: Do the first thing.
+  - id: 2
+    name: Second task
+    prompt: Do the second thing.
+    state: failed
+    error: boom
+  - id: 3
+    name: Third task
+    prompt: Do the third thing.
+    state: failed
+`
+	tasksPath := writeTasksFile(t, dir, content)
 
-	err := runLoop(context.Background(), "prompt", tl, tasksPath)
+	err := Start(context.Background(), promptPath, tasksPath)
+	require.Error(t, err)
+	assert.EqualError(t, err, "fix the failed tasks and set their state to pending before running")
+
+	assert.Empty(t, readFakeClaudeRecords(t, recordPath), "claude must never be invoked")
+	data, readErr := os.ReadFile(tasksPath)
+	require.NoError(t, readErr)
+	assert.Equal(t, content, string(data), "the tasks file must be unchanged")
+}
+
+func TestDryRun_ValidFile(t *testing.T) {
+	dir := t.TempDir()
+	tasksPath := writeTasksFile(t, dir, validTasksYAML)
+
+	var out bytes.Buffer
+	require.NoError(t, DryRun(&out, tasksPath))
+	want := "   ID  STATE      NAME\n" +
+		"   --  ---------  ----\n" +
+		"    1  PENDING  \033[0m  First task\n" +
+		"    2  PENDING  \033[0m  Second task\n" +
+		tasksPath + " is valid\n"
+	assert.Equal(t, want, out.String())
+}
+
+// TestDryRun_NoFailedTasksTable pins the exact table, colour codes included,
+// for completed and pending tasks, with a 3-digit id widening the ID column.
+func TestDryRun_NoFailedTasksTable(t *testing.T) {
+	dir := t.TempDir()
+	content := `tasks:
+  - id: 1
+    name: First task
+    prompt: Do the first thing.
+    state: completed
+  - id: 123
+    name: Second task
+    prompt: Do the second thing.
+`
+	tasksPath := writeTasksFile(t, dir, content)
+
+	var out bytes.Buffer
+	require.NoError(t, DryRun(&out, tasksPath))
+	want := "    ID  STATE      NAME\n" +
+		"   ---  ---------  ----\n" +
+		"✅   1  \033[92mCOMPLETED\033[0m  First task\n" +
+		"   123  PENDING  \033[0m  Second task\n" +
+		tasksPath + " is valid\n"
+	assert.Equal(t, want, out.String())
+}
+
+func TestDryRun_InvalidFile(t *testing.T) {
+	dir := t.TempDir()
+	tasksPath := writeTasksFile(t, dir, "tasks:\n  - {id: 1, name: a, prompt: p, state: bogus}\n")
+
+	var out bytes.Buffer
+	err := DryRun(&out, tasksPath)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "failed to parse tasks yaml")
+	assert.Empty(t, out.String())
+}
+
+// TestDryRun_FlagsFailedTasks pins the exact table, colour codes included,
+// for a mix of completed, pending, and failed tasks with a 3-digit id, and
+// that a file with failed tasks is still accepted.
+func TestDryRun_FlagsFailedTasks(t *testing.T) {
+	dir := t.TempDir()
+	content := `tasks:
+  - id: 1
+    name: First task
+    prompt: Do the first thing.
+    state: completed
+  - id: 2
+    name: Second task
+    prompt: Do the second thing.
+    state: failed
+    error: boom
+  - id: 100
+    name: Third task
+    prompt: Do the third thing.
+`
+	tasksPath := writeTasksFile(t, dir, content)
+
+	var out bytes.Buffer
+	require.NoError(t, DryRun(&out, tasksPath))
+	want := "Some tasks failed previous runs:\n" +
+		"    ID  STATE      NAME\n" +
+		"   ---  ---------  ----\n" +
+		"✅   1  \033[92mCOMPLETED\033[0m  First task\n" +
+		"❌   2  \033[1;91mFAILED   \033[0m  Second task  \033[1;91m← Needs review!\033[0m\n" +
+		"   100  PENDING  \033[0m  Third task\n"
+	assert.Equal(t, want, out.String())
+
+	data, err := os.ReadFile(tasksPath)
 	require.NoError(t, err)
-
-	records := readFakeClaudeRecords(t, recordPath)
-	assert.Len(t, records, 1, "a previously failed task must be run again")
-
-	saved := readSavedTasks(t, tasksPath)
-	require.Len(t, saved.Tasks, 1)
-	assert.Equal(t, tasks.CompletedState, saved.Tasks[0].State, "a retried task that now succeeds is saved as completed")
+	assert.Equal(t, content, string(data), "the tasks file must be unchanged")
 }

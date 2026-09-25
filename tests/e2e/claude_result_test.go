@@ -233,12 +233,10 @@ func TestLoop_FencedResultLine_Completes(t *testing.T) {
 	assertNoTmpFile(t, tasksPath)
 }
 
-// TestLoop_PreviouslyFailedTaskWithError_RerunsAndClearsError verifies that
-// a task left failed with a persisted error by a prior run is re-run, and
-// once it completes, its stored error is cleared entirely (the `error` YAML
-// key is absent, not merely blank) rather than left stale alongside the new
-// completed state.
-func TestLoop_PreviouslyFailedTaskWithError_RerunsAndClearsError(t *testing.T) {
+// TestLoop_StaleErrorClearedWhenTaskCompletes verifies that a pending task
+// carrying a stale error has it cleared entirely once it completes (the
+// `error` YAML key is absent, not merely blank).
+func TestLoop_StaleErrorClearedWhenTaskCompletes(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 
@@ -247,7 +245,7 @@ func TestLoop_PreviouslyFailedTaskWithError_RerunsAndClearsError(t *testing.T) {
   - id: 1
     name: First task
     prompt: Do the first thing.
-    state: failed
+    state: pending
     error: boom old
 `
 	tasksPath := writeTasksYAML(t, dir, tasksYAML)
@@ -262,7 +260,7 @@ func TestLoop_PreviouslyFailedTaskWithError_RerunsAndClearsError(t *testing.T) {
 	require.Equal(t, 0, res.exitCode, "stdout:\n%s\nstderr:\n%s", res.stdout, res.stderr)
 
 	records := readFakeClaudeRecords(t, recordFile)
-	require.Len(t, records, 1, "expected the previously failed task to be re-run rather than skipped")
+	require.Len(t, records, 1, "expected the pending task to run")
 	assert.NotContains(t, records[0].Stdin, "boom old", "the stale error must never be sent to claude")
 
 	after := readTasksYAML(t, tasksPath)
