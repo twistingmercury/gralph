@@ -9,13 +9,15 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/twistingmercury/gralph/internal/version"
 	"github.com/twistingmercury/gralph/skills"
 )
 
 const skillName = "gralph-docs-writer"
 
 // Install replaces ~/.claude/skills/gralph-docs-writer with the skill
-// embedded in the binary and returns the installed path.
+// embedded in the binary, writes a VERSION file holding the gralph version
+// and Hash(), and returns the installed path.
 func Install() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -46,6 +48,15 @@ func Install() (string, error) {
 		return os.WriteFile(target, data, 0o600)
 	})
 	if err != nil {
+		return "", err
+	}
+
+	hash, err := Hash()
+	if err != nil {
+		return "", err
+	}
+	stamp := version.Version() + "\n" + hash + "\n"
+	if err := os.WriteFile(filepath.Join(dest, "VERSION"), []byte(stamp), 0o600); err != nil {
 		return "", err
 	}
 

@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/twistingmercury/gralph/internal/version"
 	"github.com/twistingmercury/gralph/skills"
 )
 
@@ -59,6 +60,19 @@ func TestInstall_ReplacesExistingFolder(t *testing.T) {
 
 	assert.NoFileExists(t, stray)
 	assert.FileExists(t, filepath.Join(dest, "SKILL.md"))
+}
+
+func TestInstall_WritesVersionFile(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	dest, err := Install()
+	require.NoError(t, err)
+
+	data, err := os.ReadFile(filepath.Join(dest, "VERSION"))
+	require.NoError(t, err)
+	hash, err := Hash()
+	require.NoError(t, err)
+	assert.Equal(t, version.Version()+"\n"+hash+"\n", string(data))
 }
 
 func TestHash_Format(t *testing.T) {
