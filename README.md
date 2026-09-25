@@ -72,7 +72,9 @@ order — `id` identifies a task, it does not order them. The
 `gralph-docs-writer` skill in [skills/](skills/gralph-docs-writer/SKILL.md)
 generates a task file and shared prompt for a project. It is embedded in the
 binary: `gralph --install-skill` replaces `~/.claude/skills/gralph-docs-writer/`
-with the copy matching that binary's version and prints the path.
+with the copy matching that binary's version and prints the path. A run or
+`--dry-run` refuses to start (exit 1) while that skill is missing or was
+installed by a different binary, and tells you to run `gralph --install-skill`.
 `scripts/install_skill.sh` installs the working-tree copy instead, for
 development.
 
@@ -105,7 +107,7 @@ original) with every state change. Comments and custom formatting are not
 preserved; each task's state is made explicit.
 
 Background on the approach is in [docs/gralph-concept.md](docs/gralph-concept.md);
-the design is documented from [docs/architecture/00_overview_v02.md](docs/architecture/00_overview_v02.md).
+the design is documented from [docs/architecture/00_overview.md](docs/architecture/00_overview.md).
 
 ## Key Considerations
 

@@ -1,8 +1,8 @@
 # Gralph — Architecture Overview
 
-> **Version**: v01
+> **Version**: v02
 > **Date**: 2026-09-25
-> **Notes**: Realigned to the v0.6.2 design; replaces the unversioned pre-YAML docs.
+> **Notes**: Skill renamed to gralph-docs-writer.
 
 [Back to Project README](../../README.md)
 
@@ -68,10 +68,10 @@ graph TB
 
 | #   | Document                                                    | Description                           | Status  |
 | --- | ----------------------------------------------------------- | ------------------------------------- | ------- |
-| 00  | [Overview](00_overview_v01.md)                              | This document                         | Current |
-| 01  | [Requirements](01_requirements_v01.md)                      | Problem statement, goals, constraints | Active  |
-| 02  | [Architectural Decisions](02_architectural_decisions_v01.md) | ADR log                               | Active  |
-| 03  | [System Architecture](03_system_architecture_v01.md)        | Components, data flow, boundaries     | Active  |
-| 05  | [Deployment Architecture](05_deployment_architecture_v01.md) | Deployment, infrastructure, scaling   | Active  |
+| 00  | [Overview](00_overview.md)                              | This document                         | Current |
+| 01  | [Requirements](01_requirements.md)                      | Problem statement, goals, constraints | Active  |
+| 02  | [Architectural Decisions](02_architectural_decisions.md) | ADR log                               | Active  |
+| 03  | [System Architecture](03_system_architecture.md)        | Components, data flow, boundaries     | Active  |
+| 05  | [Deployment Architecture](05_deployment_architecture.md) | Deployment, infrastructure, scaling   | Active  |
 
-**Next:** [Requirements](01_requirements_v01.md)
+**Next:** [Requirements](01_requirements.md)

@@ -1,10 +1,10 @@
 # Gralph — Architectural Decisions
 
-> **Version**: v01
+> **Version**: v03
 > **Date**: 2026-09-25
-> **Notes**: Realigned to the v0.6.2 design.
+> **Notes**: ADR-010 adds the installed-skill version check: `--install-skill` stamps VERSION with a content hash, and runs and dry-runs refuse to start on a missing or stale skill.
 
-[Back to Overview](00_overview_v01.md) | [Back to Project README](../../README.md)
+[Back to Overview](00_overview.md) | [Back to Project README](../../README.md)
 
 ## Table of Contents
 
@@ -34,6 +34,8 @@ Each architectural decision is recorded as an ADR with the following structure:
 | 006   | Failed task blocks run until manual reset      | Accepted | 2026-09-25 |
 | 007   | Unix only, process group lifecycle management  | Accepted | 2026-09-25 |
 | 008   | Docker-first CI: build, test, e2e in container | Accepted | 2026-09-25 |
+| 009   | Embed the skill, install with --install-skill  | Accepted | 2026-09-25 |
+| 010   | Refuse to run with a stale installed skill     | Accepted | 2026-09-25 |
 
 ## Decisions
 
@@ -75,7 +77,7 @@ Task definitions need to be:
 2. Human-readable without special tooling
 3. Safe: a corrupted file should be rejected entirely, not partially loaded
 
-Early designs considered PR Markdown checklists, JSON, and config-file overrides. YAML was chosen because the ralph-loop-docs-writer skill already generates tasks.yaml + prompt.md pairs, and YAML parsing is a known quantity in Go.
+Early designs considered PR Markdown checklists, JSON, and config-file overrides. YAML was chosen because the gralph-docs-writer skill already generates tasks.yaml + prompt.md pairs, and YAML parsing is a known quantity in Go.
 
 **Decision:**
 
@@ -263,4 +265,63 @@ The Makefile's `local` target builds a native binary. The `build` target runs `b
 
 ---
 
-**Next:** [System Architecture](03_system_architecture_v01.md)
+### ADR-009: Embed the skill, install with --install-skill
+
+**Status:** Accepted
+
+**Context:**
+
+The `gralph-docs-writer` skill generates task files that must satisfy the parser in `internal/tasks`. Installing it with `scripts/install_skill.sh` requires a checkout of the repository, and nothing ties the installed copy to the gralph binary in use, so the skill and the parser can drift apart.
+
+**Decision:**
+
+`skills/embed.go` embeds the whole `skills/gralph-docs-writer` folder (SKILL.md and templates/) in the binary with `//go:embed`. The `--install-skill` flag runs before the `--prompt`/`--tasks` checks: `internal/skillinstall` resolves the home directory with `os.UserHomeDir`, removes `~/.claude/skills/gralph-docs-writer`, writes every embedded file under it preserving the layout, prints the path, and exits 0 (1 on error). There is no override flag or env var. `scripts/install_skill.sh` stays for development, installing the working-tree copy.
+
+**Consequences:**
+
+*Positive:*
+- The installed skill always matches the binary's version and parser rules
+- Installing needs only the binary, not a repository checkout
+- Reinstalling is clean: stale files from an older skill are removed
+
+*Negative:*
+- Any local edits to the installed skill folder are lost on reinstall
+- Skill changes ship only with a new binary; a stale install is not detected during normal runs
+- Two install paths exist (flag for users, script for development)
+
+---
+
+### ADR-010: Refuse to run with a stale installed skill
+
+**Status:** Accepted
+
+**Context:**
+
+ADR-009 ties the embedded skill to the binary, but nothing checked the installed copy: the installed `gralph-docs-writer` skill went stale more than once after gralph was upgraded or the skill changed. The skill's field rules must match the parser in `internal/tasks`, so a stale skill generates task files the current gralph may reject or read differently.
+
+**Decision:**
+
+`--install-skill` writes a `VERSION` file into `~/.claude/skills/gralph-docs-writer` holding two lines: the gralph version and a SHA-256 content hash of the embedded skill (`sha256:<hex>`, computed over each file's relative path and bytes in `fs.WalkDir` order). Normal runs and `--dry-run` call `skillinstall.Check` after the flag checks and refuse to start (exit 1) when the skill folder is missing or its `VERSION` hash differs from the binary's, telling the user to run `gralph --install-skill`. The stored version is informational only, used in the error message.
+
+A content hash was chosen over the version tag or the git commit:
+
+- A version tag misses skill changes made between releases, so development builds would accept a stale skill.
+- A commit changes on unrelated edits, forcing reinstalls when the skill did not change, and its length differs between `make local` and `make build`, so the same source would stamp different values.
+- The content hash changes exactly when the embedded skill changes, independent of how the binary was built.
+
+**Consequences:**
+
+*Positive:*
+- A stale or missing skill is caught before any task runs, with a one-line fix in the error
+- Reinstalls are required only when the skill content actually changes
+- Local and release builds of the same source agree on the hash
+
+*Negative:*
+- Every run and dry-run needs the skill installed, even when the user never generates task files with it
+- Local edits to the installed skill make every run fail until `--install-skill` overwrites them
+- Tests that run gralph need a `HOME` with the skill installed (the e2e suite's `skillHome`)
+- `scripts/install_skill.sh` writes no `VERSION`, so a development install fails the check until `--install-skill` is run
+
+---
+
+**Next:** [System Architecture](03_system_architecture.md)

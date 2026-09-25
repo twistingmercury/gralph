@@ -29,6 +29,10 @@ var testBinaryPath string
 // child process's PATH.
 var fakeClaudeDir string
 
+// skillHome is set by TestMain to a HOME in which `gralph --install-skill`
+// has already run; the env helpers give every gralph run this HOME.
+var skillHome string
+
 // cliResult captures the result of executing the CLI binary.
 type cliResult struct {
 	stdout   string
@@ -97,6 +101,16 @@ func runTests(m *testing.M) int {
 		return 1
 	}
 
+	skillHome = filepath.Join(tmpDir, "home")
+	install := exec.Command(testBinaryPath, "--install-skill")
+	install.Env = append(os.Environ(), "HOME="+skillHome)
+	install.Stdout = os.Stdout
+	install.Stderr = os.Stderr
+	if err := install.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "failed to install skill into test HOME: %v\n", err)
+		return 1
+	}
+
 	return m.Run()
 }
 
@@ -108,6 +122,7 @@ func runCLI(t *testing.T, args ...string) cliResult {
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, testBinaryPath, args...) // #nosec G204 -- testBinaryPath is a test fixture
+	cmd.Env = gralphEnvWithPath(os.Getenv("PATH"), nil)
 	// Bound how long Wait() can block flushing output after the context kills
 	// the process, so a child that inherited stdout/stderr can't hang Wait
 	// past the deadline.
