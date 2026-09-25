@@ -8,6 +8,7 @@ import (
 	"syscall"
 
 	"github.com/twistingmercury/gralph/internal/looper"
+	"github.com/twistingmercury/gralph/internal/skillinstall"
 	"github.com/twistingmercury/gralph/internal/version"
 
 	"github.com/spf13/pflag"
@@ -18,11 +19,13 @@ var (
 	tasksFlag   = pflag.StringP("tasks", "t", "", "Required. Path to the tasks.yaml task list that drives the loop")
 	promptFlag  = pflag.StringP("prompt", "p", "", "Required unless --dry-run. Path to the prompt.md shared prompt passed to Claude with every task")
 	dryRunFlag  = pflag.Bool("dry-run", false, "Validate the tasks file and report failed tasks without running anything")
+	installFlag = pflag.Bool("install-skill", false, "Install the gralph-docs-writer skill bundled with this binary into ~/.claude/skills")
 )
 
 func main() {
 	pflag.Parse()
 	checkVersion()
+	checkInstallSkill()
 	validateRequiredFlags()
 
 	if *dryRunFlag {
@@ -48,6 +51,21 @@ func checkVersion() {
 	}
 
 	version.Print()
+	os.Exit(0)
+}
+
+func checkInstallSkill() {
+	if !*installFlag {
+		return
+	}
+
+	path, err := skillinstall.Install()
+	if err != nil {
+		_, _ = fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Println(path)
 	os.Exit(0)
 }
 
