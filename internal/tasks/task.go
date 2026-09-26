@@ -18,9 +18,9 @@ const (
 )
 
 type Task struct {
-	ID     int16  `yaml:"id" validate:"required"`
-	Name   string `yaml:"name" validate:"required"`
-	Prompt string `yaml:"prompt" validate:"required"`
+	ID     int16  `yaml:"id"`
+	Name   string `yaml:"name"`
+	Prompt string `yaml:"prompt"`
 	State  string `yaml:"state"`
 	Error  string `yaml:"error,omitempty"`
 }
