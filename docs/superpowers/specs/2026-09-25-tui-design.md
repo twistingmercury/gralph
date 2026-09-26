@@ -50,6 +50,10 @@ task, stop on failure, cancel leaves the task untouched). It takes a
   nothing is written to gralph's stdout/stderr, and progress goes through
   `report`.
 
+The loop body calls one of two unexported helpers per task, `runTaskPlain`
+or `runTaskStream`, so the loop rules stay in one place, apart from the code
+that talks to claude.
+
 The combined-prompt wire contract
 (`fmt.Sprintf("%s\n\n%s\n", prompt, task.String())`) is the same in both.
 
@@ -75,15 +79,22 @@ type Event struct {
 ### Package boundary
 
 The TUI lives in `internal/tui` and depends on `internal/looper`, never the
-reverse. `looper` exports what the TUI and `cmd/main` need:
+reverse. `looper` never imports Bubble Tea; only `internal/tui` and
+`cmd/main` do. `looper` exports what the TUI and `cmd/main` need:
 
-- `Load(promptFile, tasksFile string) (prompt string, tl *tasks.TaskList, err error)`:
-  the checks `Start` does today (prompt trimmed, non-empty; tasks parsed; no
-  `failed` task). It prints nothing; a failed-task refusal is an error value
-  the caller renders. `Start` calls it and keeps today's output byte for byte
-  (the `Some tasks failed previous runs:` table on stdout included).
+- `LoadPrompt(path string) (string, error)`: today's prompt checks (trimmed,
+  non-empty). Prints nothing.
+- `LoadTasks(path string) (*tasks.TaskList, error)`: today's tasks-file
+  checks, plus the failed-task check. Prints nothing. When the file parses
+  but holds a `failed` task it returns the list **and** `ErrFailedTasks`, so
+  the caller can print the table: `Start` then returns an error (exit 1)
+  and `DryRun` returns nil (exit 0), both byte for byte as today.
 - `Run(ctx, prompt, tl, tasksFile, report)`: the exported entry to `runLoop`.
-  `Start` is `Load` + the table on refusal + `Run(..., nil)`.
+  `Start` is `LoadPrompt` + `LoadTasks` + the table on refusal +
+  `Run(..., nil)`.
+
+Two loaders rather than one `Load`, because the setup screen validates one
+path at a time.
 
 ### TUI task path: claude invocation
 
@@ -136,15 +147,15 @@ empty text, which is "no valid result line" and therefore `failed`.
 3. Plain: exactly today's order — required-flag check, skill check, then
    dry-run or `Start`. Errors and their order are unchanged.
 4. TUI: skill check (plain stderr on failure). Then, for each path given on
-   the command line, `Load` checks it before the TUI opens; a bad file is a
+   the command line, `LoadTasks`/`LoadPrompt` check it before the TUI opens; a bad file is a
    plain stderr error and exit 1, as today (a `failed` task prints the same
    table and refusal as `Start`). Paths that are missing go to the setup
    screen; then the run view.
 
 ### Setup screen
 
-One text field per missing path. Enter validates it with the same checks as
-`Load` (tasks file parses and has no `failed` task; prompt file non-empty
+One text field per missing path. Enter validates it with `LoadTasks` or
+`LoadPrompt` (tasks file parses and has no `failed` task; prompt file non-empty
 after trimming) so the rules cannot drift. Errors show under the field.
 `Esc` quits.
 
@@ -204,12 +215,14 @@ calls `program.Send(event)`. The model only reacts to messages.
   `result` text → outcome; a line over 64 KiB is read, not a hang) and for
   `runLoop` with a non-nil `report` (event order; cancel sends no
   `TaskFinished`).
-- `Load`: unit tests that it matches `Start`'s checks and prints nothing.
-- Both fake claudes keep today's text output by default and emit stream-json
-  only when their argv contains `--output-format stream-json`. Then the
+- `LoadPrompt`/`LoadTasks`: unit tests that they match today's checks, print
+  nothing, and return the list with `ErrFailedTasks` for a failed task.
+- The unit fake claude keeps today's text output by default and emits
+  stream-json only when their argv contains `--output-format stream-json`. Then the
   default is `system` init, one `assistant` text event, and a `result` event
   whose text is the completed result line; `FAKE_CLAUDE_OUTPUT` supplies the
-  `result` text.
+  `result` text. The e2e fake is unchanged: e2e has no terminal, so gralph
+  never asks it for stream-json.
 - e2e: gralph without a terminal (as e2e always runs) uses plain mode with
   no flag, so every existing test keeps passing unchanged; add a test that
   `--no-tui` is accepted and output is identical to running without it. (e2e
@@ -224,7 +237,7 @@ calls `program.Send(event)`. The model only reacts to messages.
 ### Docs
 
 README (the TUI as default, `--no-tui`, the no-terminal fallback, keys), CLAUDE.md (the `report` hook and
-its two task paths, stream-json in the fakes, the TUI package), and ADRs in
+its two task paths, stream-json in the unit fake, the TUI package), and ADRs in
 `docs/architecture/02_architectural_decisions.md` for the default TUI with
 stream-json live activity (plain mode unchanged) and for Bubble Tea.
 
@@ -233,10 +246,10 @@ stream-json live activity (plain mode unchanged) and for Bubble Tea.
 Each step leaves gralph working and passing the quality gates. Plain mode is
 unchanged throughout.
 
-1. `Load` and `Run` exported from `looper`, and the `report` parameter on
+1. `LoadPrompt`, `LoadTasks`, and `Run` exported from `looper`, and the `report` parameter on
    `runLoop` (nil everywhere) — a refactor, no visible change.
 2. The stream-json task path behind a non-nil `report`, with stream parsing;
-   fake claudes emit stream-json when asked.
+   the unit fake claude emits stream-json when asked.
 3. The TUI as default: mode selection (terminal check, `--no-tui`), the run
    view, and quitting.
 4. The setup screen for missing `-t`/`-p`.
