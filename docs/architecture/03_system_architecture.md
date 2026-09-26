@@ -1,8 +1,8 @@
 # Gralph — System Architecture
 
-> **Version**: v04
+> **Version**: v05
 > **Date**: 2026-09-26
-> **Notes**: Described the Task progress row format and the end-of-run banner.
+> **Notes**: Named `LoadTasksReport` as the shared failed-task report used by `Start`, `DryRun`, and the TUI.
 
 [Back to Overview](00_overview.md) | [Back to Project README](../../README.md)
 
@@ -50,7 +50,7 @@ graph TB
 - Parse command-line flags (--prompt, --tasks, --dry-run, --no-tui, --install-skill, --version)
 - Choose the mode: plain when `--dry-run`, `--no-tui`, or stdin or stdout is not a terminal (`github.com/charmbracelet/x/term`); otherwise the TUI
 - Plain mode: validate required flags, then route to `looper.Start` (normal run) or `looper.DryRun` (validation only)
-- TUI mode: load the given paths with `looper.LoadPrompt`/`looper.LoadTasks` (a failed task prints the `PrintTasks` table and exits 1, as in plain mode), run `tui.Setup` for any missing path, then `tui.Run`, and print the one-line summary after the view closes
+- TUI mode: load the given paths with `looper.LoadPrompt`/`looper.LoadTasksReport` (a failed task prints the `PrintTasks` table and exits 1, as in plain mode), run `tui.Setup` for any missing path, then `tui.Run`, and print the one-line summary after the view closes
 - Set up context with signal handling (SIGINT, SIGTERM)
 - Exit with appropriate code (0 on success, 1 on error); a Bubble Tea error exits 1 with a hint to rerun with `--no-tui`
 
@@ -87,7 +87,7 @@ graph TB
 **Responsibilities:**
 - Load and validate prompt file (`LoadPrompt`: must exist, readable, non-empty after trimming)
 - Load and parse task file via `tasks.ParseTasks` (`LoadTasks`)
-- Check preconditions (`LoadTasks` returns the list plus `ErrFailedTasks` if any task is `failed`; `Start` then prints the table and refuses to run)
+- Check preconditions (`LoadTasks` returns the list plus `ErrFailedTasks` if any task is `failed`; `LoadTasksReport` then prints the failed-task notice and table, and `Start` refuses to run)
 - Iterate pending tasks in file order (`Run` → `runLoop`)
 - Combine shared prompt with each task
 - Run each task on one of two paths, picked by the `report` hook:

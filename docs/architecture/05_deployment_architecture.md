@@ -1,8 +1,8 @@
 # Gralph — Deployment Architecture
 
-> **Version**: v02
-> **Date**: 2026-09-25
-> **Notes**: Testing strategy covers the TUI: `internal/tui` unit tests, the stream-json unit fake, and e2e running plain mode only.
+> **Version**: v03
+> **Date**: 2026-09-26
+> **Notes**: Unit tests now cover `cmd/main` (`make test` runs `./cmd/... ./internal/...`); the release build runs `go test ./...`.
 
 [Back to Overview](00_overview.md) | [Back to Project README](../../README.md)
 
@@ -77,7 +77,7 @@ one for your platform onto your PATH, or build from source with
 
 1. **Docker image build**: Uses `build/Dockerfile` with base image `ghcr.io/twistingmercury/golang-tooling:go1.27.1`
 2. **In-container lint**: goimports, golangci-lint, govulncheck, gosec
-3. **In-container unit tests**: `go test -v ./internal/...`
+3. **In-container unit tests**: `go test ./...`
 4. **Cross-compilation**: Builds binaries for linux and darwin on amd64 and arm64
 5. **Binary export**: Outputs to `.bin/<arch>/<os>/gralph`
 6. **E2E tests**: Runs `tests/e2e` suite in a container using docker-compose
@@ -130,10 +130,10 @@ GitHub Actions runs on `develop` and `main` branches for both push and pull requ
 
 ### Unit Tests
 
-- Run via `make test` → `go test -v ./internal/...`
+- Run via `make test` → `go test -v ./cmd/... ./internal/...`
 - Covers task parsing, state transitions, result parsing, process management
 - Uses testify (require for preconditions, assert for checks)
-- Test suites: `internal/tasks`, `internal/looper`, `internal/tui`, `internal/skillinstall`
+- Test suites: `cmd/main` (mode selection), `internal/tasks`, `internal/looper`, `internal/tui`, `internal/skillinstall`
 - The unit fake `claude` speaks stream-json only when its argv has `--output-format stream-json`, so the looper's TUI path is tested against it
 - `internal/tui` tests drive the Bubble Tea models directly, or `tui.Run`/`tui.Setup` with test program options; no terminal needed
 - Run natively or in Docker; Docker is authoritative

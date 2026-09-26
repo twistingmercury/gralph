@@ -1,7 +1,7 @@
 # Gralph
 
 > **Maturity Level**: Emerging - under active development; the CLI contract has already changed between minor versions
-> **Version**: v0.6.2
+> **Version**: v0.7.0
 
 > - **Emerging**: Prototype, not production-ready, expect breaking changes
 > - **Basic**: Production-ready but actively evolving, expect minor version changes
@@ -28,14 +28,14 @@ per task, feeding each session a shared prompt plus that task's own prompt.
 gralph --prompt path/to/prompt.md --tasks path/to/tasks.yaml
 ```
 
-| Flag               | Required | Description                                            |
-| ------------------ | -------- | ------------------------------------------------------ |
-| `--prompt` / `-p`  | Yes, unless `--dry-run`; asked for when missing in the full-screen view | Path to the shared prompt sent to Claude for every task |
-| `--tasks` / `-t`   | Yes; asked for when missing in the full-screen view | Path to the YAML task list that drives the loop |
-| `--dry-run`        | No       | Validate the task file and report on it without running anything |
-| `--no-tui`         | No       | Use plain output instead of the full-screen view        |
-| `--install-skill`  | No       | Install the bundled `gralph-docs-writer` skill for Claude Code and exit |
-| `--version` / `-v` | No       | Print version information and exit                     |
+| Flag               | Required                                                                | Description                                                             |
+| ------------------ | ----------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| `--prompt` / `-p`  | Yes, unless `--dry-run`; asked for when missing in the full-screen view | Path to the shared prompt sent to Claude for every task                 |
+| `--tasks` / `-t`   | Yes; asked for when missing in the full-screen view                     | Path to the YAML task list that drives the loop                         |
+| `--dry-run`        | No                                                                      | Validate the task file and report on it without running anything        |
+| `--no-tui`         | No                                                                      | Use plain output instead of the full-screen view                        |
+| `--install-skill`  | No                                                                      | Install the bundled `gralph-docs-writer` skill for Claude Code and exit |
+| `--version` / `-v` | No                                                                      | Print version information and exit                                      |
 
 When stdin and stdout are both terminals, gralph runs in a full-screen view
 (see [The full-screen view](#the-full-screen-view)). With `--no-tui`, or when
@@ -133,12 +133,12 @@ The view has three panes, each under a title bar, over a one-line legend:
 
 Keys:
 
-| Key                  | Action                                         |
-| -------------------- | ---------------------------------------------- |
-| `tab`                | Move focus to the next pane (output has it at start) |
-| `↑` / `↓`            | Scroll the focused pane one line               |
-| `PgUp` / `PgDn`      | Scroll the focused pane one page               |
-| `q` / `ctrl+c`       | Ask `Stop the run? The current task stays pending. [y/N]`; `y` stops the Claude session and closes the view, any other key carries on. Once the run has ended, closes the view |
+| Key             | Action                                                                                                                                                                         |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `tab`           | Move focus to the next pane (output has it at start)                                                                                                                           |
+| `↑` / `↓`       | Scroll the focused pane one line                                                                                                                                               |
+| `PgUp` / `PgDn` | Scroll the focused pane one page                                                                                                                                               |
+| `q` / `ctrl+c`  | Ask `Stop the run? The current task stays pending. [y/N]`; `y` stops the Claude session and closes the view, any other key carries on. Once the run has ended, closes the view |
 
 When the run ends on its own, the view stays open until you press `q`, with the
 outcome in the legend and in a banner at the top of Task progress, such as
