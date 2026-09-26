@@ -1,8 +1,8 @@
 # Gralph — Architectural Decisions
 
-> **Version**: v03
+> **Version**: v04
 > **Date**: 2026-09-25
-> **Notes**: ADR-010 adds the installed-skill version check: `--install-skill` stamps VERSION with a content hash, and runs and dry-runs refuse to start on a missing or stale skill.
+> **Notes**: ADR-011 makes the full-screen TUI the default in a terminal, with live activity from stream-json on the TUI path only and plain mode unchanged; ADR-012 adopts Bubble Tea v2, bubbles, and lipgloss, confined to `internal/tui` and `cmd/main`.
 
 [Back to Overview](00_overview.md) | [Back to Project README](../../README.md)
 
@@ -24,18 +24,20 @@ Each architectural decision is recorded as an ADR with the following structure:
 
 ## Decision Summary
 
-| ADR # | Title                                          | Status   | Date       |
-| ----- | ---------------------------------------------- | -------- | ---------- |
-| 001   | Claude Code only, no agent abstraction         | Accepted | 2026-09-25 |
-| 002   | YAML task file + shared prompt, strict parsing | Accepted | 2026-09-25 |
-| 003   | One fresh session per task, no retry           | Accepted | 2026-09-25 |
-| 004   | Gralph owns task state, atomic writes          | Accepted | 2026-09-25 |
-| 005   | Outcome from JSON result line, not exit code   | Accepted | 2026-09-25 |
-| 006   | Failed task blocks run until manual reset      | Accepted | 2026-09-25 |
-| 007   | Unix only, process group lifecycle management  | Accepted | 2026-09-25 |
-| 008   | Docker-first CI: build, test, e2e in container | Accepted | 2026-09-25 |
-| 009   | Embed the skill, install with --install-skill  | Accepted | 2026-09-25 |
-| 010   | Refuse to run with a stale installed skill     | Accepted | 2026-09-25 |
+| ADR     | Title                                          | Status   | Date       |
+| ------- | ---------------------------------------------- | -------- | ---------- |
+| ADR-001 | Claude Code only, no agent abstraction         | Accepted | 2026-09-25 |
+| ADR-002 | YAML task file + shared prompt, strict parsing | Accepted | 2026-09-25 |
+| ADR-003 | One fresh session per task, no retry           | Accepted | 2026-09-25 |
+| ADR-004 | Gralph owns task state, atomic writes          | Accepted | 2026-09-25 |
+| ADR-005 | Outcome from JSON result line, not exit code   | Accepted | 2026-09-25 |
+| ADR-006 | Failed task blocks run until manual reset      | Accepted | 2026-09-25 |
+| ADR-007 | Unix only, process group lifecycle management  | Accepted | 2026-09-25 |
+| ADR-008 | Docker-first CI: build, test, e2e in container | Accepted | 2026-09-25 |
+| ADR-009 | Embed the skill, install with --install-skill  | Accepted | 2026-09-25 |
+| ADR-010 | Refuse to run with a stale installed skill     | Accepted | 2026-09-25 |
+| ADR-011 | Full-screen TUI by default, plain mode intact  | Accepted | 2026-09-25 |
+| ADR-012 | Bubble Tea v2 for the TUI, confined to its use | Accepted | 2026-09-25 |
 
 ## Decisions
 
@@ -321,6 +323,67 @@ A content hash was chosen over the version tag or the git commit:
 - Local edits to the installed skill make every run fail until `--install-skill` overwrites them
 - Tests that run gralph need a `HOME` with the skill installed (the e2e suite's `skillHome`)
 - `scripts/install_skill.sh` writes no `VERSION`, so a development install fails the check until `--install-skill` is run
+
+---
+
+### ADR-011: Full-screen TUI by default, plain mode intact
+
+**Status:** Accepted
+
+**Context:**
+
+In plain mode a run shows the combined prompt and then nothing from Claude until the session ends, because `claude --print` writes its final message only when it exits. Tasks can run for many minutes, so the user cannot tell what the session is doing or how far the run has got. Plain mode is also what CI, pipes, and the e2e suite rely on, byte for byte, so it must not change.
+
+**Decision:**
+
+When stdin and stdout are both terminals, gralph opens a full-screen view (`internal/tui`) with the current task's prompt, the task list and statuses, the current session's live activity, and a key legend. Plain mode is chosen by `--no-tui`, by `--dry-run`, or automatically when either stream is not a terminal, and keeps today's argv, output, and exit codes. In the TUI, a missing `--prompt` or `--tasks` is asked for on a setup screen instead of being an error.
+
+There is one loop. `looper.Run` → `runLoop` takes a `report func(Event)` hook:
+
+- `report == nil` (plain): `runTaskPlain` runs `claude --print --dangerously-skip-permissions`, echoes the combined prompt, tees claude's stdout, and inherits stderr, exactly as before.
+- `report != nil` (TUI): `runTaskStream` runs `claude --print --output-format stream-json --verbose --dangerously-skip-permissions`, writes nothing to gralph's stdout or stderr, and reports `TaskStarted`, `Activity` (assistant text and tool calls, and claude's stderr lines), and `TaskFinished` events, then a final `RunDone`. The outcome comes from the `result` event's text with the same rules as plain mode.
+
+Both paths send the same combined prompt on stdin, and the loop rules (skip completed, save after every task, stop on first failure, cancel leaves the task untouched) live once in `runLoop`. Stream-json is used only on the TUI path. There are no runner, storage, or writer interfaces: `runLoop` still execs claude inline, and tests still drive a fake `claude` on `PATH`. `in progress` is display only and never written to `tasks.yaml`.
+
+**Consequences:**
+
+*Positive:*
+- A run is easy to follow live: what Claude is doing, which task is running, which are done
+- Plain mode, its tests, and every script or CI job that uses gralph are unchanged
+- One copy of the loop rules; the two task paths differ only in how they talk to claude
+- The e2e suite needs no change: it has no terminal, so it always runs plain mode
+
+*Negative:*
+- Two ways to run claude, each with its own code and tests
+- The TUI path depends on the stream-json event format, which Claude Code may change; unknown events and undecodable lines are ignored, but a changed `result` event would fail every task
+- The TUI cannot be exercised by the e2e suite; it is tested through its Bubble Tea models and a manual run
+- In the TUI the terminal is raw, so Ctrl-C is a key that opens a confirm; only an outside SIGINT/SIGTERM stops the run at once
+
+---
+
+### ADR-012: Bubble Tea v2 for the TUI, confined to its use
+
+**Status:** Accepted
+
+**Context:**
+
+ADR-011 needs a full-screen terminal UI: an alt screen, resizable panes, scrolling, text input for the setup screen, and key handling alongside a loop that runs in a goroutine. Writing that on raw terminal escape codes would be a lot of code to own. Bubble Tea exists in a v1 (`github.com/charmbracelet/*`) and a v2 (`charm.land/*`) line with different APIs.
+
+**Decision:**
+
+The TUI uses Bubble Tea v2 only: `charm.land/bubbletea/v2`, `charm.land/bubbles/v2` (viewport, textinput), and `charm.land/lipgloss/v2`. The v1 `github.com/charmbracelet/bubbletea`, `bubbles`, and `lipgloss` modules are never imported. These modules are imported only by `internal/tui` and `cmd/main`; `internal/looper` and `internal/tasks` never import them, so dependencies point one way: `cmd/main` → `internal/tui` → `internal/looper` → `internal/tasks`. The looper reaches the TUI only through the `report` hook, which `tui.Run` forwards to the program with `Send`. `cmd/main` uses `github.com/charmbracelet/x/term` for the terminal check. Bubble Tea's own signal handling is off (`tea.WithoutSignalHandler`), so the SIGINT/SIGTERM context from `cmd/main` stays the only outside stop.
+
+**Consequences:**
+
+*Positive:*
+- Layout, scrolling, input, and resize handling come from maintained libraries
+- The looper stays free of UI code and testable without a terminal
+- The models are plain values that tests drive directly with messages
+
+*Negative:*
+- New third-party dependencies to track and scan (govulncheck, gosec)
+- v2 differs from v1 (`View()` returns `tea.View`, keys are `tea.KeyPressMsg`), so most examples and answers written for v1 do not apply
+- If Bubble Tea fails to start despite the terminal check, gralph exits 1 and suggests `--no-tui`; there is no automatic fallback
 
 ---
 

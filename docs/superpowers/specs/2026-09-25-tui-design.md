@@ -1,7 +1,7 @@
 # TUI and live session activity — design
 
 **Date:** 2026-09-25
-**Status:** Approved
+**Status:** Implemented (corrected to match the code)
 **Mockup:** [docs/tui_mock_up.txt](../../tui_mock_up.txt)
 
 ## Goal
@@ -23,10 +23,10 @@ Make a gralph run easy to follow while it happens:
 | Plain mode | Byte-for-byte as today: same claude argv, the combined-prompt echo, claude's stdout/stderr inherited. |
 | Live output | TUI only: run claude with `--output-format stream-json --verbose` and show its activity as it happens. |
 | TUI start failure | Print the error, suggest `--no-tui`, exit 1. No automatic fallback. |
-| Missing `-t`/`-p` | The TUI asks for them on a setup screen; plain mode still errors, as today. |
+| Missing `-t`/`-p` | The TUI asks for them on a setup screen; plain mode still errors, as today. Esc or Ctrl-C on the setup screen cancels (exit 1). |
 | `--dry-run` | Always plain, as today. Never launches the TUI and never prompts; `-t` stays required. |
 | End of run | TUI stays open on the final state until `q`; exit code is the run's. |
-| Quit mid-run | `q` or Ctrl-C asks to confirm; `y` cancels like Ctrl-C today. |
+| Quit mid-run | `q` or Ctrl-C asks to confirm; `y` cancels like Ctrl-C today; any other key keeps the run going. |
 | External signal | SIGINT/SIGTERM from outside the TUI cancels at once, no confirm; exit 1. |
 | Prompt pane | The current task's `<id>: <name>` and prompt; the shared prompt is not shown. |
 | Output pane | Cleared when the next task starts; shows the current task only. |
@@ -146,18 +146,22 @@ empty text, which is "no valid result line" and therefore `failed`.
    stdout is not a terminal; otherwise the TUI.
 3. Plain: exactly today's order — required-flag check, skill check, then
    dry-run or `Start`. Errors and their order are unchanged.
-4. TUI: skill check (plain stderr on failure). Then, for each path given on
-   the command line, `LoadTasks`/`LoadPrompt` check it before the TUI opens; a bad file is a
+4. TUI: the skill check runs first, before the mode matters (plain stderr on
+   failure). Then, for each path given on the command line, `LoadTasks`/`LoadPrompt` check it before the TUI opens; a bad file is a
    plain stderr error and exit 1, as today (a `failed` task prints the same
-   table and refusal as `Start`). Paths that are missing go to the setup
+   table and refusal as `Start`; other load errors read
+   `error: failed to start loop runner: <err>`). Paths that are missing go to the setup
    screen; then the run view.
 
 ### Setup screen
 
-One text field per missing path. Enter validates it with `LoadTasks` or
-`LoadPrompt` (tasks file parses and has no `failed` task; prompt file non-empty
-after trimming) so the rules cannot drift. Errors show under the field.
-`Esc` quits.
+One text field per missing path, tasks first. Enter validates the focused
+field with `LoadTasks` or `LoadPrompt` (tasks file parses and has no `failed`
+task; prompt file non-empty after trimming) so the rules cannot drift; a
+valid entry moves to the next field, and the last one closes the screen.
+Errors show under the field. Esc or Ctrl-C cancels: gralph prints
+`error: setup cancelled` and exits 1. The screen is its own Bubble Tea
+program, run before the run view opens.
 
 ### Run view
 
@@ -166,16 +170,20 @@ mockup:
 
 - **Prompt pane** (top left): the current task's `<id>: <name>` and prompt
   (`task.String()`), read-only, scrollable; replaced on each `TaskStarted`.
-  Before the first task and after the run it shows the last task that ran.
-  The shared prompt is not shown.
-- **Tasks pane** (bottom left): one row per task — `✅`/`❌`/`▶`, name, and
+  Empty before the first task starts; after the run it shows the last task
+  that ran. The shared prompt is not shown.
+- **Tasks pane** (bottom left): a `Tasks` header, then one row per task —
+  `✅`/`❌`/`▶` (blank for `pending`), then `<name>: <state>`, where state is
   `pending | in progress | completed | failed`.
 - **Output pane** (right): the current task's activity lines under a
   `task <id>: <name>` header. Cleared on each `TaskStarted`, so it holds one
   task at a time; after the run it keeps the last task's output. Follows the
   newest line unless scrolled up.
-- **Key legend** (bottom): `tab` switch focused pane · `↑/↓/PgUp/PgDn` scroll ·
-  `q` quit.
+- **Key legend** (bottom): `tab switch pane · ↑/↓/PgUp/PgDn scroll · q quit`.
+  `tab` cycles focus through the prompt, tasks, and output panes (output
+  first); the focused pane has a highlighted border and is the one the
+  scroll keys move. The legend line also carries the stop confirm and, after
+  the run, the final status.
 
 `runLoop` runs in a goroutine with a cancellable context; its `report` hook
 calls `program.Send(event)`. The model only reacts to messages.
@@ -187,14 +195,19 @@ calls `program.Send(event)`. The model only reacts to messages.
   leaves the task `pending`, file untouched), waits for `runLoop` to return,
   and exits 1.
 - SIGINT/SIGTERM from outside (a keyboard Ctrl-C is a key in raw mode, not a
-  signal): cancel the context at once with no confirm, leave the task
-  `pending`, wait for `runLoop`, close the TUI, exit 1. The run context
+  signal): cancel the context at once with no confirm (an open confirm is
+  dismissed), leave the task `pending`, wait for `runLoop`, close the TUI,
+  exit 1. A signal after the run has ended just closes the view with the
+  run's exit code. The run context
   derives from `cmd/main`'s `signal.NotifyContext`; Bubble Tea's own signal
   handling is disabled (`tea.WithoutSignalHandler()`) so the signal has one
   owner.
 - After the run ends, the view freezes with a status line (`All tasks
-  completed` or `Task <id> failed: <error>`); `q` exits 0 or 1.
-- After the TUI closes, gralph prints a one-line summary to the terminal.
+  completed`, `Task <id> failed: <error>`, or `Run stopped: <err>` for any
+  other run error, such as a `tasks.yaml` write failure); `q` or Ctrl-C
+  exits 0 or 1.
+- After the TUI closes, gralph prints a one-line summary to the terminal:
+  the status line, or `Run stopped by user` / `Run stopped by signal`.
 
 ## Section 3 — Errors and testing
 
@@ -202,10 +215,12 @@ calls `program.Send(event)`. The model only reacts to messages.
 
 - Before the TUI opens (flags, skill check, `--dry-run`): plain stderr and
   exit code, as today.
-- In the TUI: a failed task shows `❌` and its error on the status line; a
-  `tasks.yaml` write failure stops the run and is shown the same way.
+- In the TUI: a failed task shows `❌` and `Task <id> failed: <error>` on the
+  status line. A `tasks.yaml` write failure stops the run without a
+  `TaskFinished` event, so the task stays `in progress` on screen and the
+  status line reads `Run stopped: <err>`.
 - If the TUI fails to start despite the terminal check, gralph prints the
-  error, suggests `--no-tui`, and exits 1.
+  error and `run with --no-tui to use plain output`, and exits 1.
 
 ### Testing
 
@@ -219,8 +234,8 @@ calls `program.Send(event)`. The model only reacts to messages.
   nothing, and return the list with `ErrFailedTasks` for a failed task.
 - The unit fake claude keeps today's text output by default and emits
   stream-json only when their argv contains `--output-format stream-json`. Then the
-  default is `system` init, one `assistant` text event, and a `result` event
-  whose text is the completed result line; `FAKE_CLAUDE_OUTPUT` supplies the
+  default is `system` init, one `assistant` text event, and, on a zero exit
+  only, a `result` event whose text is the completed result line; `FAKE_CLAUDE_OUTPUT` supplies the
   `result` text. The e2e fake is unchanged: e2e has no terminal, so gralph
   never asks it for stream-json.
 - e2e: gralph without a terminal (as e2e always runs) uses plain mode with

@@ -1,8 +1,8 @@
 # Gralph — Deployment Architecture
 
-> **Version**: v01
+> **Version**: v02
 > **Date**: 2026-09-25
-> **Notes**: Realigned to the v0.6.2 design.
+> **Notes**: Testing strategy covers the TUI: `internal/tui` unit tests, the stream-json unit fake, and e2e running plain mode only.
 
 [Back to Overview](00_overview.md) | [Back to Project README](../../README.md)
 
@@ -133,7 +133,9 @@ GitHub Actions runs on `develop` and `main` branches for both push and pull requ
 - Run via `make test` → `go test -v ./internal/...`
 - Covers task parsing, state transitions, result parsing, process management
 - Uses testify (require for preconditions, assert for checks)
-- Test suites: `internal/tasks`, `internal/looper`
+- Test suites: `internal/tasks`, `internal/looper`, `internal/tui`, `internal/skillinstall`
+- The unit fake `claude` speaks stream-json only when its argv has `--output-format stream-json`, so the looper's TUI path is tested against it
+- `internal/tui` tests drive the Bubble Tea models directly, or `tui.Run`/`tui.Setup` with test program options; no terminal needed
 - Run natively or in Docker; Docker is authoritative
 
 ### E2E Tests
@@ -142,6 +144,7 @@ GitHub Actions runs on `develop` and `main` branches for both push and pull requ
 - Black-box: no internal imports, tests the gralph binary as a subprocess
 - Uses a fake `claude` executable (built in test setup) on PATH
 - Driven by env vars: `FAKE_CLAUDE_OUTPUT` to customize Claude's behavior
+- No terminal, so gralph always runs plain mode; the TUI is not e2e tested, and a test pins that `--no-tui` output matches the default
 - Tests cover:
   - Valid task files, completed tasks, failed tasks, missing result line
   - State persistence (state file rewritten correctly)
@@ -157,6 +160,8 @@ All non-trivial code paths are exercised:
 - Task parsing: valid, invalid ids/names/prompts/states and task elements, duplicate detection, tag rejection
 - Looper: normal runs, failed tasks, dry-run, result parsing, atomic writes
 - Result parsing: JSON with state/error, missing lines, malformed JSON, fence line handling
+- Stream parsing: assistant text and tool calls to activity lines, result event text to outcome, lines over 64 KiB, event order on the TUI path
+- TUI: event handling, pane focus and scrolling, stop confirm, signal stop, layout, setup screen validation
 - Signal handling: SIGINT/SIGTERM during run, process group killed
 
 Tests pin the combined-prompt wire contract (shared + task format) via golden assertions.
