@@ -90,13 +90,9 @@ func PrintTasks(w io.Writer, tl *tasks.TaskList) {
 // LoadTasks reads and parses the tasks file at path. When the file parses but
 // any task is failed, it returns the list and ErrFailedTasks.
 func LoadTasks(path string) (*tasks.TaskList, error) {
-	if _, err := os.Stat(path); err != nil {
-		return nil, fmt.Errorf("tasks file %q is not accessible: %w", path, err)
-	}
-
 	bytes, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
-		return nil, fmt.Errorf("yaml tasks file could not be read: %w", err)
+		return nil, fmt.Errorf("tasks file %q is not accessible: %w", path, err)
 	}
 
 	taskList, err := tasks.ParseTasks(bytes)
@@ -116,13 +112,9 @@ func LoadTasks(path string) (*tasks.TaskList, error) {
 // LoadPrompt reads the prompt file at path and returns it trimmed; an empty or
 // whitespace-only prompt is an error.
 func LoadPrompt(path string) (string, error) {
-	if _, err := os.Stat(path); err != nil {
-		return "", fmt.Errorf("prompt file %q is not accessible: %w", path, err)
-	}
-
 	bytes, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
-		return "", fmt.Errorf("the prompt file could not be read: %w", err)
+		return "", fmt.Errorf("prompt file %q is not accessible: %w", path, err)
 	}
 
 	if len(bytes) == 0 {
@@ -135,8 +127,7 @@ func LoadPrompt(path string) (string, error) {
 		return "", errors.New("the prompt file is just whitespace")
 	}
 
-	return string(prompt), nil
-
+	return prompt, nil
 }
 
 // Run runs the loop over tl. When report is non-nil it receives a copy of

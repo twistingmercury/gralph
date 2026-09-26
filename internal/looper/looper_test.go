@@ -222,12 +222,12 @@ func TestLoadPrompt_MissingFile(t *testing.T) {
 }
 
 func TestLoadPrompt_ReadError(t *testing.T) {
-	// A directory exists (Stat succeeds) but cannot be read as a file.
+	// A directory exists but cannot be read as a file.
 	dir := t.TempDir()
 
 	_, err := LoadPrompt(dir)
 	require.Error(t, err)
-	assert.ErrorContains(t, err, "could not be read")
+	assert.ErrorContains(t, err, "not accessible")
 }
 
 func TestLoadPrompt_Empty(t *testing.T) {
@@ -271,7 +271,7 @@ func TestLoadTasks_ReadError(t *testing.T) {
 
 	_, err := LoadTasks(dir)
 	require.Error(t, err)
-	assert.ErrorContains(t, err, "could not be read")
+	assert.ErrorContains(t, err, "not accessible")
 }
 
 func TestLoadTasks_InvalidYAML(t *testing.T) {
