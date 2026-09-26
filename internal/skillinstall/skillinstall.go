@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"hash"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -81,7 +82,18 @@ func copyTo(dest string) fs.WalkDirFunc {
 // slash-separated relative path, then its bytes, in fs.WalkDir order.
 func Hash() (string, error) {
 	h := sha256.New()
-	err := fs.WalkDir(skills.FS, skillName, func(path string, d fs.DirEntry, err error) error {
+	if err := fs.WalkDir(skills.FS, skillName, hashInto(h)); err != nil {
+		return "", err
+	}
+
+	return "sha256:" + hex.EncodeToString(h.Sum(nil)), nil
+}
+
+// hashInto returns a WalkDirFunc that writes each embedded skill file's
+// relative path and bytes to h; it is a closure because fs.WalkDirFunc has no
+// parameter for h.
+func hashInto(h hash.Hash) fs.WalkDirFunc {
+	return func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return err
 		}
@@ -94,12 +106,7 @@ func Hash() (string, error) {
 		h.Write([]byte(strings.TrimPrefix(path, skillName+"/")))
 		h.Write(data)
 		return nil
-	})
-	if err != nil {
-		return "", err
 	}
-
-	return "sha256:" + hex.EncodeToString(h.Sum(nil)), nil
 }
 
 // Check returns nil when ~/.claude/skills/gralph-docs-writer/VERSION exists
