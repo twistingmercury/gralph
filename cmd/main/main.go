@@ -80,10 +80,8 @@ func runTUI(ctx context.Context) int {
 	var tasklist *tasks.TaskList
 	if tasksPath != "" {
 		var err error
-		tasklist, err = looper.LoadTasks(tasksPath)
+		tasklist, err = looper.LoadTasksReport(os.Stdout, tasksPath)
 		if errors.Is(err, looper.ErrFailedTasks) {
-			fmt.Println("Some tasks failed previous runs:")
-			looper.PrintTasks(os.Stdout, tasklist)
 			_, _ = fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			return 1
 		}

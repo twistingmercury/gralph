@@ -24,10 +24,8 @@ func Start(ctx context.Context, promptFile, tasksFile string) error {
 		return fmt.Errorf("failed to start loop runner: %w", err)
 	}
 
-	tasklist, err := LoadTasks(tasksFile)
+	tasklist, err := LoadTasksReport(os.Stdout, tasksFile)
 	if errors.Is(err, ErrFailedTasks) {
-		fmt.Println("Some tasks failed previous runs:")
-		PrintTasks(os.Stdout, tasklist)
 		return err
 	}
 	if err != nil {
@@ -44,10 +42,8 @@ func Start(ctx context.Context, promptFile, tasksFile string) error {
 // DryRun validates tasksFile with the same checks Start uses and reports on
 // it to w without launching claude or writing any file.
 func DryRun(w io.Writer, tasksFile string) error {
-	tasklist, err := LoadTasks(tasksFile)
+	tasklist, err := LoadTasksReport(w, tasksFile)
 	if errors.Is(err, ErrFailedTasks) {
-		_, _ = fmt.Fprintln(w, "Some tasks failed previous runs:")
-		PrintTasks(w, tasklist)
 		return nil
 	}
 	if err != nil {
@@ -107,6 +103,17 @@ func LoadTasks(path string) (*tasks.TaskList, error) {
 	}
 
 	return &taskList, nil
+}
+
+// LoadTasksReport loads tasksFile and, when any task is failed, writes the
+// failed-tasks notice and table to w; err is then ErrFailedTasks.
+func LoadTasksReport(w io.Writer, tasksFile string) (*tasks.TaskList, error) {
+	tl, err := LoadTasks(tasksFile)
+	if errors.Is(err, ErrFailedTasks) {
+		_, _ = fmt.Fprintln(w, "Some tasks failed previous runs:")
+		PrintTasks(w, tl)
+	}
+	return tl, err
 }
 
 // LoadPrompt reads the prompt file at path and returns it trimmed; an empty or

@@ -310,6 +310,32 @@ func TestLoadTasks_FailedTaskReturnsListAndErrFailedTasks(t *testing.T) {
 	assert.Len(t, got.Tasks, 2)
 }
 
+func TestLoadTasksReport_FailedTaskWritesNoticeAndTable(t *testing.T) {
+	dir := t.TempDir()
+	path := writeTasksFile(t, dir, "tasks:\n  - {id: 1, name: a, prompt: p}\n  - {id: 2, name: b, prompt: p, state: failed}\n")
+
+	var got bytes.Buffer
+	tl, err := LoadTasksReport(&got, path)
+	require.ErrorIs(t, err, ErrFailedTasks)
+	require.NotNil(t, tl)
+
+	var want bytes.Buffer
+	want.WriteString("Some tasks failed previous runs:\n")
+	PrintTasks(&want, tl)
+	assert.Equal(t, want.String(), got.String())
+}
+
+func TestLoadTasksReport_CleanFileWritesNothing(t *testing.T) {
+	dir := t.TempDir()
+	path := writeTasksFile(t, dir, validTasksYAML)
+
+	var got bytes.Buffer
+	tl, err := LoadTasksReport(&got, path)
+	require.NoError(t, err)
+	require.NotNil(t, tl)
+	assert.Empty(t, got.String())
+}
+
 func TestLoadTasks_ParseErrorIsNotErrFailedTasks(t *testing.T) {
 	dir := t.TempDir()
 	path := writeTasksFile(t, dir, "tasks:\n  - {id: 1, name: a, prompt: p, state: bogus}\n")
