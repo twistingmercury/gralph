@@ -235,7 +235,8 @@ func TestLoop_NonZeroExitWithCompletedJSON_Fails(t *testing.T) {
 
 // TestLoop_FencedResultLine_Completes verifies that a result line wrapped in
 // a Markdown code fence (``` or ```json) is still recognized: fence-only
-// lines are skipped when gralph looks for the last non-blank line.
+// lines are skipped when gralph looks for the last non-blank line, and an
+// earlier JSON line is ignored.
 func TestLoop_FencedResultLine_Completes(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -247,7 +248,7 @@ func TestLoop_FencedResultLine_Completes(t *testing.T) {
     prompt: Do the first thing.
 `)
 
-	fencedOutput := "```json\n{\"state\":\"completed\",\"error\":\"\"}\n```\n"
+	fencedOutput := "{\"state\":\"failed\",\"error\":\"stale\"}\n```json\n{\"state\":\"completed\",\"error\":\"\"}\n```\n"
 	env := gralphEnv(fakeClaudeDir, map[string]string{
 		"FAKE_CLAUDE_OUTPUT": fencedOutput,
 	})
