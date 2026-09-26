@@ -42,6 +42,12 @@ var rowStyles = map[string]lipgloss.Style{
 	tasks.PendingState:   lipgloss.NewStyle().Foreground(lipgloss.Color("7")),
 }
 
+// Inline keeps the banner to one line even when a task error spans several.
+var (
+	successBanner = lipgloss.NewStyle().Inline(true).Bold(true).Foreground(lipgloss.Color("10"))
+	failureBanner = lipgloss.NewStyle().Inline(true).Bold(true).Foreground(lipgloss.Color("9"))
+)
+
 // Model is the run view: prompt, tasks, and output panes over a key legend.
 type Model struct {
 	tasks  []tasks.Task
@@ -168,7 +174,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.Err != nil {
 				m.exitCode = 1
 			}
+
 			m.legend.SetContent(m.status + " · " + legend)
+			m.renderTasks()
 		}
 	}
 	return m, nil
@@ -238,6 +246,10 @@ func (m *Model) setState(id int16, state string) {
 
 func (m *Model) renderTasks() {
 	var rows []string
+	if m.done {
+		rows = append(rows, m.banner())
+	}
+
 	for _, t := range m.tasks {
 		icon, ok := icons[t.State]
 		if !ok {
@@ -247,4 +259,13 @@ func (m *Model) renderTasks() {
 		rows = append(rows, icon+" "+rowStyles[t.State].Render(text))
 	}
 	m.taskPane.SetContent(strings.Join(rows, "\n"))
+}
+
+func (m *Model) banner() string {
+	text := m.status + " · press q to exit"
+	if m.exitCode != 0 {
+		return failureBanner.Render("✘ " + text)
+	}
+
+	return successBanner.Render("✔ " + text)
 }

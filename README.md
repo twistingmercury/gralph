@@ -140,8 +140,10 @@ Keys:
 | `PgUp` / `PgDn`      | Scroll the focused pane one page               |
 | `q` / `ctrl+c`       | Ask `Stop the run? The current task stays pending. [y/N]`; `y` stops the Claude session and closes the view, any other key carries on. Once the run has ended, closes the view |
 
-When the run ends on its own, the view stays open with the outcome in the
-legend until you press `q`. After the view closes, gralph prints one summary
+When the run ends on its own, the view stays open until you press `q`, with the
+outcome in the legend and in a banner at the top of Task progress, such as
+`✔ All tasks completed · press q to exit` (bold green) or
+`✘ Task <id> failed: <error> · press q to exit` (bold red). After the view closes, gralph prints one summary
 line to stdout: `All tasks completed`, `Task <id> failed: <error>`,
 `Run stopped: <error>`, or `Run stopped by user` / `Run stopped by signal`.
 It exits zero only when every task completed.

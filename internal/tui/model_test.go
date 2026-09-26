@@ -366,3 +366,36 @@ func TestUpdate_OtherRunErrorOnStatusLine(t *testing.T) {
 	assert.Contains(t, render(m), "Run stopped: disk full")
 	assert.Equal(t, 1, m.ExitCode())
 }
+
+func TestRenderTasks_NoBannerWhileRunning(t *testing.T) {
+	m, _ := runningModel(t, func() {})
+
+	assert.NotContains(t, m.taskPane.GetContent(), "press q to exit")
+	assert.True(t, strings.HasPrefix(m.taskPane.GetContent(), row("▶ ", "1: First: in progress", inProgressState)))
+}
+
+func TestRenderTasks_SuccessBannerAboveRows(t *testing.T) {
+	m, tl := runningModel(t, func() {})
+	for _, task := range tl.Tasks {
+		task.State = tasks.CompletedState
+		m = update(t, m, looper.Event{Kind: looper.TaskFinished, Task: task})
+	}
+	m = update(t, m, looper.Event{Kind: looper.RunDone})
+
+	lines := strings.Split(m.taskPane.GetContent(), "\n")
+	require.Len(t, lines, 3)
+	assert.Equal(t, successBanner.Render("✔ All tasks completed · press q to exit"), lines[0])
+	assert.Equal(t, row("✅", "1: First: completed", tasks.CompletedState), lines[1])
+}
+
+func TestRenderTasks_FailureBannerNamesTask(t *testing.T) {
+	m, tl := runningModel(t, func() {})
+	failed := tl.Tasks[0]
+	failed.State = tasks.FailedState
+	failed.Error = "tests failed"
+	m = update(t, m, looper.Event{Kind: looper.TaskFinished, Task: failed})
+	m = update(t, m, looper.Event{Kind: looper.RunDone, Err: errors.New("task 1: First failed: tests failed")})
+
+	lines := strings.Split(m.taskPane.GetContent(), "\n")
+	assert.Equal(t, failureBanner.Render("✘ Task 1 failed: tests failed · press q to exit"), lines[0])
+}
