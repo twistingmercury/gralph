@@ -18,6 +18,11 @@ const inProgressState = "in progress"
 
 const legend = "tab switch pane · ↑/↓/PgUp/PgDn scroll · q quit"
 
+var (
+	border  = lipgloss.NewStyle().Border(lipgloss.NormalBorder())
+	focused = border.BorderForeground(lipgloss.Color("12"))
+)
+
 var icons = map[string]string{
 	tasks.CompletedState: "✅",
 	tasks.FailedState:    "❌",
@@ -30,12 +35,13 @@ type Model struct {
 	output []string
 
 	prompt, taskPane, outPane, legend viewport.Model
+	// focus indexes panes(): prompt, tasks, output.
+	focus int
 }
 
 // New returns a run view over a copy of tl's tasks.
 func New(tl *tasks.TaskList) Model {
-	border := lipgloss.NewStyle().Border(lipgloss.NormalBorder())
-	m := Model{tasks: append([]tasks.Task(nil), tl.Tasks...)}
+	m := Model{tasks: append([]tasks.Task(nil), tl.Tasks...), focus: 2}
 	for _, vp := range []*viewport.Model{&m.prompt, &m.taskPane, &m.outPane, &m.legend} {
 		*vp = viewport.New()
 		vp.Style = border
@@ -53,6 +59,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.layout(msg.Width, msg.Height)
+	case tea.KeyPressMsg:
+		vp := m.panes()[m.focus]
+		switch msg.String() {
+		case "tab":
+			m.focus = (m.focus + 1) % len(m.panes())
+		case "up":
+			vp.ScrollUp(1)
+		case "down":
+			vp.ScrollDown(1)
+		case "pgup":
+			vp.PageUp()
+		case "pgdown":
+			vp.PageDown()
+		}
 	case looper.Event:
 		switch msg.Kind {
 		case looper.TaskStarted:
@@ -77,6 +97,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) View() tea.View {
+	for i, vp := range m.panes() {
+		vp.Style = border
+		if i == m.focus {
+			vp.Style = focused
+		}
+	}
 	left := lipgloss.JoinVertical(lipgloss.Left, m.prompt.View(), m.taskPane.View())
 	top := lipgloss.JoinHorizontal(lipgloss.Top, left, m.outPane.View())
 	v := tea.NewView(lipgloss.JoinVertical(lipgloss.Left, top, m.legend.View()))
@@ -100,6 +126,10 @@ func (m *Model) layout(width, height int) {
 	m.outPane.SetHeight(topH)
 	m.legend.SetWidth(width)
 	m.legend.SetHeight(legendH)
+}
+
+func (m *Model) panes() []*viewport.Model {
+	return []*viewport.Model{&m.prompt, &m.taskPane, &m.outPane}
 }
 
 func (m *Model) setState(id int16, state string) {
