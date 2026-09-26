@@ -202,6 +202,37 @@ func TestLoop_NonZeroExitWithNoResultLine_UsesExitError(t *testing.T) {
 	assertNoTmpFile(t, tasksPath)
 }
 
+// TestLoop_NonZeroExitWithCompletedJSON_Fails verifies that a completed
+// result line never overrides a non-zero exit: the task fails with the
+// generic exit error.
+func TestLoop_NonZeroExitWithCompletedJSON_Fails(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	promptPath := writePrompt(t, dir, "Body.\n")
+	tasksPath := writeTasksYAML(t, dir, `tasks:
+  - id: 1
+    name: First task
+    prompt: Do the first thing.
+`)
+
+	env := gralphEnv(fakeClaudeDir, map[string]string{
+		"FAKECLAUDE_EXIT_CODE": "2",
+		"FAKE_CLAUDE_OUTPUT":   `{"state":"completed","error":""}` + "\n",
+	})
+
+	res := runGralph(t, 15*time.Second, []string{"--prompt=" + promptPath, "--tasks=" + tasksPath}, env)
+
+	require.Equal(t, 1, res.exitCode, "stdout:\n%s\nstderr:\n%s", res.stdout, res.stderr)
+	assert.Contains(t, res.stderr, "task 1: First task failed: exit status 2")
+
+	after := readTasksYAML(t, tasksPath)
+	assert.Equal(t, "failed", taskStates(after)[1])
+	assert.Equal(t, "exit status 2", taskErrors(after)[1])
+
+	assertNoTmpFile(t, tasksPath)
+}
+
 // TestLoop_FencedResultLine_Completes verifies that a result line wrapped in
 // a Markdown code fence (``` or ```json) is still recognized: fence-only
 // lines are skipped when gralph looks for the last non-blank line.
