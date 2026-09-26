@@ -147,12 +147,14 @@ func TestLoop_StopsOnFirstFailure(t *testing.T) {
 	env := gralphEnv(fakeClaudeDir, map[string]string{
 		"FAKECLAUDE_EXIT_CODE":        "3",
 		"FAKECLAUDE_ATTEMPT_LOG_FILE": attemptLog,
+		"FAKECLAUDE_STDERR_MSG":       "claude-stderr-marker",
 	})
 
 	res := runGralph(t, 15*time.Second, []string{"--prompt=" + promptPath, "--tasks=" + tasksPath}, env)
 
 	require.NotEqual(t, 0, res.exitCode, "stdout:\n%s\nstderr:\n%s", res.stdout, res.stderr)
 	assert.Contains(t, res.stderr, "task 1: First task failed: exit status 3")
+	assert.Contains(t, res.stderr, "claude-stderr-marker", "expected claude's stderr to pass through")
 
 	assert.Equal(t, 1, countAttempts(t, attemptLog), "expected claude invoked exactly once")
 	assert.NotContains(t, res.stdout, "Do the second thing.", "expected the second task's prompt never to be printed")
