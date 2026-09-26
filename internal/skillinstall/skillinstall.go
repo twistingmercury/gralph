@@ -31,24 +31,7 @@ func Install() (string, error) {
 		return "", err
 	}
 
-	err = fs.WalkDir(skills.FS, skillName, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		rel, err := filepath.Rel(skillName, path)
-		if err != nil {
-			return err
-		}
-		target := filepath.Join(dest, rel)
-		if d.IsDir() {
-			return os.MkdirAll(target, 0o750)
-		}
-		data, err := skills.FS.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		return os.WriteFile(target, data, 0o600)
-	})
+	err = fs.WalkDir(skills.FS, skillName, copyTo(dest))
 	if err != nil {
 		return "", err
 	}
@@ -63,6 +46,33 @@ func Install() (string, error) {
 	}
 
 	return dest, nil
+}
+
+// copyTo returns a WalkDirFunc that copies each embedded skill entry under
+// dest; it is a closure because fs.WalkDirFunc has no parameter for dest.
+func copyTo(dest string) fs.WalkDirFunc {
+	return func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+
+		rel, err := filepath.Rel(skillName, path)
+		if err != nil {
+			return err
+		}
+
+		target := filepath.Join(dest, rel)
+		if d.IsDir() {
+			return os.MkdirAll(target, 0o750)
+		}
+
+		data, err := skills.FS.ReadFile(path)
+		if err != nil {
+			return err
+		}
+
+		return os.WriteFile(target, data, 0o600)
+	}
 }
 
 // Hash returns a SHA-256 content hash of the embedded skill: each file's
