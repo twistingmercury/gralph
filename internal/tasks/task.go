@@ -66,19 +66,33 @@ func ParseTasks(yml []byte) (TaskList, error) {
 		if err != nil {
 			return TaskList{}, err
 		}
-		if j, dup := ids[task.ID]; dup {
-			return TaskList{}, fmt.Errorf("%s: id: duplicates tasks[%d]", where, j)
+
+		if err := checkDuplicate(ids, names, i, task, where); err != nil {
+			return TaskList{}, err
 		}
-		ids[task.ID] = i
-		name := strings.TrimSpace(strings.ToLower(task.Name))
-		if j, dup := names[name]; dup {
-			return TaskList{}, fmt.Errorf("%s: name: duplicates the name of tasks[%d]", where, j)
-		}
-		names[name] = i
+
 		taskList.Tasks = append(taskList.Tasks, task)
 	}
 
 	return taskList, nil
+}
+
+// checkDuplicate rejects a task whose id or name repeats an earlier one,
+// recording both so later tasks are checked against it. Names compare
+// ignoring case and surrounding whitespace.
+func checkDuplicate(ids map[int16]int, names map[string]int, i int, task Task, where string) error {
+	if j, dup := ids[task.ID]; dup {
+		return fmt.Errorf("%s: id: duplicates tasks[%d]", where, j)
+	}
+
+	ids[task.ID] = i
+	name := strings.TrimSpace(strings.ToLower(task.Name))
+	if j, dup := names[name]; dup {
+		return fmt.Errorf("%s: name: duplicates the name of tasks[%d]", where, j)
+	}
+
+	names[name] = i
+	return nil
 }
 
 // tasksSeq returns the non-empty sequence under the document's single
