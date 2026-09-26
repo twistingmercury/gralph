@@ -84,7 +84,7 @@ func TestLoop_RunsEveryTaskInOrder(t *testing.T) {
 
 // TestLoop_FailedTaskRefusesToRun verifies that a task file containing a
 // failed task is refused before any work starts: gralph prints the task
-// summary table on stdout, exits non-zero, never invokes claude, and leaves the task file
+// summary table on stdout, exits 1, never invokes claude, and leaves the task file
 // byte-for-byte unchanged with no temporary file behind.
 func TestLoop_FailedTaskRefusesToRun(t *testing.T) {
 	t.Parallel()
@@ -110,7 +110,7 @@ func TestLoop_FailedTaskRefusesToRun(t *testing.T) {
 
 	res := runGralph(t, 15*time.Second, []string{"--prompt=" + promptPath, "--tasks=" + tasksPath}, env)
 
-	require.NotEqual(t, 0, res.exitCode, "stdout:\n%s\nstderr:\n%s", res.stdout, res.stderr)
+	require.Equal(t, 1, res.exitCode, "stdout:\n%s\nstderr:\n%s", res.stdout, res.stderr)
 	assert.Contains(t, res.stdout, "Some tasks failed previous runs:\n")
 	assert.Contains(t, res.stdout, "   1  PENDING  \033[0m  First task\n")
 	assert.Contains(t, res.stdout, "❌  2  \033[1;91mFAILED   \033[0m  Second task  \033[1;91m← Needs review!\033[0m\n")
