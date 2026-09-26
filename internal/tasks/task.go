@@ -53,26 +53,9 @@ func ParseTasks(yml []byte) (TaskList, error) {
 		return TaskList{}, err
 	}
 
-	var seq *yaml.Node
-	if len(doc.Content) > 0 && doc.Content[0].Kind == yaml.MappingNode {
-		root := doc.Content[0].Content
-		for i := 0; i+1 < len(root); i += 2 {
-			if root[i].Value != "tasks" {
-				continue
-			}
-			if seq != nil {
-				return TaskList{}, errors.New("tasks: duplicate key")
-			}
-			seq = root[i+1]
-		}
-	}
-	switch {
-	case seq == nil:
-		return TaskList{}, errors.New("tasks: is required")
-	case seq.Kind != yaml.SequenceNode:
-		return TaskList{}, errors.New("tasks: must be a sequence")
-	case len(seq.Content) == 0:
-		return TaskList{}, errors.New("tasks: must contain at least one task")
+	seq, err := tasksSeq(&doc)
+	if err != nil {
+		return TaskList{}, err
 	}
 
 	var taskList TaskList
@@ -96,6 +79,39 @@ func ParseTasks(yml []byte) (TaskList, error) {
 	}
 
 	return taskList, nil
+}
+
+// tasksSeq returns the non-empty sequence under the document's single
+// top-level tasks key.
+func tasksSeq(doc *yaml.Node) (*yaml.Node, error) {
+	if len(doc.Content) == 0 || doc.Content[0].Kind != yaml.MappingNode {
+		return nil, errors.New("tasks: is required")
+	}
+
+	var seq *yaml.Node
+	root := doc.Content[0].Content
+	for i := 0; i+1 < len(root); i += 2 {
+		if root[i].Value != "tasks" {
+			continue
+		}
+
+		if seq != nil {
+			return nil, errors.New("tasks: duplicate key")
+		}
+
+		seq = root[i+1]
+	}
+
+	switch {
+	case seq == nil:
+		return nil, errors.New("tasks: is required")
+	case seq.Kind != yaml.SequenceNode:
+		return nil, errors.New("tasks: must be a sequence")
+	case len(seq.Content) == 0:
+		return nil, errors.New("tasks: must contain at least one task")
+	}
+
+	return seq, nil
 }
 
 // parseTask checks element i of the tasks sequence and decodes it. It returns
