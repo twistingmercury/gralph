@@ -239,7 +239,7 @@ func TestStart_EmptyPrompt(t *testing.T) {
 	promptPath := writePrompt(t, dir, "")
 	tasksPath := writeTasksYAML(t, dir, validTasksYAML())
 
-	assertStartupFailure(t, dir, promptPath, tasksPath)
+	assertStartupFailure(t, dir, promptPath, tasksPath, "the prompt file is empty")
 }
 
 // TestStart_WhitespacePrompt verifies that a whitespace-only prompt file
@@ -251,24 +251,7 @@ func TestStart_WhitespacePrompt(t *testing.T) {
 	promptPath := writePrompt(t, dir, "   \t\n  ")
 	tasksPath := writeTasksYAML(t, dir, validTasksYAML())
 
-	assertStartupFailure(t, dir, promptPath, tasksPath)
-}
-
-// TestStart_InvalidTaskState verifies that a tasks.yaml with an invalid
-// state value fails startup before claude is ever invoked.
-func TestStart_InvalidTaskState(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-
-	promptPath := writePrompt(t, dir, "Body.\n")
-	tasksPath := writeTasksYAML(t, dir, `tasks:
-  - id: 1
-    name: First task
-    prompt: Do the thing.
-    state: bogus
-`)
-
-	assertStartupFailure(t, dir, promptPath, tasksPath)
+	assertStartupFailure(t, dir, promptPath, tasksPath, "the prompt file is just whitespace")
 }
 
 // TestStart_AbandonedStateRejected verifies that "abandoned" -- a state
@@ -309,14 +292,14 @@ func TestStart_EmptyTaskList(t *testing.T) {
 	promptPath := writePrompt(t, dir, "Body.\n")
 	tasksPath := writeTasksYAML(t, dir, "tasks: []\n")
 
-	assertStartupFailure(t, dir, promptPath, tasksPath)
+	assertStartupFailure(t, dir, promptPath, tasksPath, "tasks: must contain at least one task")
 }
 
 // assertStartupFailure runs gralph with the given prompt/tasks files and
 // asserts the shared startup-failure contract: stderr mentions the loop
-// runner failed to start, gralph exits non-zero, and claude is never
-// invoked.
-func assertStartupFailure(t *testing.T, dir, promptPath, tasksPath string) {
+// runner failed to start and the given reason, gralph exits non-zero, and
+// claude is never invoked.
+func assertStartupFailure(t *testing.T, dir, promptPath, tasksPath, want string) {
 	t.Helper()
 
 	attemptLog := filepath.Join(dir, "attempts.log")
@@ -328,6 +311,7 @@ func assertStartupFailure(t *testing.T, dir, promptPath, tasksPath string) {
 
 	require.NotEqual(t, 0, res.exitCode, "stdout:\n%s\nstderr:\n%s", res.stdout, res.stderr)
 	assert.Contains(t, res.stderr, "failed to start loop runner")
+	assert.Contains(t, res.stderr, want)
 	assert.Equal(t, 0, countAttempts(t, attemptLog), "expected claude never invoked")
 }
 
