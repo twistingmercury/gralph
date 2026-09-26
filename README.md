@@ -121,12 +121,12 @@ preserved; each task's state is made explicit.
 
 ### The full-screen view
 
-The view has three panes over a one-line legend:
+The view has three panes, each under a title bar, over a one-line legend:
 
-- **Prompt** (top left): the current task, as `<id>: <name>` and its prompt.
-- **Tasks** (bottom left): every task with its state; the running task shows
+- **Current task** (top left): the current task, as `<id>: <name>` and its prompt.
+- **Task progress** (bottom left): every task with its state; the running task shows
   `in progress` (display only; it is never written to the file).
-- **Output** (right): the current task's activity — Claude's text, one
+- **Claude activity** (right): the current task's activity — Claude's text, one
   `→ <tool> <target>` line per tool call, and the session's stderr. It follows
   new lines while scrolled to the bottom.
 

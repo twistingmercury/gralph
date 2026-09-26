@@ -26,6 +26,7 @@ type interruptedMsg struct{}
 var (
 	border  = lipgloss.NewStyle().Border(lipgloss.NormalBorder())
 	focused = border.BorderForeground(lipgloss.Color("12"))
+	title   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("0")).Background(lipgloss.Color("12"))
 )
 
 var icons = map[string]string{
@@ -184,15 +185,21 @@ func (m Model) View() tea.View {
 			vp.Style = focused
 		}
 	}
-	left := lipgloss.JoinVertical(lipgloss.Left, m.prompt.View(), m.taskPane.View())
-	top := lipgloss.JoinHorizontal(lipgloss.Top, left, m.outPane.View())
+	left := lipgloss.JoinVertical(lipgloss.Left, pane("Current task", m.prompt), pane("Task progress", m.taskPane))
+	top := lipgloss.JoinHorizontal(lipgloss.Top, left, pane("Claude activity", m.outPane))
 	v := tea.NewView(lipgloss.JoinVertical(lipgloss.Left, top, m.legend.View()))
 	v.AltScreen = true
 	return v
 }
 
+// pane renders the title bar above the viewport rather than as its content so
+// the title stays put while the pane scrolls.
+func pane(name string, vp viewport.Model) string {
+	return lipgloss.JoinVertical(lipgloss.Left, title.Width(vp.Width()).Render(name), vp.View())
+}
+
 // layout sizes the panes to fill a width x height window, following
-// docs/tui_mock_up.txt.
+// docs/tui_mock_up.txt; each pane gives up one line to its title bar.
 func (m *Model) layout(width, height int) {
 	legendH := 3
 	topH := max(height-legendH, 0)
@@ -200,11 +207,11 @@ func (m *Model) layout(width, height int) {
 	promptH := topH / 2
 
 	m.prompt.SetWidth(leftW)
-	m.prompt.SetHeight(promptH)
+	m.prompt.SetHeight(max(promptH-1, 0))
 	m.taskPane.SetWidth(leftW)
-	m.taskPane.SetHeight(topH - promptH)
+	m.taskPane.SetHeight(max(topH-promptH-1, 0))
 	m.outPane.SetWidth(width - leftW)
-	m.outPane.SetHeight(topH)
+	m.outPane.SetHeight(max(topH-1, 0))
 	m.legend.SetWidth(width)
 	m.legend.SetHeight(legendH)
 }
@@ -223,7 +230,7 @@ func (m *Model) setState(id int16, state string) {
 }
 
 func (m *Model) renderTasks() {
-	rows := []string{"Tasks"}
+	var rows []string
 	for _, t := range m.tasks {
 		icon, ok := icons[t.State]
 		if !ok {

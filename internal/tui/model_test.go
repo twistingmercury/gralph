@@ -188,6 +188,25 @@ func TestUpdate_ScrollMovesOnlyFocusedPane(t *testing.T) {
 	assert.Equal(t, taskY, m.taskPane.YOffset())
 }
 
+func TestView_TitlesStayWhenPanesScroll(t *testing.T) {
+	tl := &tasks.TaskList{}
+	for i := range int16(20) {
+		tl.Tasks = append(tl.Tasks, tasks.Task{ID: i + 1, Name: fmt.Sprintf("T%d", i+1), Prompt: strings.Repeat("step\n", 20)})
+	}
+	m := update(t, New(tl, func() {}), tea.WindowSizeMsg{Width: 120, Height: 30},
+		looper.Event{Kind: looper.TaskStarted, Task: tl.Tasks[0]})
+	m = update(t, m, activity(30)...)
+	m = update(t, m, key(tea.KeyTab), key(tea.KeyPgDown), key(tea.KeyTab), key(tea.KeyPgDown))
+	require.Positive(t, m.prompt.YOffset())
+	require.Positive(t, m.taskPane.YOffset())
+	require.Positive(t, m.outPane.YOffset())
+
+	out := render(m)
+	for _, name := range []string{"Current task", "Task progress", "Claude activity"} {
+		assert.Contains(t, out, name)
+	}
+}
+
 func TestUpdate_OutputFollowsUntilScrolledUp(t *testing.T) {
 	tl := testTasks()
 	m := update(t, New(tl, func() {}), tea.WindowSizeMsg{Width: 60, Height: 15},
