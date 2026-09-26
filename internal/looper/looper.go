@@ -21,7 +21,7 @@ var ErrFailedTasks = errors.New("fix the failed tasks and set their state to pen
 func Start(ctx context.Context, promptFile, tasksFile string) error {
 	prompt, err := LoadPrompt(promptFile)
 	if err != nil {
-		return fmt.Errorf("failed to start loop runner: %s", err)
+		return fmt.Errorf("failed to start loop runner: %w", err)
 	}
 
 	tasklist, err := LoadTasks(tasksFile)
@@ -31,7 +31,7 @@ func Start(ctx context.Context, promptFile, tasksFile string) error {
 		return err
 	}
 	if err != nil {
-		return fmt.Errorf("failed to start loop runner: %s", err)
+		return fmt.Errorf("failed to start loop runner: %w", err)
 	}
 
 	if err := Run(ctx, prompt, tasklist, tasksFile, nil); err != nil {

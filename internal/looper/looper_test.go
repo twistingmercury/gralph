@@ -3,7 +3,6 @@ package looper
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -169,18 +168,21 @@ func TestStart_InvalidTasksYAML(t *testing.T) {
 	assert.ErrorContains(t, err, "failed to parse tasks yaml")
 }
 
-// TestStart_LoadFailuresBreakTheErrorChain pins that Start wraps LoadPrompt
-// and LoadTasks failures with %s, not %w: the underlying sentinel is not
-// reachable via errors.Is/As through Start. This documents the current
-// behavior rather than asserting it as a desired design; production code is
-// not changed to fix it.
-func TestStart_LoadFailuresBreakTheErrorChain(t *testing.T) {
+// TestStart_LoadFailuresKeepTheErrorChain pins that Start wraps LoadPrompt
+// and LoadTasks failures with %w, so the underlying error is reachable via
+// errors.Is/As through Start.
+func TestStart_LoadFailuresKeepTheErrorChain(t *testing.T) {
 	dir := t.TempDir()
+	promptPath := writePromptFile(t, dir, "Do the task.\n")
 	tasksPath := writeTasksFile(t, dir, validTasksYAML)
 
 	err := Start(context.Background(), filepath.Join(dir, "missing.md"), tasksPath)
 	require.Error(t, err)
-	assert.False(t, errors.Is(err, os.ErrNotExist), "expected %%s wrapping in Start to break the error chain")
+	assert.ErrorIs(t, err, os.ErrNotExist)
+
+	err = Start(context.Background(), promptPath, filepath.Join(dir, "missing.yaml"))
+	require.Error(t, err)
+	assert.ErrorIs(t, err, os.ErrNotExist)
 }
 
 func TestStart_RunLoopFailureIsWrappedWithLoopErrorPrefix(t *testing.T) {
@@ -533,6 +535,7 @@ func TestStart_RefusesWhenAnyTaskFailed(t *testing.T) {
 	err := Start(context.Background(), promptPath, tasksPath)
 	require.Error(t, err)
 	assert.EqualError(t, err, "fix the failed tasks and set their state to pending before running")
+	assert.ErrorIs(t, err, ErrFailedTasks)
 
 	assert.Empty(t, readFakeClaudeRecords(t, recordPath), "claude must never be invoked")
 	data, readErr := os.ReadFile(tasksPath)
