@@ -66,19 +66,21 @@ func main() {
 // missing path on the setup screen, runs the loop in the full-screen view,
 // prints its summary, and returns the exit code.
 func runTUI(ctx context.Context) int {
+	tasksPath, promptPath := *tasksFlag, *promptFlag
+
 	var prompt string
-	if *promptFlag != "" {
+	if promptPath != "" {
 		var err error
-		if prompt, err = looper.LoadPrompt(*promptFlag); err != nil {
+		if prompt, err = looper.LoadPrompt(promptPath); err != nil {
 			_, _ = fmt.Fprintf(os.Stderr, "error: failed to start loop runner: %v\n", err)
 			return 1
 		}
 	}
 
 	var tasklist *tasks.TaskList
-	if *tasksFlag != "" {
+	if tasksPath != "" {
 		var err error
-		tasklist, err = looper.LoadTasks(*tasksFlag)
+		tasklist, err = looper.LoadTasks(tasksPath)
 		if errors.Is(err, looper.ErrFailedTasks) {
 			fmt.Println("Some tasks failed previous runs:")
 			looper.PrintTasks(os.Stdout, tasklist)
@@ -91,8 +93,8 @@ func runTUI(ctx context.Context) int {
 		}
 	}
 
-	if *promptFlag == "" || *tasksFlag == "" {
-		s, err := tui.Setup(*tasksFlag, *promptFlag)
+	if promptPath == "" || tasksPath == "" {
+		s, err := tui.Setup(tasksPath, promptPath)
 		if err != nil {
 			_, _ = fmt.Fprintf(os.Stderr, "error: %v\nrun with --no-tui to use plain output\n", err)
 			return 1
@@ -101,15 +103,15 @@ func runTUI(ctx context.Context) int {
 			_, _ = fmt.Fprintln(os.Stderr, "error: setup cancelled")
 			return 1
 		}
-		if *tasksFlag == "" {
-			*tasksFlag, tasklist = s.TasksPath(), s.Tasks()
+		if tasksPath == "" {
+			tasksPath, tasklist = s.TasksPath(), s.Tasks()
 		}
-		if *promptFlag == "" {
-			*promptFlag, prompt = s.PromptPath(), s.Prompt()
+		if promptPath == "" {
+			prompt = s.Prompt()
 		}
 	}
 
-	code, summary, err := tui.Run(ctx, prompt, tasklist, *tasksFlag)
+	code, summary, err := tui.Run(ctx, prompt, tasklist, tasksPath)
 	if err != nil {
 		_, _ = fmt.Fprintf(os.Stderr, "error: %v\nrun with --no-tui to use plain output\n", err)
 		return 1
