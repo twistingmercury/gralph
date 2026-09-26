@@ -40,7 +40,7 @@ func TestRunLoop_CancelMidTaskStopsQuickly(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- runLoop(ctx, "prompt", tl, tasksPath)
+		errCh <- runLoop(ctx, "prompt", tl, tasksPath, nil)
 	}()
 
 	require.Eventually(t, func() bool {

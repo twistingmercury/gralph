@@ -34,7 +34,7 @@ func Start(ctx context.Context, promptFile, tasksFile string) error {
 		return fmt.Errorf("failed to start loop runner: %s", err)
 	}
 
-	if err := runLoop(ctx, prompt, tasklist, tasksFile); err != nil {
+	if err := Run(ctx, prompt, tasklist, tasksFile, nil); err != nil {
 		return fmt.Errorf("loop error: %w", err)
 	}
 
@@ -139,47 +139,44 @@ func LoadPrompt(path string) (string, error) {
 
 }
 
-func runLoop(ctx context.Context, p string, tl *tasks.TaskList, tasksFile string) error {
-	const claude = "claude"
-	const print = "--print"
-	const skipPermissions = "--dangerously-skip-permissions"
+// Run runs the loop over tl. When report is non-nil it receives a copy of
+// each task's progress and, last, a RunDone event carrying Run's error.
+func Run(ctx context.Context, prompt string, tl *tasks.TaskList, tasksFile string, report func(Event)) error {
+	err := runLoop(ctx, prompt, tl, tasksFile, report)
+	if report != nil {
+		report(Event{Kind: RunDone, Err: err})
+	}
+	return err
+}
 
+func runLoop(ctx context.Context, p string, tl *tasks.TaskList, tasksFile string, report func(Event)) error {
 	for i := range tl.Tasks {
 		task := &tl.Tasks[i]
 
 		if task.State == tasks.CompletedState {
-			fmt.Printf("task %d: %s already completed, skipping\n", task.ID, task.Name)
+			if report == nil {
+				fmt.Printf("task %d: %s already completed, skipping\n", task.ID, task.Name)
+			}
 			continue
 		}
 
-		// formatting it to make it easier to read by a human
-		prompt := fmt.Sprintf("%s\n\n%s\n", p, task.String())
-
-		fmt.Println(prompt)
-
-		cmd := exec.CommandContext(ctx, claude, print, skipPermissions)
-		configureProcessTree(cmd)
-		cmd.Stdin = strings.NewReader(prompt)
-
-		var out bytes.Buffer
-		cmd.Stdout = io.MultiWriter(os.Stdout, &out)
-		cmd.Stderr = os.Stderr
-
-		runErr := cmd.Run()
-
-		if runErr != nil && ctx.Err() != nil {
-			// Cancelled by SIGINT/SIGTERM: leave the task's state and the
-			// tasks file untouched so a re-run picks up where it left off.
-			return fmt.Errorf("task %d: %s failed: %w", task.ID, task.Name, runErr)
+		if report != nil {
+			report(Event{Kind: TaskStarted, Task: *task})
 		}
 
-		state, errMsg := outcome(runErr, lastResultLine(out.String()))
+		state, errMsg, err := runTaskPlain(ctx, p, *task)
+		if err != nil {
+			return err
+		}
 		task.State = state
 		task.Error = errMsg
 
 		if state == tasks.CompletedState {
 			if err := tasks.SaveTasks(tasksFile, *tl); err != nil {
 				return fmt.Errorf("task %d: %s: failed to save task state: %w", task.ID, task.Name, err)
+			}
+			if report != nil {
+				report(Event{Kind: TaskFinished, Task: *task})
 			}
 			continue
 		}
@@ -188,8 +185,44 @@ func runLoop(ctx context.Context, p string, tl *tasks.TaskList, tasksFile string
 		if saveErr := tasks.SaveTasks(tasksFile, *tl); saveErr != nil {
 			return errors.Join(runFailure, saveErr)
 		}
+		if report != nil {
+			report(Event{Kind: TaskFinished, Task: *task, Err: runFailure})
+		}
 		return runFailure
 	}
 
 	return nil
+}
+
+// runTaskPlain runs one task as plain mode always has: the combined prompt
+// echoed to stdout, claude's stdout teed to the terminal, stderr inherited.
+// It returns the task's outcome, or an error when ctx was cancelled.
+func runTaskPlain(ctx context.Context, p string, task tasks.Task) (state, errMsg string, err error) {
+	const claude = "claude"
+	const print = "--print"
+	const skipPermissions = "--dangerously-skip-permissions"
+
+	// formatting it to make it easier to read by a human
+	prompt := fmt.Sprintf("%s\n\n%s\n", p, task.String())
+
+	fmt.Println(prompt)
+
+	cmd := exec.CommandContext(ctx, claude, print, skipPermissions)
+	configureProcessTree(cmd)
+	cmd.Stdin = strings.NewReader(prompt)
+
+	var out bytes.Buffer
+	cmd.Stdout = io.MultiWriter(os.Stdout, &out)
+	cmd.Stderr = os.Stderr
+
+	runErr := cmd.Run()
+
+	if runErr != nil && ctx.Err() != nil {
+		// Cancelled by SIGINT/SIGTERM: leave the task's state and the
+		// tasks file untouched so a re-run picks up where it left off.
+		return "", "", fmt.Errorf("task %d: %s failed: %w", task.ID, task.Name, runErr)
+	}
+
+	state, errMsg = outcome(runErr, lastResultLine(out.String()))
+	return state, errMsg, nil
 }

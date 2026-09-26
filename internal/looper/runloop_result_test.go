@@ -102,7 +102,7 @@ func TestRunLoop_ResultLineOutcomes(t *testing.T) {
 
 			tl := &tasks.TaskList{Tasks: []tasks.Task{{ID: 1, Name: "Only", Prompt: "p"}}}
 
-			err := runLoop(context.Background(), "prompt", tl, tasksPath)
+			err := runLoop(context.Background(), "prompt", tl, tasksPath, nil)
 
 			if tt.wantErrText == "" {
 				require.NoError(t, err)
@@ -133,7 +133,7 @@ func TestRunLoop_NonZeroExitUsesJSONErrorNotExitStatus(t *testing.T) {
 
 	tl := &tasks.TaskList{Tasks: []tasks.Task{{ID: 1, Name: "First task", Prompt: "p"}}}
 
-	err := runLoop(context.Background(), "prompt", tl, tasksPath)
+	err := runLoop(context.Background(), "prompt", tl, tasksPath, nil)
 	require.Error(t, err)
 	assert.Equal(t, "task 1: First task failed: boom", err.Error())
 	assert.NotContains(t, err.Error(), "exit status", "the JSON error must replace the generic exit status text")
@@ -158,7 +158,7 @@ func TestRunLoop_ClearsStaleErrorWhenTaskCompletes(t *testing.T) {
 		{ID: 1, Name: "Only", Prompt: "p", State: tasks.PendingState, Error: "exit status 1"},
 	}}
 
-	err := runLoop(context.Background(), "prompt", tl, tasksPath)
+	err := runLoop(context.Background(), "prompt", tl, tasksPath, nil)
 	require.NoError(t, err)
 
 	data, readErr := os.ReadFile(tasksPath)
@@ -187,7 +187,7 @@ func TestRunLoop_ResultLineFailureStopsLaterTasks(t *testing.T) {
 		{ID: 2, Name: "Second", Prompt: "p2"},
 	}}
 
-	err := runLoop(context.Background(), "prompt", tl, tasksPath)
+	err := runLoop(context.Background(), "prompt", tl, tasksPath, nil)
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "tests failed")
 
