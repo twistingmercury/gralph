@@ -65,3 +65,52 @@ func TestRunLoop_CancelMidTaskStopsQuickly(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, tasksYAML, string(gotTasksYAML), "the tasks file must be byte-for-byte unchanged after a mid-task cancel")
 }
+
+// TestRunLoop_SavesAfterEachCompletedTask proves the tasks file is saved as
+// soon as a task completes, not only at the end of the run: task 1 completes,
+// the run is cancelled while task 2 is running, and the file on disk already
+// records task 1 as completed.
+func TestRunLoop_SavesAfterEachCompletedTask(t *testing.T) {
+	useFakeClaude(t)
+	dir := t.TempDir()
+	readyPath := filepath.Join(dir, "ready")
+	tasksPath := filepath.Join(dir, "tasks.yaml")
+	t.Setenv("FAKE_CLAUDE_BLOCK_ON", "block-second")
+	t.Setenv("FAKE_CLAUDE_READY", readyPath)
+
+	tasksYAML := "tasks:\n  - {id: 1, name: First, prompt: p1, state: pending}\n  - {id: 2, name: Second, prompt: block-second, state: pending}\n"
+	require.NoError(t, os.WriteFile(tasksPath, []byte(tasksYAML), 0o600))
+	tl, err := tasks.ParseTasks([]byte(tasksYAML))
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- runLoop(ctx, "prompt", &tl, tasksPath, nil)
+	}()
+
+	require.Eventually(t, func() bool {
+		_, err := os.Stat(readyPath)
+		return err == nil
+	}, 5*time.Second, 10*time.Millisecond, "fake claude never blocked on task 2")
+
+	cancel()
+
+	select {
+	case err := <-errCh:
+		require.Error(t, err)
+		assert.ErrorContains(t, err, "task 2")
+	case <-time.After(5 * time.Second):
+		t.Fatal("runLoop did not return after cancellation")
+	}
+
+	data, err := os.ReadFile(tasksPath)
+	require.NoError(t, err)
+	saved, err := tasks.ParseTasks(data)
+	require.NoError(t, err)
+	require.Len(t, saved.Tasks, 2)
+	assert.Equal(t, tasks.CompletedState, saved.Tasks[0].State)
+	assert.Equal(t, tasks.PendingState, saved.Tasks[1].State)
+}

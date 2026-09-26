@@ -12,6 +12,10 @@
 //	FAKE_CLAUDE_BLOCK   "1" to write the ready file (if set) and then block
 //	                    forever, instead of reading stdin, recording it, and
 //	                    exiting
+//	FAKE_CLAUDE_BLOCK_ON text; when stdin contains it, write the ready file
+//	                    (if set) and block forever after reading stdin,
+//	                    before recording it, so a test can block only one
+//	                    task's invocation
 //	FAKE_CLAUDE_READY   path to write a ready marker to just before blocking
 //	FAKE_CLAUDE_OUTPUT  if set (even to the empty string), its value is
 //	                    written verbatim to stdout before exiting, instead of
@@ -62,17 +66,16 @@ func main() {
 	}
 
 	if os.Getenv("FAKE_CLAUDE_BLOCK") == "1" {
-		if readyFile := os.Getenv("FAKE_CLAUDE_READY"); readyFile != "" {
-			if err := writeUnderRoot(readyFile, []byte("ready"), 0o600); err != nil {
-				fail("write ready file: %v", err)
-			}
-		}
 		blockForever()
 	}
 
 	stdin, err := io.ReadAll(os.Stdin)
 	if err != nil {
 		fail("read stdin: %v", err)
+	}
+
+	if on := os.Getenv("FAKE_CLAUDE_BLOCK_ON"); on != "" && strings.Contains(string(stdin), on) {
+		blockForever()
 	}
 
 	if recordFile := os.Getenv("FAKE_CLAUDE_RECORD"); recordFile != "" {
@@ -194,7 +197,13 @@ func withRootFile(path string, flag int, perm os.FileMode, data []byte) error {
 	return nil
 }
 
+// blockForever writes the ready file (if set) and then never returns.
 func blockForever() {
+	if readyFile := os.Getenv("FAKE_CLAUDE_READY"); readyFile != "" {
+		if err := writeUnderRoot(readyFile, []byte("ready"), 0o600); err != nil {
+			fail("write ready file: %v", err)
+		}
+	}
 	for {
 		time.Sleep(time.Hour)
 	}
