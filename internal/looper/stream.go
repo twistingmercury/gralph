@@ -107,32 +107,46 @@ func runTaskStream(ctx context.Context, p string, task tasks.Task, report func(E
 		return "", "", fmt.Errorf("task %d: %s: %w", task.ID, task.Name, err)
 	}
 
-	var resultText string
-	runErr := cmd.Start()
-	if runErr == nil {
-		stderrDone := make(chan struct{})
-		go func() {
-			defer close(stderrDone)
-			readLines(stderr, func(line []byte) {
-				report(Event{Kind: Activity, Task: task, Line: strings.TrimRight(string(line), "\r\n")})
-			})
-		}()
-
-		readLines(stdout, func(line []byte) {
-			activity, result, isResult := parseStreamLine(line)
-			for _, a := range activity {
-				report(Event{Kind: Activity, Task: task, Line: a})
-			}
-			if isResult {
-				resultText = result
-			}
-		})
-
-		<-stderrDone
-		runErr = cmd.Wait()
+	if err = cmd.Start(); err != nil {
+		return finishTask(ctx, task, err, "")
 	}
 
-	return finishTask(ctx, task, runErr, resultText)
+	st := &streamTask{task: task, report: report}
+	stderrDone := make(chan struct{})
+	go st.readStderr(stderr, stderrDone)
+	readLines(stdout, st.stdoutLine)
+	<-stderrDone
+
+	return finishTask(ctx, task, cmd.Wait(), st.resultText)
+}
+
+// streamTask carries what runTaskStream's line callbacks share, so they can
+// be methods rather than closures over its locals.
+type streamTask struct {
+	task       tasks.Task
+	report     func(Event)
+	resultText string
+}
+
+// readStderr closes done once stderr is drained, so cmd.Wait is not called
+// while the pipe still has unread lines.
+func (st *streamTask) readStderr(stderr io.Reader, done chan<- struct{}) {
+	defer close(done)
+	readLines(stderr, st.stderrLine)
+}
+
+func (st *streamTask) stderrLine(line []byte) {
+	st.report(Event{Kind: Activity, Task: st.task, Line: strings.TrimRight(string(line), "\r\n")})
+}
+
+func (st *streamTask) stdoutLine(line []byte) {
+	activity, result, isResult := parseStreamLine(line)
+	for _, a := range activity {
+		st.report(Event{Kind: Activity, Task: st.task, Line: a})
+	}
+	if isResult {
+		st.resultText = result
+	}
 }
 
 // readLines exists because bufio.Scanner stops at a 64 KiB token, and one
