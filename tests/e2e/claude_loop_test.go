@@ -112,7 +112,7 @@ func TestLoop_FailedTaskRefusesToRun(t *testing.T) {
 
 	require.Equal(t, 1, res.exitCode, "stdout:\n%s\nstderr:\n%s", res.stdout, res.stderr)
 	assert.Contains(t, res.stdout, "Some tasks failed previous runs:\n")
-	assert.Contains(t, res.stdout, "   1  PENDING  \033[0m  First task\n")
+	assert.Contains(t, res.stdout, "   1  PENDING    First task\n")
 	assert.Contains(t, res.stdout, "❌  2  \033[1;91mFAILED   \033[0m  Second task  \033[1;91m← Needs review!\033[0m\n")
 	assert.Contains(t, res.stderr, "fix the failed tasks and set their state to pending before running")
 	assert.Equal(t, 0, countAttempts(t, attemptLog), "expected claude never invoked")

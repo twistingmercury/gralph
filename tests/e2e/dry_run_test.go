@@ -43,7 +43,7 @@ func TestDryRun_ValidFile(t *testing.T) {
 	require.Equal(t, 0, res.exitCode, "stdout:\n%s\nstderr:\n%s", res.stdout, res.stderr)
 	want := "   ID  STATE      NAME\n" +
 		"   --  ---------  ----\n" +
-		"    1  PENDING  \033[0m  First task\n" +
+		"    1  PENDING    First task\n" +
 		tasksPath + " is valid\n"
 	assert.Equal(t, want, res.stdout)
 }
@@ -80,7 +80,7 @@ func TestDryRun_FlagsFailedTaskAndExitsZero(t *testing.T) {
 	want := "Some tasks failed previous runs:\n" +
 		"   ID  STATE      NAME\n" +
 		"   --  ---------  ----\n" +
-		"    1  PENDING  \033[0m  First task\n" +
+		"    1  PENDING    First task\n" +
 		"❌  2  \033[1;91mFAILED   \033[0m  Second task  \033[1;91m← Needs review!\033[0m\n"
 	assert.Equal(t, want, res.stdout)
 }
@@ -94,7 +94,7 @@ func TestDryRun_IgnoresNonexistentPrompt(t *testing.T) {
 	require.Equal(t, 0, res.exitCode, "stdout:\n%s\nstderr:\n%s", res.stdout, res.stderr)
 	want := "   ID  STATE      NAME\n" +
 		"   --  ---------  ----\n" +
-		"    1  PENDING  \033[0m  First task\n" +
+		"    1  PENDING    First task\n" +
 		tasksPath + " is valid\n"
 	assert.Equal(t, want, res.stdout)
 }

@@ -577,8 +577,8 @@ func TestDryRun_ValidFile(t *testing.T) {
 	require.NoError(t, DryRun(&out, tasksPath))
 	want := "   ID  STATE      NAME\n" +
 		"   --  ---------  ----\n" +
-		"    1  PENDING  \033[0m  First task\n" +
-		"    2  PENDING  \033[0m  Second task\n" +
+		"    1  PENDING    First task\n" +
+		"    2  PENDING    Second task\n" +
 		tasksPath + " is valid\n"
 	assert.Equal(t, want, out.String())
 }
@@ -603,7 +603,7 @@ func TestDryRun_NoFailedTasksTable(t *testing.T) {
 	want := "    ID  STATE      NAME\n" +
 		"   ---  ---------  ----\n" +
 		"✅   1  \033[92mCOMPLETED\033[0m  First task\n" +
-		"   123  PENDING  \033[0m  Second task\n" +
+		"   123  PENDING    Second task\n" +
 		tasksPath + " is valid\n"
 	assert.Equal(t, want, out.String())
 }
@@ -647,7 +647,7 @@ func TestDryRun_FlagsFailedTasks(t *testing.T) {
 		"   ---  ---------  ----\n" +
 		"✅   1  \033[92mCOMPLETED\033[0m  First task\n" +
 		"❌   2  \033[1;91mFAILED   \033[0m  Second task  \033[1;91m← Needs review!\033[0m\n" +
-		"   100  PENDING  \033[0m  Third task\n"
+		"   100  PENDING    Third task\n"
 	assert.Equal(t, want, out.String())
 
 	data, err := os.ReadFile(tasksPath)

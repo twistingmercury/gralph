@@ -72,15 +72,15 @@ func PrintTasks(w io.Writer, tl *tasks.TaskList) {
 	_, _ = fmt.Fprintf(w, "   %*s  %-*s  NAME\n", idWidth, "ID", stateWidth, "STATE")
 	_, _ = fmt.Fprintf(w, "   %s  %s  %s\n", strings.Repeat("-", idWidth), strings.Repeat("-", stateWidth), strings.Repeat("-", 4))
 	for _, task := range tl.Tasks {
-		emoji, color, note := "  ", "", ""
+		emoji, color, reset, note := "  ", "", "", ""
 		switch task.State {
 		case tasks.FailedState:
-			emoji, color = "❌", colorRed
+			emoji, color, reset = "❌", colorRed, colorRst
 			note = "  " + colorRed + "← Needs review!" + colorRst
 		case tasks.CompletedState:
-			emoji, color = "✅", colorGrn
+			emoji, color, reset = "✅", colorGrn, colorRst
 		}
-		_, _ = fmt.Fprintf(w, "%s %*d  %s%-*s%s  %s%s\n", emoji, idWidth, task.ID, color, stateWidth, strings.ToUpper(task.State), colorRst, task.Name, note)
+		_, _ = fmt.Fprintf(w, "%s %*d  %s%-*s%s  %s%s\n", emoji, idWidth, task.ID, color, stateWidth, strings.ToUpper(task.State), reset, task.Name, note)
 	}
 }
 
