@@ -31,7 +31,7 @@ func main() {
 	pflag.Parse()
 	checkVersion()
 	checkInstallSkill()
-	plain := *dryRunFlag || *noTUIFlag || !term.IsTerminal(os.Stdin.Fd()) || !term.IsTerminal(os.Stdout.Fd())
+	plain := isPlain(*dryRunFlag, *noTUIFlag, term.IsTerminal(os.Stdin.Fd()), term.IsTerminal(os.Stdout.Fd()))
 	if plain {
 		validateRequiredFlags()
 	}
@@ -60,6 +60,12 @@ func main() {
 		_, _ = fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+// isPlain reports whether gralph runs in plain mode: on --dry-run or
+// --no-tui, or when stdin or stdout is not a terminal.
+func isPlain(dryRun, noTUI, stdinTTY, stdoutTTY bool) bool {
+	return dryRun || noTUI || !stdinTTY || !stdoutTTY
 }
 
 // runTUI loads the given prompt and tasks like looper.Start, asks for any

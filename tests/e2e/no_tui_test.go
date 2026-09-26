@@ -9,11 +9,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestNoTUI_MatchesDefaultWithoutTerminal runs gralph with and without
-// --no-tui on identical fresh copies of a two-task file. With no terminal
-// attached both runs are plain, so their exit code, stdout, stderr, and
-// saved tasks file must match.
-func TestNoTUI_MatchesDefaultWithoutTerminal(t *testing.T) {
+// TestNonTerminal_DefaultsToPlain proves the non-terminal fallback: with no
+// terminal attached, a run without --no-tui must be plain, so its exit code,
+// stdout, stderr, and saved tasks file match a --no-tui run on an identical
+// fresh copy of a two-task file. It cannot detect --no-tui being ignored;
+// cmd/main's isPlain unit test covers that.
+func TestNonTerminal_DefaultsToPlain(t *testing.T) {
 	t.Parallel()
 	promptPath := writePrompt(t, t.TempDir(), "Follow the runbook.\n")
 
