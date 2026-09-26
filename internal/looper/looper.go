@@ -140,7 +140,9 @@ func LoadPrompt(path string) (string, error) {
 }
 
 // Run runs the loop over tl. When report is non-nil it receives a copy of
-// each task's progress and, last, a RunDone event carrying Run's error.
+// each task's progress and, last, a RunDone event carrying Run's error;
+// claude then runs with stream-json output and its activity is reported
+// live. report may be called from more than one goroutine.
 func Run(ctx context.Context, prompt string, tl *tasks.TaskList, tasksFile string, report func(Event)) error {
 	err := runLoop(ctx, prompt, tl, tasksFile, report)
 	if report != nil {
@@ -164,7 +166,13 @@ func runLoop(ctx context.Context, p string, tl *tasks.TaskList, tasksFile string
 			report(Event{Kind: TaskStarted, Task: *task})
 		}
 
-		state, errMsg, err := runTaskPlain(ctx, p, *task)
+		var state, errMsg string
+		var err error
+		if report == nil {
+			state, errMsg, err = runTaskPlain(ctx, p, *task)
+		} else {
+			state, errMsg, err = runTaskStream(ctx, p, *task, report)
+		}
 		if err != nil {
 			return err
 		}

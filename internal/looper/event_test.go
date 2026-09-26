@@ -43,15 +43,15 @@ func TestRun_ReportsTwoTaskSuccess(t *testing.T) {
 	events, err := runWithRecorder(t, tl)
 	require.NoError(t, err)
 
-	require.Equal(t, []EventKind{TaskStarted, TaskFinished, TaskStarted, TaskFinished, RunDone}, eventKinds(events))
+	require.Equal(t, []EventKind{TaskStarted, Activity, TaskFinished, TaskStarted, Activity, TaskFinished, RunDone}, eventKinds(events))
 	assert.Equal(t, int16(1), events[0].Task.ID)
-	assert.Equal(t, int16(1), events[1].Task.ID)
-	assert.Equal(t, tasks.CompletedState, events[1].Task.State)
-	assert.NoError(t, events[1].Err)
-	assert.Equal(t, int16(2), events[2].Task.ID)
+	assert.Equal(t, int16(1), events[2].Task.ID)
+	assert.Equal(t, tasks.CompletedState, events[2].Task.State)
+	assert.NoError(t, events[2].Err)
 	assert.Equal(t, int16(2), events[3].Task.ID)
-	assert.Equal(t, tasks.CompletedState, events[3].Task.State)
-	assert.NoError(t, events[4].Err)
+	assert.Equal(t, int16(2), events[5].Task.ID)
+	assert.Equal(t, tasks.CompletedState, events[5].Task.State)
+	assert.NoError(t, events[6].Err)
 }
 
 func TestRun_ReportsFailedTask(t *testing.T) {
@@ -65,10 +65,10 @@ func TestRun_ReportsFailedTask(t *testing.T) {
 	events, err := runWithRecorder(t, tl)
 	require.Error(t, err)
 
-	require.Equal(t, []EventKind{TaskStarted, TaskFinished, RunDone}, eventKinds(events))
-	assert.Equal(t, tasks.FailedState, events[1].Task.State)
-	assert.Error(t, events[1].Err)
-	assert.Equal(t, err, events[2].Err)
+	require.Equal(t, []EventKind{TaskStarted, Activity, TaskFinished, RunDone}, eventKinds(events))
+	assert.Equal(t, tasks.FailedState, events[2].Task.State)
+	assert.Error(t, events[2].Err)
+	assert.Equal(t, err, events[3].Err)
 }
 
 func TestRun_SkippedCompletedTaskSendsNoEvent(t *testing.T) {
