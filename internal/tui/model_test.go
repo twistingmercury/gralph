@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -36,7 +38,7 @@ func render(m Model) string {
 
 func TestNew_CopiesTasks(t *testing.T) {
 	tl := testTasks()
-	m := New(tl)
+	m := New(tl, func() {})
 	m = update(t, m, looper.Event{Kind: looper.TaskStarted, Task: tl.Tasks[0]})
 
 	assert.Equal(t, tasks.PendingState, tl.Tasks[0].State)
@@ -45,7 +47,7 @@ func TestNew_CopiesTasks(t *testing.T) {
 
 func TestUpdate_StatusesFollowEvents(t *testing.T) {
 	tl := testTasks()
-	m := update(t, New(tl), tea.WindowSizeMsg{Width: 120, Height: 30})
+	m := update(t, New(tl, func() {}), tea.WindowSizeMsg{Width: 120, Height: 30})
 	assert.Contains(t, render(m), "   First: pending")
 	assert.Contains(t, render(m), "   Second: pending")
 
@@ -67,7 +69,7 @@ func TestUpdate_StatusesFollowEvents(t *testing.T) {
 
 func TestUpdate_TaskStartedReplacesPromptAndClearsOutput(t *testing.T) {
 	tl := testTasks()
-	m := update(t, New(tl), tea.WindowSizeMsg{Width: 120, Height: 30},
+	m := update(t, New(tl, func() {}), tea.WindowSizeMsg{Width: 120, Height: 30},
 		looper.Event{Kind: looper.TaskStarted, Task: tl.Tasks[0]},
 		looper.Event{Kind: looper.Activity, Line: "first activity"},
 	)
@@ -89,7 +91,7 @@ func TestUpdate_TaskStartedReplacesPromptAndClearsOutput(t *testing.T) {
 
 func TestUpdate_ActivityLinesAppear(t *testing.T) {
 	tl := testTasks()
-	m := update(t, New(tl), tea.WindowSizeMsg{Width: 120, Height: 30},
+	m := update(t, New(tl, func() {}), tea.WindowSizeMsg{Width: 120, Height: 30},
 		looper.Event{Kind: looper.TaskStarted, Task: tl.Tasks[0]},
 		looper.Event{Kind: looper.Activity, Line: "reading files"},
 		looper.Event{Kind: looper.Activity, Line: "writing code"},
@@ -103,7 +105,7 @@ func TestView_FillsWindow(t *testing.T) {
 	tl := testTasks()
 	long := strings.Repeat("a very long activity line ", 20)
 	for _, size := range []tea.WindowSizeMsg{{Width: 120, Height: 30}, {Width: 60, Height: 15}} {
-		m := update(t, New(tl), size,
+		m := update(t, New(tl, func() {}), size,
 			looper.Event{Kind: looper.TaskStarted, Task: tl.Tasks[0]},
 			looper.Event{Kind: looper.Activity, Line: long},
 		)
@@ -131,7 +133,7 @@ func activity(n int) []tea.Msg {
 }
 
 func TestUpdate_TabCyclesFocus(t *testing.T) {
-	m := New(testTasks())
+	m := New(testTasks(), func() {})
 	assert.Equal(t, 2, m.focus, "output")
 	for _, want := range []int{0, 1, 2, 0} {
 		m = update(t, m, key(tea.KeyTab))
@@ -140,7 +142,7 @@ func TestUpdate_TabCyclesFocus(t *testing.T) {
 }
 
 func TestView_FocusedPaneHighlighted(t *testing.T) {
-	m := update(t, New(testTasks()), tea.WindowSizeMsg{Width: 60, Height: 15})
+	m := update(t, New(testTasks(), func() {}), tea.WindowSizeMsg{Width: 60, Height: 15})
 	blue := "\x1b[94m"
 	views := map[string]bool{}
 	for range 3 {
@@ -157,7 +159,7 @@ func TestUpdate_ScrollMovesOnlyFocusedPane(t *testing.T) {
 	for i := range int16(20) {
 		tl.Tasks = append(tl.Tasks, tasks.Task{ID: i + 1, Name: fmt.Sprintf("T%d", i+1), Prompt: strings.Repeat("step\n", 20)})
 	}
-	m := update(t, New(tl), tea.WindowSizeMsg{Width: 60, Height: 15},
+	m := update(t, New(tl, func() {}), tea.WindowSizeMsg{Width: 60, Height: 15},
 		looper.Event{Kind: looper.TaskStarted, Task: tl.Tasks[0]})
 	m = update(t, m, activity(30)...)
 	outY := m.outPane.YOffset()
@@ -188,7 +190,7 @@ func TestUpdate_ScrollMovesOnlyFocusedPane(t *testing.T) {
 
 func TestUpdate_OutputFollowsUntilScrolledUp(t *testing.T) {
 	tl := testTasks()
-	m := update(t, New(tl), tea.WindowSizeMsg{Width: 60, Height: 15},
+	m := update(t, New(tl, func() {}), tea.WindowSizeMsg{Width: 60, Height: 15},
 		looper.Event{Kind: looper.TaskStarted, Task: tl.Tasks[0]})
 	m = update(t, m, activity(30)...)
 	assert.True(t, m.outPane.AtBottom())
@@ -210,4 +212,115 @@ func TestUpdate_OutputFollowsUntilScrolledUp(t *testing.T) {
 	m = update(t, m, activity(30)...)
 	assert.True(t, m.outPane.AtBottom(), "TaskStarted resets to following")
 	assert.Contains(t, render(m), "line 29")
+}
+
+// step sends one message and reports whether the model asked to quit.
+func step(t *testing.T, m Model, msg tea.Msg) (Model, bool) {
+	t.Helper()
+	next, cmd := m.Update(msg)
+	if cmd == nil {
+		return next.(Model), false
+	}
+	_, quit := cmd().(tea.QuitMsg)
+	return next.(Model), quit
+}
+
+func runningModel(t *testing.T, cancel func()) (Model, *tasks.TaskList) {
+	t.Helper()
+	tl := testTasks()
+	m := update(t, New(tl, cancel), tea.WindowSizeMsg{Width: 120, Height: 30},
+		looper.Event{Kind: looper.TaskStarted, Task: tl.Tasks[0]})
+	return m, tl
+}
+
+func TestUpdate_QuitAsksToConfirm(t *testing.T) {
+	for _, k := range []tea.KeyPressMsg{key('q'), {Code: 'c', Mod: tea.ModCtrl}} {
+		cancelled := false
+		m, _ := runningModel(t, func() { cancelled = true })
+		m, quit := step(t, m, k)
+		assert.False(t, quit, k.String())
+		assert.False(t, cancelled, k.String())
+		assert.Contains(t, render(m), stopPrompt, k.String())
+
+		m, quit = step(t, m, key('n'))
+		assert.False(t, quit)
+		assert.False(t, cancelled)
+		assert.NotContains(t, render(m), stopPrompt)
+	}
+}
+
+func TestUpdate_ConfirmStopQuitsAfterRunDone(t *testing.T) {
+	cancelled := false
+	m, _ := runningModel(t, func() { cancelled = true })
+	m = update(t, m, key('q'))
+	m, quit := step(t, m, key('y'))
+	assert.True(t, cancelled)
+	assert.False(t, quit, "waits for RunDone")
+	assert.NotContains(t, render(m), stopPrompt)
+
+	m, quit = step(t, m, looper.Event{Kind: looper.RunDone, Err: context.Canceled})
+	assert.True(t, quit)
+	assert.Equal(t, 1, m.ExitCode())
+	assert.Equal(t, "Run stopped by user", m.Summary())
+	assert.Equal(t, tasks.PendingState, m.tasks[0].State)
+	assert.Contains(t, render(m), "First: pending")
+}
+
+func TestUpdate_InterruptedQuitsAfterRunDoneWithoutPrompt(t *testing.T) {
+	m, _ := runningModel(t, func() {})
+	m, quit := step(t, m, interruptedMsg{})
+	assert.False(t, quit)
+	assert.NotContains(t, render(m), stopPrompt)
+
+	m, quit = step(t, m, key('q'))
+	assert.False(t, quit)
+	assert.NotContains(t, render(m), stopPrompt, "already stopping")
+
+	m, quit = step(t, m, looper.Event{Kind: looper.RunDone, Err: context.Canceled})
+	assert.True(t, quit)
+	assert.Equal(t, 1, m.ExitCode())
+	assert.Equal(t, "Run stopped by signal", m.Summary())
+	assert.Equal(t, tasks.PendingState, m.tasks[0].State)
+}
+
+func TestUpdate_SuccessHoldsUntilQuit(t *testing.T) {
+	m, tl := runningModel(t, func() {})
+	done := tl.Tasks[0]
+	done.State = tasks.CompletedState
+	m = update(t, m, looper.Event{Kind: looper.TaskFinished, Task: done})
+	m, quit := step(t, m, looper.Event{Kind: looper.RunDone})
+	assert.False(t, quit)
+	assert.Contains(t, render(m), "All tasks completed")
+
+	m, quit = step(t, m, key(tea.KeyDown))
+	assert.False(t, quit)
+	m, quit = step(t, m, key('q'))
+	assert.True(t, quit)
+	assert.NotContains(t, render(m), stopPrompt)
+	assert.Equal(t, 0, m.ExitCode())
+	assert.Equal(t, "All tasks completed", m.Summary())
+}
+
+func TestUpdate_FailedTaskNamedOnStatusLine(t *testing.T) {
+	m, tl := runningModel(t, func() {})
+	failed := tl.Tasks[0]
+	failed.State = tasks.FailedState
+	failed.Error = "tests failed"
+	m = update(t, m, looper.Event{Kind: looper.TaskFinished, Task: failed})
+	m, quit := step(t, m, looper.Event{Kind: looper.RunDone, Err: errors.New("task 1: First failed: tests failed")})
+	assert.False(t, quit)
+	assert.Contains(t, render(m), "Task 1 failed: tests failed")
+	assert.Equal(t, "Task 1 failed: tests failed", m.Summary())
+
+	m, quit = step(t, m, tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
+	assert.True(t, quit)
+	assert.Equal(t, 1, m.ExitCode())
+}
+
+func TestUpdate_OtherRunErrorOnStatusLine(t *testing.T) {
+	m, _ := runningModel(t, func() {})
+	m, quit := step(t, m, looper.Event{Kind: looper.RunDone, Err: errors.New("disk full")})
+	assert.False(t, quit)
+	assert.Contains(t, render(m), "Run stopped: disk full")
+	assert.Equal(t, 1, m.ExitCode())
 }

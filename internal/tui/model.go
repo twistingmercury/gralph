@@ -18,6 +18,11 @@ const inProgressState = "in progress"
 
 const legend = "tab switch pane · ↑/↓/PgUp/PgDn scroll · q quit"
 
+const stopPrompt = "Stop the run? The current task stays pending. [y/N]"
+
+// interruptedMsg reports an outside SIGINT/SIGTERM.
+type interruptedMsg struct{}
+
 var (
 	border  = lipgloss.NewStyle().Border(lipgloss.NormalBorder())
 	focused = border.BorderForeground(lipgloss.Color("12"))
@@ -37,11 +42,21 @@ type Model struct {
 	prompt, taskPane, outPane, legend viewport.Model
 	// focus indexes panes(): prompt, tasks, output.
 	focus int
+
+	cancel     func()
+	confirming bool
+	// stopBy is "user" or "signal" once a stop is under way.
+	stopBy string
+	// failed is the status line for the last TaskFinished, if it failed.
+	failed   string
+	done     bool
+	status   string
+	exitCode int
 }
 
-// New returns a run view over a copy of tl's tasks.
-func New(tl *tasks.TaskList) Model {
-	m := Model{tasks: append([]tasks.Task(nil), tl.Tasks...), focus: 2}
+// New returns a run view over a copy of tl's tasks; cancel stops the run.
+func New(tl *tasks.TaskList, cancel func()) Model {
+	m := Model{tasks: append([]tasks.Task(nil), tl.Tasks...), focus: 2, cancel: cancel}
 	for _, vp := range []*viewport.Model{&m.prompt, &m.taskPane, &m.outPane, &m.legend} {
 		*vp = viewport.New()
 		vp.Style = border
@@ -59,9 +74,36 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.layout(msg.Width, msg.Height)
+	case interruptedMsg:
+		if m.done {
+			return m, tea.Quit
+		}
+		m.confirming = false
+		m.stopBy = "signal"
+		m.legend.SetContent(legend)
 	case tea.KeyPressMsg:
+		k := msg.String()
+		if m.confirming {
+			m.confirming = false
+			m.legend.SetContent(legend)
+			if k == "y" {
+				m.cancel()
+				m.stopBy = "user"
+			}
+			return m, nil
+		}
+		if k == "q" || k == "ctrl+c" {
+			if m.done {
+				return m, tea.Quit
+			}
+			if m.stopBy == "" {
+				m.confirming = true
+				m.legend.SetContent(stopPrompt)
+			}
+			return m, nil
+		}
 		vp := m.panes()[m.focus]
-		switch msg.String() {
+		switch k {
 		case "tab":
 			m.focus = (m.focus + 1) % len(m.panes())
 		case "up":
@@ -91,9 +133,48 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case looper.TaskFinished:
 			m.setState(msg.Task.ID, msg.Task.State)
+			m.failed = ""
+			if msg.Task.State == tasks.FailedState {
+				m.failed = fmt.Sprintf("Task %d failed: %s", msg.Task.ID, msg.Task.Error)
+			}
+		case looper.RunDone:
+			m.confirming = false
+			if m.stopBy != "" {
+				for _, t := range m.tasks {
+					if t.State == inProgressState {
+						m.setState(t.ID, tasks.PendingState)
+					}
+				}
+				m.exitCode = 1
+				return m, tea.Quit
+			}
+			m.done = true
+			switch {
+			case msg.Err == nil:
+				m.status = "All tasks completed"
+			case m.failed != "":
+				m.status = m.failed
+			default:
+				m.status = "Run stopped: " + msg.Err.Error()
+			}
+			if msg.Err != nil {
+				m.exitCode = 1
+			}
+			m.legend.SetContent(m.status + " · " + legend)
 		}
 	}
 	return m, nil
+}
+
+// ExitCode is the exit code for the run: 0 only when it finished with no error.
+func (m Model) ExitCode() int { return m.exitCode }
+
+// Summary is the one-line outcome of the run.
+func (m Model) Summary() string {
+	if m.stopBy != "" {
+		return "Run stopped by " + m.stopBy
+	}
+	return m.status
 }
 
 func (m Model) View() tea.View {
