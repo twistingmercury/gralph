@@ -29,8 +29,10 @@ build(){
 
 e2e_tests(){
     printf "\n=== starting end-to-end tests ===\n"
-    docker compose -f "${PROJ_ROOT}/tests/docker-compose.yaml" up --build --remove-orphans --exit-code-from tests
+    local rc=0
+    docker compose -f "${PROJ_ROOT}/tests/docker-compose.yaml" up --build --remove-orphans --exit-code-from tests || rc=$?
     docker compose -f "${PROJ_ROOT}/tests/docker-compose.yaml" down --remove-orphans > /dev/null 2>&1 || true
+    return "${rc}"
 }
 
 main(){
