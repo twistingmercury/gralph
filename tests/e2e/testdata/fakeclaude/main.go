@@ -22,7 +22,6 @@
 //	FAKECLAUDE_ATTEMPT_LOG_FILE    path to append one line to per invocation,
 //	                                used to count invocations across a run
 //	FAKECLAUDE_EXIT_CODE           exit code to use (default "0")
-//	FAKECLAUDE_STDOUT_MSG          text to print to stdout before exiting
 //	FAKECLAUDE_STDERR_MSG          text to print to stderr before exiting
 //	FAKECLAUDE_DESCENDANT_PID_FILE path to write the PID of a spawned
 //	                                blocking descendant process (empty: no
@@ -116,9 +115,6 @@ func main() {
 		blockForever()
 	}
 
-	if msg := os.Getenv("FAKECLAUDE_STDOUT_MSG"); msg != "" {
-		fmt.Println(msg)
-	}
 	if msg := os.Getenv("FAKECLAUDE_STDERR_MSG"); msg != "" {
 		fmt.Fprintln(os.Stderr, msg)
 	}
