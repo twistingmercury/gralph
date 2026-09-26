@@ -124,8 +124,9 @@ preserved; each task's state is made explicit.
 The view has three panes, each under a title bar, over a one-line legend:
 
 - **Current task** (top left): the current task, as `<id>: <name>` and its prompt.
-- **Task progress** (bottom left): every task with its state; the running task shows
-  `in progress` (display only; it is never written to the file).
+- **Task progress** (bottom left): every task as `<icon> <id>: <name>: <state>`,
+  colored by state; the running task shows `in progress` (display only; it is never
+  written to the file).
 - **Claude activity** (right): the current task's activity — Claude's text, one
   `→ <tool> <target>` line per tool call, and the session's stderr. It follows
   new lines while scrolled to the bottom.

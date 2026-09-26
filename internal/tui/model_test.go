@@ -45,26 +45,49 @@ func TestNew_CopiesTasks(t *testing.T) {
 	assert.Equal(t, inProgressState, m.tasks[0].State)
 }
 
+func row(icon, text, state string) string {
+	return icon + " " + rowStyles[state].Render(text)
+}
+
 func TestUpdate_StatusesFollowEvents(t *testing.T) {
 	tl := testTasks()
 	m := update(t, New(tl, func() {}), tea.WindowSizeMsg{Width: 120, Height: 30})
-	assert.Contains(t, render(m), "   First: pending")
-	assert.Contains(t, render(m), "   Second: pending")
+	assert.Contains(t, render(m), row("  ", "1: First: pending", tasks.PendingState))
+	assert.Contains(t, render(m), row("  ", "2: Second: pending", tasks.PendingState))
 
 	m = update(t, m, looper.Event{Kind: looper.TaskStarted, Task: tl.Tasks[0]})
-	assert.Contains(t, render(m), "▶  First: in progress")
+	assert.Contains(t, render(m), row("▶ ", "1: First: in progress", inProgressState))
 
 	done := tl.Tasks[0]
 	done.State = tasks.CompletedState
 	m = update(t, m, looper.Event{Kind: looper.TaskFinished, Task: done})
-	assert.Contains(t, render(m), "✅ First: completed")
+	assert.Contains(t, render(m), row("✅", "1: First: completed", tasks.CompletedState))
 
 	m = update(t, m, looper.Event{Kind: looper.TaskStarted, Task: tl.Tasks[1]})
 	failed := tl.Tasks[1]
 	failed.State = tasks.FailedState
 	m = update(t, m, looper.Event{Kind: looper.TaskFinished, Task: failed})
-	assert.Contains(t, render(m), "❌ Second: failed")
-	assert.Contains(t, render(m), "✅ First: completed")
+	assert.Contains(t, render(m), row("❌", "2: Second: failed", tasks.FailedState))
+	assert.Contains(t, render(m), row("✅", "1: First: completed", tasks.CompletedState))
+}
+
+func TestRenderTasks_RowFormatAndStylePerState(t *testing.T) {
+	states := []struct {
+		state, icon string
+	}{
+		{tasks.PendingState, "  "},
+		{inProgressState, "▶ "},
+		{tasks.CompletedState, "✅"},
+		{tasks.FailedState, "❌"},
+	}
+	for _, tc := range states {
+		t.Run(tc.state, func(t *testing.T) {
+			m := New(&tasks.TaskList{Tasks: []tasks.Task{{ID: 26, Name: "Name", Prompt: "p", State: tc.state}}}, func() {})
+
+			assert.Equal(t, row(tc.icon, "26: Name: "+tc.state, tc.state), m.taskPane.GetContent())
+			assert.NotEqual(t, "26: Name: "+tc.state, rowStyles[tc.state].Render("26: Name: "+tc.state))
+		})
+	}
 }
 
 func TestUpdate_TaskStartedReplacesPromptAndClearsOutput(t *testing.T) {

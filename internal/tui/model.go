@@ -35,6 +35,13 @@ var icons = map[string]string{
 	inProgressState:      "▶ ",
 }
 
+var rowStyles = map[string]lipgloss.Style{
+	tasks.CompletedState: lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("10")),
+	tasks.FailedState:    lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("9")),
+	inProgressState:      lipgloss.NewStyle().Italic(true).Foreground(lipgloss.Color("3")),
+	tasks.PendingState:   lipgloss.NewStyle().Foreground(lipgloss.Color("7")),
+}
+
 // Model is the run view: prompt, tasks, and output panes over a key legend.
 type Model struct {
 	tasks  []tasks.Task
@@ -236,7 +243,8 @@ func (m *Model) renderTasks() {
 		if !ok {
 			icon = "  "
 		}
-		rows = append(rows, fmt.Sprintf("%s %s: %s", icon, t.Name, t.State))
+		text := fmt.Sprintf("%d: %s: %s", t.ID, t.Name, t.State)
+		rows = append(rows, icon+" "+rowStyles[t.State].Render(text))
 	}
 	m.taskPane.SetContent(strings.Join(rows, "\n"))
 }
