@@ -1,8 +1,8 @@
 # Gralph — Requirements
 
-> **Version**: v02
+> **Version**: v03
 > **Date**: 2026-09-25
-> **Notes**: Skill renamed to gralph-docs-writer.
+> **Notes**: Added the full-screen TUI as a goal; the claude argv constraint now covers both task paths.
 
 [Back to Overview](00_overview.md) | [Back to Project README](../../README.md)
 
@@ -40,8 +40,9 @@ Claude Code users need a way to:
 ### Secondary Goals
 
 1. Be installable to GOBIN and usable from anywhere
-2. Support Docker-based release builds and CI testing
-3. Provide clear error messages when task files are invalid or tasks fail
+2. Show a run live in a full-screen view by default in a terminal, while plain mode (`--no-tui` or no terminal) stays unchanged for scripts and CI
+3. Support Docker-based release builds and CI testing
+4. Provide clear error messages when task files are invalid or tasks fail
 
 ## Non-Goals
 
@@ -50,7 +51,8 @@ Claude Code users need a way to:
 - Agent abstraction layer; Claude Code is the only runtime
 - Windows support
 - Configuration files or environment variable override of task/prompt paths
-- Rich UI; plain text tables and console output only
+- A TUI for `--dry-run`; it always prints plain text
+- Writing the TUI's `in progress` state to tasks.yaml
 
 ## Success Criteria
 
@@ -73,7 +75,8 @@ Claude Code users need a way to:
 - **Unix process API** — Depends on Setpgid and process groups; Windows not supported
 - **Single-file YAML task input** — No migration from other formats; tasks.yaml must be valid on the first parse
 - **No injectable runner** — Both test suites use a fake `claude` on PATH to drive the looper; runLoop execs inline
-- **Prompt passed via stdin** — Claude is invoked as `claude --print --dangerously-skip-permissions` with prompt on stdin
+- **Prompt passed via stdin** — Claude is invoked as `claude --print --dangerously-skip-permissions` with prompt on stdin; the TUI path adds `--output-format stream-json --verbose`, and plain mode's argv and output stay as they are
+- **Bubble Tea v2 only** — `charm.land/bubbletea/v2`, `bubbles/v2`, `lipgloss/v2`, imported only by `internal/tui` and `cmd/main`; never the v1 `github.com/charmbracelet/*` modules
 
 ### Business Constraints
 

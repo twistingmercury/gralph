@@ -1,8 +1,8 @@
 # Gralph — Architecture Overview
 
-> **Version**: v02
+> **Version**: v03
 > **Date**: 2026-09-25
-> **Notes**: Skill renamed to gralph-docs-writer.
+> **Notes**: Added the full-screen TUI (default in a terminal, live activity via stream-json) alongside the unchanged plain mode.
 
 [Back to Project README](../../README.md)
 
@@ -25,10 +25,12 @@ Gralph was built specifically for Claude Code (`claude.ai/code`); an agent-agnos
 The Ralph loop is a command sequence driven by a shared prompt and an ordered task list. Gralph implements this pattern by:
 
 1. Loading a shared prompt and task list (both YAML)
-2. For each pending task, combining the prompt + task and starting a fresh `claude --print --dangerously-skip-permissions` session
+2. For each pending task, combining the prompt + task and starting a fresh `claude --print --dangerously-skip-permissions` session (in the TUI, with `--output-format stream-json --verbose` added)
 3. Reading Claude's output to determine success/failure
 4. Writing state back atomically
 5. Blocking on the first failure until a person intervenes
+
+In a terminal, gralph shows the run in a full-screen view: the current task's prompt, the task list and statuses, and the current session's live activity. With `--no-tui`, `--dry-run`, or no terminal, it runs in plain mode and prints to stdout as it always has.
 
 ```mermaid
 graph TB
@@ -46,8 +48,9 @@ graph TB
 
 | Component          | Description                                                                         |
 | ------------------ | ----------------------------------------------------------------------------------- |
-| CLI Entrypoint     | Parses flags, validates required arguments, routes to Start or DryRun               |
-| Looper             | Orchestrates the loop: loads files, checks preconditions, runs tasks sequentially  |
+| CLI Entrypoint     | Parses flags, picks plain or TUI mode, routes to Start/DryRun or the TUI            |
+| Terminal UI        | Setup screen for missing paths; run view fed live by looper events (`internal/tui`) |
+| Looper             | Orchestrates the loop: loads files, checks preconditions, runs tasks sequentially; plain or stream-json task path chosen by the `report` hook |
 | Task Parser        | Strict YAML validation: rejects any invalid element, whole file fails at parse time |
 | Process Manager    | Spawns claude subprocess in its own process group; kills group on SIGINT/SIGTERM   |
 | State Persistence  | Atomic task state writes via temp-file + rename; YAML rewritten on every change    |
@@ -62,7 +65,8 @@ graph TB
 5. **Outcome from JSON, not exit code** — Result determined by parsing the final non-blank JSON line; missing/invalid line is always failed, never a fallback to exit code.
 6. **Failed task blocks** — A failed task must be manually reset (state changed to pending or completed) before the next run. Gralph refuses to start with any failed task present.
 7. **Unix only** — Linux, macOS, BSDs. Windows support was removed deliberately and will not be reintroduced.
-8. **Docker-first CI** — Lint, gosec, govulncheck, unit tests, and e2e all run inside the build container; this is the only supported CI path.
+8. **Plain mode intact** — The full-screen TUI is the default in a terminal, but plain mode (`--no-tui` or no terminal) keeps the same argv, output, and exit codes. One loop serves both, through a `report` hook.
+9. **Docker-first CI** — Lint, gosec, govulncheck, unit tests, and e2e all run inside the build container; this is the only supported CI path.
 
 ## Document Navigation
 

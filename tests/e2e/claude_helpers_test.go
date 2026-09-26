@@ -53,6 +53,7 @@ func gralphEnvWithPath(pathValue string, extra map[string]string) []string {
 		if strings.HasPrefix(kv, "PATH=") || strings.HasPrefix(kv, "HOME=") {
 			continue
 		}
+
 		env = append(env, kv)
 	}
 	env = append(env, "PATH="+pathValue, "HOME="+skillHome)
@@ -160,10 +161,12 @@ func (gp *gralphProcess) waitExit(t *testing.T, timeout time.Duration) int {
 		if err == nil {
 			return 0
 		}
+
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
 			return exitErr.ExitCode()
 		}
+
 		require.NoError(t, err, "gralph exited with unexpected error")
 		return -1
 	case <-time.After(timeout):
@@ -214,6 +217,7 @@ func readFakeClaudeRecords(t *testing.T, path string) []fakeClaudeRecord {
 		if os.IsNotExist(err) {
 			return nil
 		}
+
 		require.NoError(t, err, "read fake claude record %s", path)
 	}
 
@@ -222,6 +226,7 @@ func readFakeClaudeRecords(t *testing.T, path string) []fakeClaudeRecord {
 		if line == "" {
 			continue
 		}
+
 		var rec fakeClaudeRecord
 		require.NoError(t, json.Unmarshal([]byte(line), &rec), "unmarshal fake claude record line %q", line)
 		records = append(records, rec)
@@ -240,12 +245,15 @@ func countAttempts(t *testing.T, path string) int {
 		if os.IsNotExist(err) {
 			return 0
 		}
+
 		require.NoError(t, err, "read attempt log %s", path)
 	}
+
 	trimmed := strings.TrimRight(string(data), "\n")
 	if trimmed == "" {
 		return 0
 	}
+
 	return len(strings.Split(trimmed, "\n"))
 }
 
@@ -260,12 +268,15 @@ func waitForFile(t *testing.T, path string, timeout time.Duration) []byte {
 		if err == nil {
 			return data
 		}
+
 		if !os.IsNotExist(err) {
 			require.NoError(t, err, "read %s", path)
 		}
+
 		if time.Now().After(deadline) {
 			require.FailNow(t, fmt.Sprintf("timed out after %v waiting for %s to appear", timeout, path))
 		}
+
 		time.Sleep(20 * time.Millisecond)
 	}
 }

@@ -2,6 +2,7 @@ package looper
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 
 	"github.com/twistingmercury/gralph/internal/tasks"
@@ -38,12 +39,12 @@ func parseResult(line string) (state, errMsg string, ok bool) {
 // session's trailing JSON result line even when that line is wrapped in a
 // Markdown code fence.
 func lastResultLine(output string) string {
-	lines := strings.Split(output, "\n")
-	for i := len(lines) - 1; i >= 0; i-- {
-		line := strings.TrimSpace(lines[i])
+	for _, l := range slices.Backward(strings.Split(output, "\n")) {
+		line := strings.TrimSpace(l)
 		if line == "" || strings.HasPrefix(line, "```") {
 			continue
 		}
+
 		return line
 	}
 	return ""
@@ -56,22 +57,24 @@ func lastResultLine(output string) string {
 func outcome(runErr error, lastLine string) (state, errMsg string) {
 	resState, resErr, ok := parseResult(lastLine)
 
-	if runErr == nil {
-		switch {
-		case ok && resState == tasks.CompletedState:
-			return tasks.CompletedState, ""
-		case ok && resState == tasks.FailedState:
-			if resErr == "" {
-				resErr = "session reported failed with no error"
-			}
+	if runErr != nil {
+		if ok && resErr != "" {
 			return tasks.FailedState, resErr
-		default:
-			return tasks.FailedState, "no valid result line in session output"
 		}
+
+		return tasks.FailedState, runErr.Error()
 	}
 
-	if ok && resErr != "" {
+	switch {
+	case ok && resState == tasks.CompletedState:
+		return tasks.CompletedState, ""
+	case ok && resState == tasks.FailedState:
+		if resErr == "" {
+			resErr = "session reported failed with no error"
+		}
+
 		return tasks.FailedState, resErr
+	default:
+		return tasks.FailedState, "no valid result line in session output"
 	}
-	return tasks.FailedState, runErr.Error()
 }

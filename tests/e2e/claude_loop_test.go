@@ -18,7 +18,9 @@ import (
 // claude invocation, its prompt never echoed, just the skip message on
 // stdout), the non-completed tasks run in file order with the exact
 // documented stdin wire contract, and once every invocation exits 0 the
-// tasks.yaml on disk is rewritten with every task marked completed.
+// tasks.yaml on disk is rewritten with every task marked completed. The ids
+// are out of order, so sorting by id would change both the run order and the
+// saved order.
 func TestLoop_RunsEveryTaskInOrder(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -28,14 +30,14 @@ func TestLoop_RunsEveryTaskInOrder(t *testing.T) {
 	sharedPrompt := strings.TrimSpace(promptBody)
 
 	tasksYAML := `tasks:
-  - id: 1
+  - id: 20
     name: First task
     prompt: Do the first thing.
     state: completed
-  - id: 2
+  - id: 30
     name: Second task
     prompt: Do the second thing.
-  - id: 3
+  - id: 10
     name: Third task
     prompt: Do the third thing.
     state: pending
@@ -50,7 +52,7 @@ func TestLoop_RunsEveryTaskInOrder(t *testing.T) {
 	res := runGralph(t, 15*time.Second, []string{"--prompt=" + promptPath, "--tasks=" + tasksPath}, env)
 	require.Equal(t, 0, res.exitCode, "stdout:\n%s\nstderr:\n%s", res.stdout, res.stderr)
 
-	assert.Contains(t, res.stdout, "task 1: First task already completed, skipping")
+	assert.Contains(t, res.stdout, "task 20: First task already completed, skipping")
 	assert.NotContains(t, res.stdout, "Do the first thing.", "expected the completed task's prompt never to be printed")
 
 	records := readFakeClaudeRecords(t, recordFile)
@@ -62,8 +64,8 @@ func TestLoop_RunsEveryTaskInOrder(t *testing.T) {
 		name   string
 		prompt string
 	}{
-		{2, "Second task", "Do the second thing."},
-		{3, "Third task", "Do the third thing."},
+		{30, "Second task", "Do the second thing."},
+		{10, "Third task", "Do the third thing."},
 	}
 	for i, want := range wantTasks {
 		assert.Equal(t, wantArgv, records[i].Argv, "argv for invocation %d", i)
@@ -72,17 +74,17 @@ func TestLoop_RunsEveryTaskInOrder(t *testing.T) {
 
 	after := readTasksYAML(t, tasksPath)
 	require.Len(t, after.Tasks, 3)
-	states := taskStates(after)
-	assert.Equal(t, "completed", states[1], "expected the already-completed task to remain completed")
-	assert.Equal(t, "completed", states[2], "expected the second task to be written back as completed")
-	assert.Equal(t, "completed", states[3], "expected the third task to be written back as completed")
+	for i, wantID := range []int{20, 30, 10} {
+		assert.Equal(t, wantID, after.Tasks[i].ID, "expected the saved file to keep file order at index %d", i)
+		assert.Equal(t, "completed", after.Tasks[i].State, "expected task %d to be completed", after.Tasks[i].ID)
+	}
 
 	assertNoTmpFile(t, tasksPath)
 }
 
 // TestLoop_FailedTaskRefusesToRun verifies that a task file containing a
 // failed task is refused before any work starts: gralph prints the task
-// summary table on stdout, exits non-zero, never invokes claude, and leaves the task file
+// summary table on stdout, exits 1, never invokes claude, and leaves the task file
 // byte-for-byte unchanged with no temporary file behind.
 func TestLoop_FailedTaskRefusesToRun(t *testing.T) {
 	t.Parallel()
@@ -108,9 +110,9 @@ func TestLoop_FailedTaskRefusesToRun(t *testing.T) {
 
 	res := runGralph(t, 15*time.Second, []string{"--prompt=" + promptPath, "--tasks=" + tasksPath}, env)
 
-	require.NotEqual(t, 0, res.exitCode, "stdout:\n%s\nstderr:\n%s", res.stdout, res.stderr)
+	require.Equal(t, 1, res.exitCode, "stdout:\n%s\nstderr:\n%s", res.stdout, res.stderr)
 	assert.Contains(t, res.stdout, "Some tasks failed previous runs:\n")
-	assert.Contains(t, res.stdout, "   1  PENDING  \033[0m  First task\n")
+	assert.Contains(t, res.stdout, "   1  PENDING    First task\n")
 	assert.Contains(t, res.stdout, "❌  2  \033[1;91mFAILED   \033[0m  Second task  \033[1;91m← Needs review!\033[0m\n")
 	assert.Contains(t, res.stderr, "fix the failed tasks and set their state to pending before running")
 	assert.Equal(t, 0, countAttempts(t, attemptLog), "expected claude never invoked")
@@ -147,12 +149,14 @@ func TestLoop_StopsOnFirstFailure(t *testing.T) {
 	env := gralphEnv(fakeClaudeDir, map[string]string{
 		"FAKECLAUDE_EXIT_CODE":        "3",
 		"FAKECLAUDE_ATTEMPT_LOG_FILE": attemptLog,
+		"FAKECLAUDE_STDERR_MSG":       "claude-stderr-marker",
 	})
 
 	res := runGralph(t, 15*time.Second, []string{"--prompt=" + promptPath, "--tasks=" + tasksPath}, env)
 
 	require.NotEqual(t, 0, res.exitCode, "stdout:\n%s\nstderr:\n%s", res.stdout, res.stderr)
 	assert.Contains(t, res.stderr, "task 1: First task failed: exit status 3")
+	assert.Contains(t, res.stderr, "claude-stderr-marker", "expected claude's stderr to pass through")
 
 	assert.Equal(t, 1, countAttempts(t, attemptLog), "expected claude invoked exactly once")
 	assert.NotContains(t, res.stdout, "Do the second thing.", "expected the second task's prompt never to be printed")
@@ -235,7 +239,7 @@ func TestStart_EmptyPrompt(t *testing.T) {
 	promptPath := writePrompt(t, dir, "")
 	tasksPath := writeTasksYAML(t, dir, validTasksYAML())
 
-	assertStartupFailure(t, dir, promptPath, tasksPath)
+	assertStartupFailure(t, dir, promptPath, tasksPath, "the prompt file is empty")
 }
 
 // TestStart_WhitespacePrompt verifies that a whitespace-only prompt file
@@ -247,24 +251,7 @@ func TestStart_WhitespacePrompt(t *testing.T) {
 	promptPath := writePrompt(t, dir, "   \t\n  ")
 	tasksPath := writeTasksYAML(t, dir, validTasksYAML())
 
-	assertStartupFailure(t, dir, promptPath, tasksPath)
-}
-
-// TestStart_InvalidTaskState verifies that a tasks.yaml with an invalid
-// state value fails startup before claude is ever invoked.
-func TestStart_InvalidTaskState(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-
-	promptPath := writePrompt(t, dir, "Body.\n")
-	tasksPath := writeTasksYAML(t, dir, `tasks:
-  - id: 1
-    name: First task
-    prompt: Do the thing.
-    state: bogus
-`)
-
-	assertStartupFailure(t, dir, promptPath, tasksPath)
+	assertStartupFailure(t, dir, promptPath, tasksPath, "the prompt file is just whitespace")
 }
 
 // TestStart_AbandonedStateRejected verifies that "abandoned" -- a state
@@ -305,14 +292,14 @@ func TestStart_EmptyTaskList(t *testing.T) {
 	promptPath := writePrompt(t, dir, "Body.\n")
 	tasksPath := writeTasksYAML(t, dir, "tasks: []\n")
 
-	assertStartupFailure(t, dir, promptPath, tasksPath)
+	assertStartupFailure(t, dir, promptPath, tasksPath, "tasks: must contain at least one task")
 }
 
 // assertStartupFailure runs gralph with the given prompt/tasks files and
 // asserts the shared startup-failure contract: stderr mentions the loop
-// runner failed to start, gralph exits non-zero, and claude is never
-// invoked.
-func assertStartupFailure(t *testing.T, dir, promptPath, tasksPath string) {
+// runner failed to start and the given reason, gralph exits non-zero, and
+// claude is never invoked.
+func assertStartupFailure(t *testing.T, dir, promptPath, tasksPath, want string) {
 	t.Helper()
 
 	attemptLog := filepath.Join(dir, "attempts.log")
@@ -324,6 +311,7 @@ func assertStartupFailure(t *testing.T, dir, promptPath, tasksPath string) {
 
 	require.NotEqual(t, 0, res.exitCode, "stdout:\n%s\nstderr:\n%s", res.stdout, res.stderr)
 	assert.Contains(t, res.stderr, "failed to start loop runner")
+	assert.Contains(t, res.stderr, want)
 	assert.Equal(t, 0, countAttempts(t, attemptLog), "expected claude never invoked")
 }
 

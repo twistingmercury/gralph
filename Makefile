@@ -29,8 +29,8 @@ install: local ## Install gralph to $GOBIN
 uninstall: ## Uninstall gralph to $GOBIN
 	rm ${GOBIN}/gralph
 
-test: ## Runs unit tests only (internal packages). The e2e suite runs in a container via `make build`.
-	go test -v ./internal/...
+test: ## Runs unit tests only (cmd and internal packages). The e2e suite runs in a container via `make build`.
+	go test -v ./cmd/... ./internal/...
 
 analyze: ## Run linters, formatters, security scanners on production code (no tests/ or *_test.go)
 	goimports -w cmd internal

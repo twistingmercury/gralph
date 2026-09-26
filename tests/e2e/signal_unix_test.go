@@ -91,9 +91,11 @@ func waitProcessGone(t *testing.T, pid int, timeout time.Duration) {
 		if !processAlive(pid) {
 			return
 		}
+
 		if time.Now().After(deadline) {
 			require.FailNow(t, fmt.Sprintf("descendant process %d is still alive after %v", pid, timeout))
 		}
+
 		time.Sleep(50 * time.Millisecond)
 	}
 }
@@ -108,6 +110,7 @@ func processAlive(pid int) bool {
 	if err != nil && err != syscall.EPERM {
 		return false
 	}
+
 	if runtime.GOOS != "linux" {
 		return true
 	}
@@ -116,10 +119,12 @@ func processAlive(pid int) bool {
 	if err != nil {
 		return false
 	}
+
 	closingParen := strings.LastIndexByte(string(stat), ')')
 	if closingParen == -1 {
 		return true
 	}
+
 	fields := strings.Fields(string(stat[closingParen+1:]))
 	return len(fields) == 0 || (fields[0] != "Z" && fields[0] != "X")
 }

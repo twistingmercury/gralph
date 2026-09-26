@@ -3,7 +3,6 @@ package looper
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -81,8 +80,10 @@ func readFakeClaudeRecords(t *testing.T, path string) []string {
 		if os.IsNotExist(err) {
 			return nil
 		}
+
 		require.NoError(t, err)
 	}
+
 	if len(data) == 0 {
 		return nil
 	}
@@ -169,18 +170,21 @@ func TestStart_InvalidTasksYAML(t *testing.T) {
 	assert.ErrorContains(t, err, "failed to parse tasks yaml")
 }
 
-// TestStart_LoadFailuresBreakTheErrorChain pins that Start wraps getPrompt
-// and getTasks failures with %s, not %w: the underlying sentinel is not
-// reachable via errors.Is/As through Start. This documents the current
-// behavior rather than asserting it as a desired design; production code is
-// not changed to fix it.
-func TestStart_LoadFailuresBreakTheErrorChain(t *testing.T) {
+// TestStart_LoadFailuresKeepTheErrorChain pins that Start wraps LoadPrompt
+// and LoadTasks failures with %w, so the underlying error is reachable via
+// errors.Is/As through Start.
+func TestStart_LoadFailuresKeepTheErrorChain(t *testing.T) {
 	dir := t.TempDir()
+	promptPath := writePromptFile(t, dir, "Do the task.\n")
 	tasksPath := writeTasksFile(t, dir, validTasksYAML)
 
 	err := Start(context.Background(), filepath.Join(dir, "missing.md"), tasksPath)
 	require.Error(t, err)
-	assert.False(t, errors.Is(err, os.ErrNotExist), "expected %%s wrapping in Start to break the error chain")
+	assert.ErrorIs(t, err, os.ErrNotExist)
+
+	err = Start(context.Background(), promptPath, filepath.Join(dir, "missing.yaml"))
+	require.Error(t, err)
+	assert.ErrorIs(t, err, os.ErrNotExist)
 }
 
 func TestStart_RunLoopFailureIsWrappedWithLoopErrorPrefix(t *testing.T) {
@@ -212,82 +216,82 @@ func TestStart_Success(t *testing.T) {
 	assert.Len(t, records, 2, "expected claude invoked once per task")
 }
 
-func TestGetPrompt_MissingFile(t *testing.T) {
+func TestLoadPrompt_MissingFile(t *testing.T) {
 	dir := t.TempDir()
 
-	_, err := getPrompt(filepath.Join(dir, "missing.md"))
+	_, err := LoadPrompt(filepath.Join(dir, "missing.md"))
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "prompt file")
 	assert.ErrorContains(t, err, "not accessible")
 }
 
-func TestGetPrompt_ReadError(t *testing.T) {
-	// A directory exists (Stat succeeds) but cannot be read as a file.
+func TestLoadPrompt_ReadError(t *testing.T) {
+	// A directory exists but cannot be read as a file.
 	dir := t.TempDir()
 
-	_, err := getPrompt(dir)
+	_, err := LoadPrompt(dir)
 	require.Error(t, err)
-	assert.ErrorContains(t, err, "could not be read")
+	assert.ErrorContains(t, err, "not accessible")
 }
 
-func TestGetPrompt_Empty(t *testing.T) {
+func TestLoadPrompt_Empty(t *testing.T) {
 	dir := t.TempDir()
 	path := writePromptFile(t, dir, "")
 
-	_, err := getPrompt(path)
+	_, err := LoadPrompt(path)
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "the prompt file is empty")
 }
 
-func TestGetPrompt_WhitespaceOnly(t *testing.T) {
+func TestLoadPrompt_WhitespaceOnly(t *testing.T) {
 	dir := t.TempDir()
 	path := writePromptFile(t, dir, " \t\n ")
 
-	_, err := getPrompt(path)
+	_, err := LoadPrompt(path)
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "the prompt file is just whitespace")
 }
 
-func TestGetPrompt_Success(t *testing.T) {
+func TestLoadPrompt_Success(t *testing.T) {
 	dir := t.TempDir()
 	path := writePromptFile(t, dir, "  Follow the plan.  \n")
 
-	got, err := getPrompt(path)
+	got, err := LoadPrompt(path)
 	require.NoError(t, err)
 	assert.Equal(t, "Follow the plan.", got)
 }
 
-func TestGetTasks_MissingFile(t *testing.T) {
+func TestLoadTasks_MissingFile(t *testing.T) {
 	dir := t.TempDir()
 
-	_, err := getTasks(filepath.Join(dir, "missing.yaml"))
+	_, err := LoadTasks(filepath.Join(dir, "missing.yaml"))
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "tasks file")
 	assert.ErrorContains(t, err, "not accessible")
 }
 
-func TestGetTasks_ReadError(t *testing.T) {
+func TestLoadTasks_ReadError(t *testing.T) {
 	dir := t.TempDir()
 
-	_, err := getTasks(dir)
+	_, err := LoadTasks(dir)
 	require.Error(t, err)
-	assert.ErrorContains(t, err, "could not be read")
+	assert.ErrorContains(t, err, "not accessible")
 }
 
-func TestGetTasks_InvalidYAML(t *testing.T) {
+func TestLoadTasks_InvalidYAML(t *testing.T) {
 	dir := t.TempDir()
 	path := writeTasksFile(t, dir, "tasks:\n  - {id: 1, name: a, prompt: p, state: bogus}\n")
 
-	_, err := getTasks(path)
+	_, err := LoadTasks(path)
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "failed to parse tasks yaml")
 }
 
-func TestGetTasks_Success(t *testing.T) {
+func TestLoadTasks_Success(t *testing.T) {
 	dir := t.TempDir()
 	path := writeTasksFile(t, dir, validTasksYAML)
 
-	got, err := getTasks(path)
+	got, err := LoadTasks(path)
 	require.NoError(t, err)
 	require.NotNil(t, got)
 
@@ -296,6 +300,51 @@ func TestGetTasks_Success(t *testing.T) {
 		ids = append(ids, task.ID)
 	}
 	assert.Equal(t, []int16{1, 2}, ids)
+}
+
+func TestLoadTasks_FailedTaskReturnsListAndErrFailedTasks(t *testing.T) {
+	dir := t.TempDir()
+	path := writeTasksFile(t, dir, "tasks:\n  - {id: 1, name: a, prompt: p}\n  - {id: 2, name: b, prompt: p, state: failed}\n")
+
+	got, err := LoadTasks(path)
+	require.ErrorIs(t, err, ErrFailedTasks)
+	require.NotNil(t, got)
+	assert.Len(t, got.Tasks, 2)
+}
+
+func TestLoadTasksReport_FailedTaskWritesNoticeAndTable(t *testing.T) {
+	dir := t.TempDir()
+	path := writeTasksFile(t, dir, "tasks:\n  - {id: 1, name: a, prompt: p}\n  - {id: 2, name: b, prompt: p, state: failed}\n")
+
+	var got bytes.Buffer
+	tl, err := LoadTasksReport(&got, path)
+	require.ErrorIs(t, err, ErrFailedTasks)
+	require.NotNil(t, tl)
+
+	var want bytes.Buffer
+	want.WriteString("Some tasks failed previous runs:\n")
+	PrintTasks(&want, tl)
+	assert.Equal(t, want.String(), got.String())
+}
+
+func TestLoadTasksReport_CleanFileWritesNothing(t *testing.T) {
+	dir := t.TempDir()
+	path := writeTasksFile(t, dir, validTasksYAML)
+
+	var got bytes.Buffer
+	tl, err := LoadTasksReport(&got, path)
+	require.NoError(t, err)
+	require.NotNil(t, tl)
+	assert.Empty(t, got.String())
+}
+
+func TestLoadTasks_ParseErrorIsNotErrFailedTasks(t *testing.T) {
+	dir := t.TempDir()
+	path := writeTasksFile(t, dir, "tasks:\n  - {id: 1, name: a, prompt: p, state: bogus}\n")
+
+	_, err := LoadTasks(path)
+	require.Error(t, err)
+	assert.NotErrorIs(t, err, ErrFailedTasks)
 }
 
 func TestRunLoop_HappyPathInvokesInOrderWithExactStdin(t *testing.T) {
@@ -312,7 +361,7 @@ func TestRunLoop_HappyPathInvokesInOrderWithExactStdin(t *testing.T) {
 		{ID: 3, Name: "Third", Prompt: "Do the third thing."},
 	}}
 
-	err := runLoop(context.Background(), p, tl, tasksPath)
+	err := runLoop(context.Background(), p, tl, tasksPath, nil)
 	require.NoError(t, err)
 
 	records := readFakeClaudeRecords(t, recordPath)
@@ -342,7 +391,7 @@ func TestRunLoop_NonZeroExitStopsAtFirstTask(t *testing.T) {
 		{ID: 2, Name: "Second", Prompt: "p2"},
 	}}
 
-	err := runLoop(context.Background(), "prompt", tl, tasksPath)
+	err := runLoop(context.Background(), "prompt", tl, tasksPath, nil)
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "task 1: First failed")
 	assert.ErrorContains(t, err, "exit status 1")
@@ -363,7 +412,7 @@ func TestRunLoop_ClaudeMissingFromPath(t *testing.T) {
 
 	tl := &tasks.TaskList{Tasks: []tasks.Task{{ID: 1, Name: "Only", Prompt: "p"}}}
 
-	err := runLoop(context.Background(), "prompt", tl, tasksPath)
+	err := runLoop(context.Background(), "prompt", tl, tasksPath, nil)
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "task")
 	assert.ErrorContains(t, err, "failed")
@@ -386,7 +435,7 @@ func TestRunLoop_ContextAlreadyCancelled(t *testing.T) {
 
 	tl := &tasks.TaskList{Tasks: []tasks.Task{{ID: 1, Name: "Only", Prompt: "p"}}}
 
-	err := runLoop(ctx, "prompt", tl, tasksPath)
+	err := runLoop(ctx, "prompt", tl, tasksPath, nil)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, context.Canceled)
 
@@ -413,7 +462,7 @@ func TestRunLoop_PrintsPromptToStdout(t *testing.T) {
 	require.NoError(t, err)
 	os.Stdout = w
 
-	runErr := runLoop(context.Background(), "Follow the runbook.", tl, tasksPath)
+	runErr := runLoop(context.Background(), "Follow the runbook.", tl, tasksPath, nil)
 
 	require.NoError(t, w.Close())
 	os.Stdout = origStdout
@@ -436,7 +485,7 @@ func TestRunLoop_EmptyTaskList(t *testing.T) {
 	tasksPath := filepath.Join(dir, "tasks.yaml")
 	t.Setenv("FAKE_CLAUDE_RECORD", recordPath)
 
-	err := runLoop(context.Background(), "prompt", &tasks.TaskList{}, tasksPath)
+	err := runLoop(context.Background(), "prompt", &tasks.TaskList{}, tasksPath, nil)
 	require.NoError(t, err)
 
 	records := readFakeClaudeRecords(t, recordPath)
@@ -462,7 +511,7 @@ func TestRunLoop_SkipsCompletedTasks(t *testing.T) {
 	require.NoError(t, err)
 	os.Stdout = w
 
-	runErr := runLoop(context.Background(), "prompt", tl, tasksPath)
+	runErr := runLoop(context.Background(), "prompt", tl, tasksPath, nil)
 
 	require.NoError(t, w.Close())
 	os.Stdout = origStdout
@@ -514,6 +563,7 @@ func TestStart_RefusesWhenAnyTaskFailed(t *testing.T) {
 	err := Start(context.Background(), promptPath, tasksPath)
 	require.Error(t, err)
 	assert.EqualError(t, err, "fix the failed tasks and set their state to pending before running")
+	assert.ErrorIs(t, err, ErrFailedTasks)
 
 	assert.Empty(t, readFakeClaudeRecords(t, recordPath), "claude must never be invoked")
 	data, readErr := os.ReadFile(tasksPath)
@@ -529,8 +579,8 @@ func TestDryRun_ValidFile(t *testing.T) {
 	require.NoError(t, DryRun(&out, tasksPath))
 	want := "   ID  STATE      NAME\n" +
 		"   --  ---------  ----\n" +
-		"    1  PENDING  \033[0m  First task\n" +
-		"    2  PENDING  \033[0m  Second task\n" +
+		"    1  PENDING    First task\n" +
+		"    2  PENDING    Second task\n" +
 		tasksPath + " is valid\n"
 	assert.Equal(t, want, out.String())
 }
@@ -555,7 +605,7 @@ func TestDryRun_NoFailedTasksTable(t *testing.T) {
 	want := "    ID  STATE      NAME\n" +
 		"   ---  ---------  ----\n" +
 		"✅   1  \033[92mCOMPLETED\033[0m  First task\n" +
-		"   123  PENDING  \033[0m  Second task\n" +
+		"   123  PENDING    Second task\n" +
 		tasksPath + " is valid\n"
 	assert.Equal(t, want, out.String())
 }
@@ -599,7 +649,7 @@ func TestDryRun_FlagsFailedTasks(t *testing.T) {
 		"   ---  ---------  ----\n" +
 		"✅   1  \033[92mCOMPLETED\033[0m  First task\n" +
 		"❌   2  \033[1;91mFAILED   \033[0m  Second task  \033[1;91m← Needs review!\033[0m\n" +
-		"   100  PENDING  \033[0m  Third task\n"
+		"   100  PENDING    Third task\n"
 	assert.Equal(t, want, out.String())
 
 	data, err := os.ReadFile(tasksPath)

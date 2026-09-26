@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -54,6 +55,7 @@ func runTests(m *testing.M) int {
 		fmt.Fprintf(os.Stderr, "failed to create temp dir: %v\n", err)
 		return 1
 	}
+
 	defer func() {
 		if err := os.RemoveAll(tmpDir); err != nil {
 			fmt.Fprintf(os.Stderr, "failed to remove temp dir %s: %v\n", tmpDir, err)
@@ -75,6 +77,7 @@ func runTests(m *testing.M) int {
 			fmt.Fprintf(os.Stderr, "failed to get working dir: %v\n", err)
 			return 1
 		}
+
 		projectRoot := filepath.Join(wd, "..", "..")
 
 		build := exec.Command("go", "build", "-o", testBinaryPath, "./cmd/main") // #nosec G204 -- fixed literal args
@@ -92,6 +95,7 @@ func runTests(m *testing.M) int {
 		fmt.Fprintf(os.Stderr, "failed to create fake claude bin dir: %v\n", err)
 		return 1
 	}
+
 	fakeClaudeBin := filepath.Join(fakeClaudeDir, "claude")
 	build := exec.Command("go", "build", "-o", fakeClaudeBin, "./testdata/fakeclaude")
 	build.Stdout = os.Stdout
@@ -160,19 +164,23 @@ func runCLI(t *testing.T, args ...string) cliResult {
 	return result
 }
 
-// TestVersionFlag verifies that --version exits 0 and produces output.
+// TestVersionFlag verifies that --version exits 0 and prints the version block.
 func TestVersionFlag(t *testing.T) {
 	t.Parallel()
 	result := runCLI(t, "--version")
 	assert.Equal(t, 0, result.exitCode, "stderr: %s", result.stderr)
-	assert.NotEmpty(t, result.stdout)
+	assert.True(t, strings.HasPrefix(result.stdout, "gralph version:"), "stdout: %s", result.stdout)
 }
 
-// TestHelpFlag verifies that --help exits 0 (pflag exits 0 on ErrHelp).
+// TestHelpFlag verifies that --help exits 0 (pflag exits 0 on ErrHelp) and
+// lists every documented flag. pflag writes usage to stderr.
 func TestHelpFlag(t *testing.T) {
 	t.Parallel()
 	result := runCLI(t, "--help")
 	assert.Equal(t, 0, result.exitCode, "stderr: %s", result.stderr)
+	for _, flag := range []string{"--prompt", "--tasks", "--dry-run", "--no-tui", "--install-skill", "--version"} {
+		assert.Contains(t, result.stderr, flag)
+	}
 }
 
 // TestMissingPrompt verifies that omitting --prompt exits non-zero.
@@ -196,6 +204,9 @@ func TestMissingBothRequiredFlags(t *testing.T) {
 	t.Parallel()
 	result := runCLI(t)
 	require.NotEqual(t, 0, result.exitCode, "expected non-zero exit when both --prompt and --tasks are missing")
+	// Usage follows the errors and names every flag, so match the error lines.
+	assert.Contains(t, result.stderr, "required flag --prompt not set")
+	assert.Contains(t, result.stderr, "required flag --tasks not set")
 }
 
 // TestNonexistentFiles verifies that valid flags pointing to missing files exit non-zero
