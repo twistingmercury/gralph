@@ -107,11 +107,11 @@ func TestLoop_MissingResultLine_TreatedAsFailed(t *testing.T) {
 	assertNoTmpFile(t, tasksPath)
 }
 
-// TestLoop_InvalidJSONResult_TreatedAsFailed is the invalid-JSON counterpart
-// of TestLoop_MissingResultLine_TreatedAsFailed: the last non-blank line
-// exists but does not parse as the expected JSON object, which must be
-// treated identically to a missing result line.
-func TestLoop_InvalidJSONResult_TreatedAsFailed(t *testing.T) {
+// TestLoop_UnknownResultState_TreatedAsFailed is the unknown-state
+// counterpart of TestLoop_MissingResultLine_TreatedAsFailed: the last
+// non-blank line is valid JSON, but its state is neither completed nor
+// failed, which must be treated identically to a missing result line.
+func TestLoop_UnknownResultState_TreatedAsFailed(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 
@@ -123,7 +123,7 @@ func TestLoop_InvalidJSONResult_TreatedAsFailed(t *testing.T) {
 `)
 
 	env := gralphEnv(fakeClaudeDir, map[string]string{
-		"FAKE_CLAUDE_OUTPUT": "{not valid json}\n",
+		"FAKE_CLAUDE_OUTPUT": "{\"state\":\"done\"}\n",
 	})
 
 	res := runGralph(t, 15*time.Second, []string{"--prompt=" + promptPath, "--tasks=" + tasksPath}, env)
