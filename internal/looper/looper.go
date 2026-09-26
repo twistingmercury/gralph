@@ -207,7 +207,6 @@ func runLoop(ctx context.Context, p string, tl *tasks.TaskList, tasksFile string
 func runTaskPlain(ctx context.Context, p string, task tasks.Task) (state, errMsg string, err error) {
 	cmd, prompt := claudeCmd(ctx, p, task, false)
 
-	// formatting it to make it easier to read by a human
 	fmt.Println(prompt)
 
 	var out bytes.Buffer
