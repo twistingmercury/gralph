@@ -190,7 +190,7 @@ cross-compiles into `.bin/<arch>/<os>/`, then runs the e2e suite in a container.
 ### Testing
 
 ```bash
-make test      # unit tests: go test -v ./internal/...
+make test      # unit tests: go test -v ./cmd/... ./internal/...
 make analyze   # goimports, golangci-lint, govulncheck, gosec (tools must be on PATH)
 ```
 
