@@ -112,9 +112,12 @@ func (s SetupModel) submit() (tea.Model, tea.Cmd) {
 func (s SetupModel) View() tea.View {
 	var b strings.Builder
 	for _, f := range s.fields {
-		b.WriteString(f.input.View() + "\n")
+		b.WriteString(f.input.View())
+		b.WriteByte('\n')
 		if f.err != "" {
-			b.WriteString("  " + f.err + "\n")
+			b.WriteString("  ")
+			b.WriteString(f.err)
+			b.WriteByte('\n')
 		}
 	}
 	b.WriteString("\nenter confirm · esc quit")
