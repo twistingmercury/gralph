@@ -17,9 +17,9 @@ type setupField struct {
 	err     string
 }
 
-// Setup asks for the missing tasks and prompt paths and validates each with
+// SetupModel asks for the missing tasks and prompt paths and validates each with
 // looper.LoadTasks or looper.LoadPrompt.
-type Setup struct {
+type SetupModel struct {
 	fields []setupField
 	focus  int
 
@@ -29,8 +29,8 @@ type Setup struct {
 }
 
 // NewSetup returns a setup screen with one field per empty path, tasks first.
-func NewSetup(tasksPath, promptPath string) Setup {
-	s := Setup{tasksPath: tasksPath, promptPath: promptPath}
+func NewSetup(tasksPath, promptPath string) SetupModel {
+	s := SetupModel{tasksPath: tasksPath, promptPath: promptPath}
 	if tasksPath == "" {
 		s.fields = append(s.fields, newSetupField("tasks file: ", true))
 	}
@@ -43,15 +43,29 @@ func NewSetup(tasksPath, promptPath string) Setup {
 	return s
 }
 
+// Setup runs the setup screen for the empty paths and returns its final
+// state. opts are extra program options, for tests.
+func Setup(tasksPath, promptPath string, opts ...tea.ProgramOption) (SetupModel, error) {
+	final, err := tea.NewProgram(NewSetup(tasksPath, promptPath), opts...).Run()
+	if err != nil {
+		return SetupModel{}, err
+	}
+	return final.(SetupModel), nil
+}
+
 func newSetupField(prompt string, isTasks bool) setupField {
 	in := textinput.New()
 	in.Prompt = prompt
 	return setupField{input: in, isTasks: isTasks}
 }
 
-func (s Setup) Init() tea.Cmd { return nil }
+func (s SetupModel) Init() tea.Cmd { return nil }
 
-func (s Setup) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (s SetupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// Every field is done; messages can still arrive before Quit lands.
+	if s.focus == len(s.fields) {
+		return s, nil
+	}
 	if msg, ok := msg.(tea.KeyPressMsg); ok {
 		switch msg.String() {
 		case "esc", "ctrl+c":
@@ -67,7 +81,7 @@ func (s Setup) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 // submit validates the focused field and, if valid, moves on or quits.
-func (s Setup) submit() (tea.Model, tea.Cmd) {
+func (s SetupModel) submit() (tea.Model, tea.Cmd) {
 	f := &s.fields[s.focus]
 	path := f.input.Value()
 	var err error
@@ -95,7 +109,7 @@ func (s Setup) submit() (tea.Model, tea.Cmd) {
 	return s, s.fields[s.focus].input.Focus()
 }
 
-func (s Setup) View() tea.View {
+func (s SetupModel) View() tea.View {
 	var b strings.Builder
 	for _, f := range s.fields {
 		b.WriteString(f.input.View() + "\n")
@@ -110,16 +124,16 @@ func (s Setup) View() tea.View {
 }
 
 // TasksPath is the tasks file path, given or entered.
-func (s Setup) TasksPath() string { return s.tasksPath }
+func (s SetupModel) TasksPath() string { return s.tasksPath }
 
 // PromptPath is the prompt file path, given or entered.
-func (s Setup) PromptPath() string { return s.promptPath }
+func (s SetupModel) PromptPath() string { return s.promptPath }
 
 // Prompt is the loaded prompt text when the prompt path was entered here.
-func (s Setup) Prompt() string { return s.prompt }
+func (s SetupModel) Prompt() string { return s.prompt }
 
 // Tasks is the loaded task list when the tasks path was entered here.
-func (s Setup) Tasks() *tasks.TaskList { return s.taskList }
+func (s SetupModel) Tasks() *tasks.TaskList { return s.taskList }
 
 // Cancelled reports whether setup was quit with Esc or ctrl+c.
-func (s Setup) Cancelled() bool { return s.cancelled }
+func (s SetupModel) Cancelled() bool { return s.cancelled }

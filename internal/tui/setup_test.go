@@ -1,9 +1,11 @@
 package tui
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/stretchr/testify/assert"
@@ -18,15 +20,15 @@ func writeFile(t *testing.T, name, content string) string {
 }
 
 // enterPath types path into the focused field and presses Enter.
-func enterPath(t *testing.T, s Setup, path string) (Setup, tea.Cmd) {
+func enterPath(t *testing.T, s SetupModel, path string) (SetupModel, tea.Cmd) {
 	t.Helper()
 	var cmd tea.Cmd
 	for _, r := range path {
 		next, _ := s.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
-		s = next.(Setup)
+		s = next.(SetupModel)
 	}
 	next, cmd := s.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-	return next.(Setup), cmd
+	return next.(SetupModel), cmd
 }
 
 func isQuit(cmd tea.Cmd) bool {
@@ -102,6 +104,56 @@ func TestSetup_EscCancels(t *testing.T) {
 	for _, k := range []tea.KeyPressMsg{{Code: tea.KeyEscape}, {Code: 'c', Mod: tea.ModCtrl}} {
 		next, cmd := NewSetup("", "").Update(k)
 		assert.True(t, isQuit(cmd))
-		assert.True(t, next.(Setup).Cancelled())
+		assert.True(t, next.(SetupModel).Cancelled())
 	}
+}
+
+// startSetup runs Setup headless for an empty tasks path and returns the input
+// pipe's writer and a channel with Setup's result.
+func startSetup(t *testing.T) (*io.PipeWriter, <-chan SetupModel) {
+	t.Helper()
+	in, w := io.Pipe()
+	t.Cleanup(func() { _ = w.Close() })
+	done := make(chan SetupModel, 1)
+	go func() {
+		s, err := Setup("", "prompt.md", tea.WithInput(in), tea.WithOutput(io.Discard), tea.WithWindowSize(80, 24))
+		assert.NoError(t, err)
+		done <- s
+	}()
+	return w, done
+}
+
+func waitSetup(t *testing.T, done <-chan SetupModel) SetupModel {
+	t.Helper()
+	select {
+	case s := <-done:
+		return s
+	case <-time.After(10 * time.Second):
+		t.Fatal("Setup did not return")
+		return SetupModel{}
+	}
+}
+
+func TestSetupProgram_ReturnsEnteredTasks(t *testing.T) {
+	tasksPath := writeFile(t, "tasks.yaml", validTasks)
+	w, done := startSetup(t)
+
+	_, err := io.WriteString(w, tasksPath+"\r")
+	require.NoError(t, err)
+
+	s := waitSetup(t, done)
+	assert.False(t, s.Cancelled())
+	assert.Equal(t, tasksPath, s.TasksPath())
+	assert.Equal(t, "prompt.md", s.PromptPath())
+	require.NotNil(t, s.Tasks())
+	assert.Equal(t, "First", s.Tasks().Tasks[0].Name)
+}
+
+func TestSetupProgram_EscCancels(t *testing.T) {
+	w, done := startSetup(t)
+
+	_, err := io.WriteString(w, "\x1b")
+	require.NoError(t, err)
+
+	assert.True(t, waitSetup(t, done).Cancelled())
 }

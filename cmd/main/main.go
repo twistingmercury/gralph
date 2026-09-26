@@ -10,6 +10,7 @@ import (
 
 	"github.com/twistingmercury/gralph/internal/looper"
 	"github.com/twistingmercury/gralph/internal/skillinstall"
+	"github.com/twistingmercury/gralph/internal/tasks"
 	"github.com/twistingmercury/gralph/internal/tui"
 	"github.com/twistingmercury/gralph/internal/version"
 
@@ -19,8 +20,8 @@ import (
 
 var (
 	versionFlag = pflag.BoolP("version", "v", false, "Show the current version of gralph")
-	tasksFlag   = pflag.StringP("tasks", "t", "", "Required. Path to the tasks.yaml task list that drives the loop")
-	promptFlag  = pflag.StringP("prompt", "p", "", "Required unless --dry-run. Path to the prompt.md shared prompt passed to Claude with every task")
+	tasksFlag   = pflag.StringP("tasks", "t", "", "Path to the tasks.yaml task list that drives the loop; required, but asked for when missing in the full-screen view")
+	promptFlag  = pflag.StringP("prompt", "p", "", "Path to the prompt.md shared prompt passed to Claude with every task; required unless --dry-run, but asked for when missing in the full-screen view")
 	dryRunFlag  = pflag.Bool("dry-run", false, "Validate the tasks file and report failed tasks without running anything")
 	installFlag = pflag.Bool("install-skill", false, "Install the gralph-docs-writer skill bundled with this binary into ~/.claude/skills")
 	noTUIFlag   = pflag.Bool("no-tui", false, "Use plain output instead of the full-screen view")
@@ -31,7 +32,9 @@ func main() {
 	checkVersion()
 	checkInstallSkill()
 	plain := *dryRunFlag || *noTUIFlag || !term.IsTerminal(os.Stdin.Fd()) || !term.IsTerminal(os.Stdout.Fd())
-	validateRequiredFlags()
+	if plain {
+		validateRequiredFlags()
+	}
 
 	if err := skillinstall.Check(); err != nil {
 		_, _ = fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -59,25 +62,51 @@ func main() {
 	}
 }
 
-// runTUI loads the prompt and tasks like looper.Start, runs the loop in the
-// full-screen view, prints its summary, and returns the exit code.
+// runTUI loads the given prompt and tasks like looper.Start, asks for any
+// missing path on the setup screen, runs the loop in the full-screen view,
+// prints its summary, and returns the exit code.
 func runTUI(ctx context.Context) int {
-	prompt, err := looper.LoadPrompt(*promptFlag)
-	if err != nil {
-		_, _ = fmt.Fprintf(os.Stderr, "error: failed to start loop runner: %v\n", err)
-		return 1
+	var prompt string
+	if *promptFlag != "" {
+		var err error
+		if prompt, err = looper.LoadPrompt(*promptFlag); err != nil {
+			_, _ = fmt.Fprintf(os.Stderr, "error: failed to start loop runner: %v\n", err)
+			return 1
+		}
 	}
 
-	tasklist, err := looper.LoadTasks(*tasksFlag)
-	if errors.Is(err, looper.ErrFailedTasks) {
-		fmt.Println("Some tasks failed previous runs:")
-		looper.PrintTasks(os.Stdout, tasklist)
-		_, _ = fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		return 1
+	var tasklist *tasks.TaskList
+	if *tasksFlag != "" {
+		var err error
+		tasklist, err = looper.LoadTasks(*tasksFlag)
+		if errors.Is(err, looper.ErrFailedTasks) {
+			fmt.Println("Some tasks failed previous runs:")
+			looper.PrintTasks(os.Stdout, tasklist)
+			_, _ = fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			return 1
+		}
+		if err != nil {
+			_, _ = fmt.Fprintf(os.Stderr, "error: failed to start loop runner: %v\n", err)
+			return 1
+		}
 	}
-	if err != nil {
-		_, _ = fmt.Fprintf(os.Stderr, "error: failed to start loop runner: %v\n", err)
-		return 1
+
+	if *promptFlag == "" || *tasksFlag == "" {
+		s, err := tui.Setup(*tasksFlag, *promptFlag)
+		if err != nil {
+			_, _ = fmt.Fprintf(os.Stderr, "error: %v\nrun with --no-tui to use plain output\n", err)
+			return 1
+		}
+		if s.Cancelled() {
+			_, _ = fmt.Fprintln(os.Stderr, "error: setup cancelled")
+			return 1
+		}
+		if *tasksFlag == "" {
+			*tasksFlag, tasklist = s.TasksPath(), s.Tasks()
+		}
+		if *promptFlag == "" {
+			*promptFlag, prompt = s.PromptPath(), s.Prompt()
+		}
 	}
 
 	code, summary, err := tui.Run(ctx, prompt, tasklist, *tasksFlag)
