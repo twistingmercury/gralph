@@ -27,7 +27,7 @@ func Start(ctx context.Context, promptFile, tasksFile string) error {
 	tasklist, err := LoadTasks(tasksFile)
 	if errors.Is(err, ErrFailedTasks) {
 		fmt.Println("Some tasks failed previous runs:")
-		printTasks(os.Stdout, tasklist)
+		PrintTasks(os.Stdout, tasklist)
 		return err
 	}
 	if err != nil {
@@ -47,21 +47,21 @@ func DryRun(w io.Writer, tasksFile string) error {
 	tasklist, err := LoadTasks(tasksFile)
 	if errors.Is(err, ErrFailedTasks) {
 		_, _ = fmt.Fprintln(w, "Some tasks failed previous runs:")
-		printTasks(w, tasklist)
+		PrintTasks(w, tasklist)
 		return nil
 	}
 	if err != nil {
 		return err
 	}
 
-	printTasks(w, tasklist)
+	PrintTasks(w, tasklist)
 	_, _ = fmt.Fprintf(w, "%s is valid\n", tasksFile)
 	return nil
 }
 
-// printTasks writes a summary table of tl's tasks to w: id, state (green when
+// PrintTasks writes a summary table of tl's tasks to w: id, state (green when
 // completed, red when failed), and name, with failed rows flagged for review.
-func printTasks(w io.Writer, tl *tasks.TaskList) {
+func PrintTasks(w io.Writer, tl *tasks.TaskList) {
 	const colorRed = "\033[1;91m"
 	const colorGrn = "\033[92m"
 	const colorRst = "\033[0m"
