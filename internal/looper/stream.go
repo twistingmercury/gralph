@@ -17,16 +17,19 @@ type streamEvent struct {
 	Result  string `json:"result"`
 	Message struct {
 		Content []struct {
-			Type  string `json:"type"`
-			Text  string `json:"text"`
-			Name  string `json:"name"`
-			Input struct {
-				Command  string `json:"command"`
-				FilePath string `json:"file_path"`
-				Pattern  string `json:"pattern"`
-			} `json:"input"`
+			Type  string    `json:"type"`
+			Text  string    `json:"text"`
+			Name  string    `json:"name"`
+			Input toolInput `json:"input"`
 		} `json:"content"`
 	} `json:"message"`
+}
+
+// toolInput holds the tool_use input fields gralph shows as a tool's target.
+type toolInput struct {
+	Command  string `json:"command"`
+	FilePath string `json:"file_path"`
+	Pattern  string `json:"pattern"`
 }
 
 // parseStreamLine turns one line of claude's stream-json output into
@@ -46,31 +49,45 @@ func parseStreamLine(line []byte) (activity []string, result string, isResult bo
 		for _, block := range ev.Message.Content {
 			switch block.Type {
 			case "text":
-				for _, l := range strings.Split(block.Text, "\n") {
-					if strings.TrimSpace(l) != "" {
-						activity = append(activity, l)
-					}
-				}
+				activity = append(activity, textActivity(block.Text)...)
 			case "tool_use":
-				var target string
-				switch block.Name {
-				case "Bash":
-					target = block.Input.Command
-				case "Read", "Edit", "Write":
-					target = block.Input.FilePath
-				case "Grep", "Glob":
-					target = block.Input.Pattern
-				}
-				target, _, _ = strings.Cut(target, "\n")
-				if target == "" {
-					activity = append(activity, "→ "+block.Name)
-				} else {
-					activity = append(activity, "→ "+block.Name+" "+target)
-				}
+				activity = append(activity, toolActivity(block.Name, block.Input))
 			}
 		}
 	}
 	return activity, "", false
+}
+
+// textActivity returns text's non-blank lines.
+func textActivity(text string) []string {
+	var lines []string
+	for _, l := range strings.Split(text, "\n") {
+		if strings.TrimSpace(l) != "" {
+			lines = append(lines, l)
+		}
+	}
+	return lines
+}
+
+// toolActivity returns the "→ <tool> <target>" line for a tool_use block.
+// Only the target's first line is kept so a multi-line command stays one
+// activity line.
+func toolActivity(name string, input toolInput) string {
+	var target string
+	switch name {
+	case "Bash":
+		target = input.Command
+	case "Read", "Edit", "Write":
+		target = input.FilePath
+	case "Grep", "Glob":
+		target = input.Pattern
+	}
+	target, _, _ = strings.Cut(target, "\n")
+	if target == "" {
+		return "→ " + name
+	}
+
+	return "→ " + name + " " + target
 }
 
 // runTaskStream runs one task with claude's stream-json output, sending each
