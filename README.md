@@ -30,11 +30,18 @@ gralph --prompt path/to/prompt.md --tasks path/to/tasks.yaml
 
 | Flag               | Required | Description                                            |
 | ------------------ | -------- | ------------------------------------------------------ |
-| `--prompt` / `-p`  | Yes, unless `--dry-run` | Path to the shared prompt sent to Claude for every task |
-| `--tasks` / `-t`   | Yes      | Path to the YAML task list that drives the loop        |
+| `--prompt` / `-p`  | Yes, unless `--dry-run`; asked for when missing in the full-screen view | Path to the shared prompt sent to Claude for every task |
+| `--tasks` / `-t`   | Yes; asked for when missing in the full-screen view | Path to the YAML task list that drives the loop |
 | `--dry-run`        | No       | Validate the task file and report on it without running anything |
+| `--no-tui`         | No       | Use plain output instead of the full-screen view        |
 | `--install-skill`  | No       | Install the bundled `gralph-docs-writer` skill for Claude Code and exit |
 | `--version` / `-v` | No       | Print version information and exit                     |
+
+When stdin and stdout are both terminals, gralph runs in a full-screen view
+(see [The full-screen view](#the-full-screen-view)). With `--no-tui`, or when
+either one is not a terminal (pipes, redirects, CI), it runs in plain mode:
+output, exit codes, and missing-flag errors are exactly as before the view
+existed. `--dry-run` is always plain.
 
 `gralph -t tasks.yaml --dry-run` checks the task file with the same rules a
 real run uses, without launching Claude or writing any file. `--prompt` is
@@ -80,9 +87,9 @@ development.
 
 ## How it works
 
-For each task, gralph combines the shared prompt with the task, prints the
-result to stdout, and starts a new `claude --print` session with it on stdin.
-The text Claude receives is:
+For each task, gralph combines the shared prompt with the task and starts a
+new `claude --print` session with it on stdin. In plain mode it also prints
+the combined text to stdout. The text Claude receives is:
 
 ```text
 <shared prompt>
@@ -92,8 +99,8 @@ The text Claude receives is:
 <task prompt>
 ```
 
-Claude's own output passes straight through to gralph's stdout and stderr. Gralph
-skips tasks with `state: completed` (printing `task <id>: <name> already
+In plain mode, Claude's own output passes straight through to gralph's stdout
+and stderr. Gralph skips tasks with `state: completed` (printing `task <id>: <name> already
 completed, skipping`). For pending tasks, gralph reads the last
 non-blank line of Claude's output (skipping lines that are only code fences).
 If that line is valid JSON with `state: "completed"` and the session exits zero,
@@ -102,9 +109,47 @@ the task `failed`, writes the file, reports `task <id>: <name> failed: <error>`
 (from the JSON `error` field or the exit code if missing), and exits non-zero;
 later tasks do not run. When every task succeeds, gralph exits zero and returns.
 
+In the full-screen view, gralph instead runs
+`claude --print --output-format stream-json --verbose
+--dangerously-skip-permissions`, shows the session's activity live, and takes
+the outcome from the same last non-blank line of the session's final result.
+Success, failure, and the file writes follow the same rules.
+
 The task file is rewritten atomically (write to temporary file, rename over
 original) with every state change. Comments and custom formatting are not
 preserved; each task's state is made explicit.
+
+### The full-screen view
+
+The view has three panes over a one-line legend:
+
+- **Prompt** (top left): the current task, as `<id>: <name>` and its prompt.
+- **Tasks** (bottom left): every task with its state; the running task shows
+  `in progress` (display only; it is never written to the file).
+- **Output** (right): the current task's activity — Claude's text, one
+  `→ <tool> <target>` line per tool call, and the session's stderr. It follows
+  new lines while scrolled to the bottom.
+
+Keys:
+
+| Key                  | Action                                         |
+| -------------------- | ---------------------------------------------- |
+| `tab`                | Move focus to the next pane (output has it at start) |
+| `↑` / `↓`            | Scroll the focused pane one line               |
+| `PgUp` / `PgDn`      | Scroll the focused pane one page               |
+| `q` / `ctrl+c`       | Ask `Stop the run? The current task stays pending. [y/N]`; `y` stops the Claude session and closes the view, any other key carries on. Once the run has ended, closes the view |
+
+When the run ends on its own, the view stays open with the outcome in the
+legend until you press `q`. After the view closes, gralph prints one summary
+line to stdout: `All tasks completed`, `Task <id> failed: <error>`,
+`Run stopped: <error>`, or `Run stopped by user` / `Run stopped by signal`.
+It exits zero only when every task completed.
+
+If `--tasks` or `--prompt` is missing, a setup screen asks for each missing
+path (tasks file first). `enter` checks the path with the same rules a run
+uses and shows any error under the field; `esc` or `ctrl+c` quits with
+`error: setup cancelled` and exit 1. As in plain mode, a task file with a
+`failed` task prints the task table and exits 1 before any view opens.
 
 Background on the approach is in [docs/gralph-concept.md](docs/gralph-concept.md);
 the design is documented from [docs/architecture/00_overview.md](docs/architecture/00_overview.md).
@@ -117,7 +162,7 @@ the design is documented from [docs/architecture/00_overview.md](docs/architectu
 - **Each session starts cold**: a session sees only the shared prompt and its one task. Anything it needs to know about earlier tasks must be in those two texts or in the repository.
 - **Completed tasks are skipped**: gralph runs only pending tasks.
 - **Failed tasks block the run**: gralph refuses to start while any task is `failed`, printing the same task summary table as `--dry-run` and exiting 1, launching no session and leaving the file untouched. Fix the cause, then set the task's `state` to `pending` (or `completed`) by hand before running again.
-- **Signal handling**: SIGINT (Ctrl-C) or SIGTERM cancels the current Claude session and stops the run. The entire Claude process group is terminated, so nothing Claude spawned outlives gralph.
+- **Signal handling**: SIGINT (Ctrl-C) or SIGTERM cancels the current Claude session and stops the run. The entire Claude process group is terminated, so nothing Claude spawned outlives gralph. The interrupted task's state and the file are left untouched. In the full-screen view, Ctrl-C is a key press (see `q` above); a SIGINT or SIGTERM sent from outside stops a running loop without asking, closes the view, prints `Run stopped by signal`, and exits 1; after the run has ended, it just closes the view.
 - **Unix only**: gralph runs on Linux, macOS, and the BSDs. Windows is not supported.
 
 ## Development Considerations
