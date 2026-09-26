@@ -169,8 +169,8 @@ func TestStart_InvalidTasksYAML(t *testing.T) {
 	assert.ErrorContains(t, err, "failed to parse tasks yaml")
 }
 
-// TestStart_LoadFailuresBreakTheErrorChain pins that Start wraps getPrompt
-// and getTasks failures with %s, not %w: the underlying sentinel is not
+// TestStart_LoadFailuresBreakTheErrorChain pins that Start wraps LoadPrompt
+// and LoadTasks failures with %s, not %w: the underlying sentinel is not
 // reachable via errors.Is/As through Start. This documents the current
 // behavior rather than asserting it as a desired design; production code is
 // not changed to fix it.
@@ -212,82 +212,82 @@ func TestStart_Success(t *testing.T) {
 	assert.Len(t, records, 2, "expected claude invoked once per task")
 }
 
-func TestGetPrompt_MissingFile(t *testing.T) {
+func TestLoadPrompt_MissingFile(t *testing.T) {
 	dir := t.TempDir()
 
-	_, err := getPrompt(filepath.Join(dir, "missing.md"))
+	_, err := LoadPrompt(filepath.Join(dir, "missing.md"))
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "prompt file")
 	assert.ErrorContains(t, err, "not accessible")
 }
 
-func TestGetPrompt_ReadError(t *testing.T) {
+func TestLoadPrompt_ReadError(t *testing.T) {
 	// A directory exists (Stat succeeds) but cannot be read as a file.
 	dir := t.TempDir()
 
-	_, err := getPrompt(dir)
+	_, err := LoadPrompt(dir)
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "could not be read")
 }
 
-func TestGetPrompt_Empty(t *testing.T) {
+func TestLoadPrompt_Empty(t *testing.T) {
 	dir := t.TempDir()
 	path := writePromptFile(t, dir, "")
 
-	_, err := getPrompt(path)
+	_, err := LoadPrompt(path)
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "the prompt file is empty")
 }
 
-func TestGetPrompt_WhitespaceOnly(t *testing.T) {
+func TestLoadPrompt_WhitespaceOnly(t *testing.T) {
 	dir := t.TempDir()
 	path := writePromptFile(t, dir, " \t\n ")
 
-	_, err := getPrompt(path)
+	_, err := LoadPrompt(path)
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "the prompt file is just whitespace")
 }
 
-func TestGetPrompt_Success(t *testing.T) {
+func TestLoadPrompt_Success(t *testing.T) {
 	dir := t.TempDir()
 	path := writePromptFile(t, dir, "  Follow the plan.  \n")
 
-	got, err := getPrompt(path)
+	got, err := LoadPrompt(path)
 	require.NoError(t, err)
 	assert.Equal(t, "Follow the plan.", got)
 }
 
-func TestGetTasks_MissingFile(t *testing.T) {
+func TestLoadTasks_MissingFile(t *testing.T) {
 	dir := t.TempDir()
 
-	_, err := getTasks(filepath.Join(dir, "missing.yaml"))
+	_, err := LoadTasks(filepath.Join(dir, "missing.yaml"))
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "tasks file")
 	assert.ErrorContains(t, err, "not accessible")
 }
 
-func TestGetTasks_ReadError(t *testing.T) {
+func TestLoadTasks_ReadError(t *testing.T) {
 	dir := t.TempDir()
 
-	_, err := getTasks(dir)
+	_, err := LoadTasks(dir)
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "could not be read")
 }
 
-func TestGetTasks_InvalidYAML(t *testing.T) {
+func TestLoadTasks_InvalidYAML(t *testing.T) {
 	dir := t.TempDir()
 	path := writeTasksFile(t, dir, "tasks:\n  - {id: 1, name: a, prompt: p, state: bogus}\n")
 
-	_, err := getTasks(path)
+	_, err := LoadTasks(path)
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "failed to parse tasks yaml")
 }
 
-func TestGetTasks_Success(t *testing.T) {
+func TestLoadTasks_Success(t *testing.T) {
 	dir := t.TempDir()
 	path := writeTasksFile(t, dir, validTasksYAML)
 
-	got, err := getTasks(path)
+	got, err := LoadTasks(path)
 	require.NoError(t, err)
 	require.NotNil(t, got)
 
@@ -296,6 +296,25 @@ func TestGetTasks_Success(t *testing.T) {
 		ids = append(ids, task.ID)
 	}
 	assert.Equal(t, []int16{1, 2}, ids)
+}
+
+func TestLoadTasks_FailedTaskReturnsListAndErrFailedTasks(t *testing.T) {
+	dir := t.TempDir()
+	path := writeTasksFile(t, dir, "tasks:\n  - {id: 1, name: a, prompt: p}\n  - {id: 2, name: b, prompt: p, state: failed}\n")
+
+	got, err := LoadTasks(path)
+	require.ErrorIs(t, err, ErrFailedTasks)
+	require.NotNil(t, got)
+	assert.Len(t, got.Tasks, 2)
+}
+
+func TestLoadTasks_ParseErrorIsNotErrFailedTasks(t *testing.T) {
+	dir := t.TempDir()
+	path := writeTasksFile(t, dir, "tasks:\n  - {id: 1, name: a, prompt: p, state: bogus}\n")
+
+	_, err := LoadTasks(path)
+	require.Error(t, err)
+	assert.NotErrorIs(t, err, ErrFailedTasks)
 }
 
 func TestRunLoop_HappyPathInvokesInOrderWithExactStdin(t *testing.T) {

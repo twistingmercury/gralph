@@ -14,23 +14,24 @@ import (
 	"github.com/twistingmercury/gralph/internal/tasks"
 )
 
+// ErrFailedTasks is returned by LoadTasks, along with the parsed list, when
+// any task in the file is failed.
+var ErrFailedTasks = errors.New("fix the failed tasks and set their state to pending before running")
+
 func Start(ctx context.Context, promptFile, tasksFile string) error {
-	prompt, err := getPrompt(promptFile)
+	prompt, err := LoadPrompt(promptFile)
 	if err != nil {
 		return fmt.Errorf("failed to start loop runner: %s", err)
 	}
 
-	tasklist, err := getTasks(tasksFile)
+	tasklist, err := LoadTasks(tasksFile)
+	if errors.Is(err, ErrFailedTasks) {
+		fmt.Println("Some tasks failed previous runs:")
+		printTasks(os.Stdout, tasklist)
+		return err
+	}
 	if err != nil {
 		return fmt.Errorf("failed to start loop runner: %s", err)
-	}
-
-	for _, task := range tasklist.Tasks {
-		if task.State == tasks.FailedState {
-			fmt.Println("Some tasks failed previous runs:")
-			printTasks(os.Stdout, tasklist)
-			return errors.New("fix the failed tasks and set their state to pending before running")
-		}
 	}
 
 	if err := runLoop(ctx, prompt, tasklist, tasksFile); err != nil {
@@ -43,17 +44,14 @@ func Start(ctx context.Context, promptFile, tasksFile string) error {
 // DryRun validates tasksFile with the same checks Start uses and reports on
 // it to w without launching claude or writing any file.
 func DryRun(w io.Writer, tasksFile string) error {
-	tasklist, err := getTasks(tasksFile)
+	tasklist, err := LoadTasks(tasksFile)
+	if errors.Is(err, ErrFailedTasks) {
+		_, _ = fmt.Fprintln(w, "Some tasks failed previous runs:")
+		printTasks(w, tasklist)
+		return nil
+	}
 	if err != nil {
 		return err
-	}
-
-	for _, task := range tasklist.Tasks {
-		if task.State == tasks.FailedState {
-			_, _ = fmt.Fprintln(w, "Some tasks failed previous runs:")
-			printTasks(w, tasklist)
-			return nil
-		}
 	}
 
 	printTasks(w, tasklist)
@@ -89,7 +87,9 @@ func printTasks(w io.Writer, tl *tasks.TaskList) {
 	}
 }
 
-func getTasks(path string) (*tasks.TaskList, error) {
+// LoadTasks reads and parses the tasks file at path. When the file parses but
+// any task is failed, it returns the list and ErrFailedTasks.
+func LoadTasks(path string) (*tasks.TaskList, error) {
 	if _, err := os.Stat(path); err != nil {
 		return nil, fmt.Errorf("tasks file %q is not accessible: %w", path, err)
 	}
@@ -104,10 +104,18 @@ func getTasks(path string) (*tasks.TaskList, error) {
 		return nil, fmt.Errorf("failed to parse tasks yaml: %w", err)
 	}
 
+	for _, task := range taskList.Tasks {
+		if task.State == tasks.FailedState {
+			return &taskList, ErrFailedTasks
+		}
+	}
+
 	return &taskList, nil
 }
 
-func getPrompt(path string) (string, error) {
+// LoadPrompt reads the prompt file at path and returns it trimmed; an empty or
+// whitespace-only prompt is an error.
+func LoadPrompt(path string) (string, error) {
 	if _, err := os.Stat(path); err != nil {
 		return "", fmt.Errorf("prompt file %q is not accessible: %w", path, err)
 	}
