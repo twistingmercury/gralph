@@ -118,8 +118,10 @@ func runTaskStream(ctx context.Context, p string, task tasks.Task, report func(E
 	return finishTask(ctx, task, runErr, resultText)
 }
 
-// readLines calls fn with each line read from r, including a final line with
-// no trailing newline, until r is exhausted. Lines have no length limit.
+// readLines exists because bufio.Scanner stops at a 64 KiB token, and one
+// stream-json event (a tool result holding a whole file, say) can exceed that,
+// which would silently stop reading claude's output. ReadBytes has no line
+// limit, and a final line with no trailing newline still reaches fn.
 func readLines(r io.Reader, fn func(line []byte)) {
 	br := bufio.NewReader(r)
 	for {
