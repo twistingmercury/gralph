@@ -1,8 +1,8 @@
 # Gralph — System Architecture
 
-> **Version**: v03
+> **Version**: v04
 > **Date**: 2026-09-26
-> **Notes**: Named the TUI panes (Current task, Task progress, Claude activity) after adding their title bars.
+> **Notes**: Described the Task progress row format and the end-of-run banner.
 
 [Back to Overview](00_overview.md) | [Back to Project README](../../README.md)
 
@@ -68,7 +68,7 @@ graph TB
 **Responsibilities:**
 - `Setup`/`SetupModel`: the path-entry screen; one text field per missing `--tasks`/`--prompt` path, each validated on Enter with `looper.LoadTasks` or `looper.LoadPrompt`, errors shown under the field; Esc or ctrl+c cancels (exit 1)
 - `Run`: derives a cancellable context from `cmd/main`'s signal context, runs `looper.Run` in a goroutine with a `report` hook that calls `program.Send`, and returns the exit code and summary when the view closes
-- `Model`: the run view (alt screen, relaid out on resize) with three titled panes (title bars rendered above the viewports so they stay put while scrolling): Current task (`<id>: <name>` and prompt), Task progress (icon, name, state per task), Claude activity (the current task's activity, cleared on each `TaskStarted`, following the newest line unless scrolled up), and a key legend that also carries the confirm prompt and final status
+- `Model`: the run view (alt screen, relaid out on resize) with three titled panes (title bars rendered above the viewports so they stay put while scrolling): Current task (`<id>: <name>` and prompt), Task progress (`<icon> <id>: <name>: <state>` per task, colored by state, under a one-line outcome banner once the run ends), Claude activity (the current task's activity, cleared on each `TaskStarted`, following the newest line unless scrolled up), and a key legend that also carries the confirm prompt and final status
 - Keys: `tab` switches the focused pane, `↑/↓/PgUp/PgDn` scroll it; `q` or ctrl+c opens a `[y/N]` stop confirm during the run and quits after it
 - Shows `in progress` for the running task; it is display only and never saved
 

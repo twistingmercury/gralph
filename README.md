@@ -143,10 +143,10 @@ Keys:
 When the run ends on its own, the view stays open until you press `q`, with the
 outcome in the legend and in a banner at the top of Task progress, such as
 `✔ All tasks completed · press q to exit` (bold green) or
-`✘ Task <id> failed: <error> · press q to exit` (bold red). After the view closes, gralph prints one summary
-line to stdout: `All tasks completed`, `Task <id> failed: <error>`,
-`Run stopped: <error>`, or `Run stopped by user` / `Run stopped by signal`.
-It exits zero only when every task completed.
+`✘ Task <id> failed: <error> · press q to exit` (bold red). After the view
+closes, gralph prints one summary line to stdout: `All tasks completed`,
+`Task <id> failed: <error>`, `Run stopped: <error>`, or `Run stopped by user` /
+`Run stopped by signal`. It exits zero only when every task completed.
 
 If `--tasks` or `--prompt` is missing, a setup screen asks for each missing
 path (tasks file first). `enter` checks the path with the same rules a run
