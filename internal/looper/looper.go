@@ -29,6 +29,7 @@ func Start(ctx context.Context, promptFile, tasksFile string) error {
 	if errors.Is(err, ErrFailedTasks) {
 		return err
 	}
+
 	if err != nil {
 		return fmt.Errorf("failed to start loop runner: %w", err)
 	}
@@ -47,6 +48,7 @@ func DryRun(w io.Writer, tasksFile string) error {
 	if errors.Is(err, ErrFailedTasks) {
 		return nil
 	}
+
 	if err != nil {
 		return err
 	}
@@ -114,6 +116,7 @@ func LoadTasksReport(w io.Writer, tasksFile string) (*tasks.TaskList, error) {
 		_, _ = fmt.Fprintln(w, "Some tasks failed previous runs:")
 		PrintTasks(w, tl)
 	}
+
 	return tl, err
 }
 
@@ -147,6 +150,7 @@ func Run(ctx context.Context, prompt string, tl *tasks.TaskList, tasksFile strin
 	if report != nil {
 		report(Event{Kind: RunDone, Err: err})
 	}
+
 	return err
 }
 
@@ -158,6 +162,7 @@ func runLoop(ctx context.Context, p string, tl *tasks.TaskList, tasksFile string
 			if report == nil {
 				fmt.Printf("task %d: %s already completed, skipping\n", task.ID, task.Name)
 			}
+
 			continue
 		}
 
@@ -172,9 +177,11 @@ func runLoop(ctx context.Context, p string, tl *tasks.TaskList, tasksFile string
 		} else {
 			state, errMsg, err = runTaskStream(ctx, p, *task, report)
 		}
+
 		if err != nil {
 			return err
 		}
+
 		task.State = state
 		task.Error = errMsg
 
@@ -182,9 +189,11 @@ func runLoop(ctx context.Context, p string, tl *tasks.TaskList, tasksFile string
 			if err := tasks.SaveTasks(tasksFile, *tl); err != nil {
 				return fmt.Errorf("task %d: %s: failed to save task state: %w", task.ID, task.Name, err)
 			}
+
 			if report != nil {
 				report(Event{Kind: TaskFinished, Task: *task})
 			}
+
 			continue
 		}
 
@@ -192,9 +201,11 @@ func runLoop(ctx context.Context, p string, tl *tasks.TaskList, tasksFile string
 		if saveErr := tasks.SaveTasks(tasksFile, *tl); saveErr != nil {
 			return errors.Join(runFailure, saveErr)
 		}
+
 		if report != nil {
 			report(Event{Kind: TaskFinished, Task: *task, Err: runFailure})
 		}
+
 		return runFailure
 	}
 
@@ -225,6 +236,7 @@ func claudeCmd(ctx context.Context, p string, task tasks.Task, stream bool) (*ex
 	if stream {
 		cmd.Args = slices.Insert(cmd.Args, 2, "--output-format", "stream-json", "--verbose")
 	}
+
 	configureProcessTree(cmd)
 	cmd.Stdin = strings.NewReader(prompt)
 	return cmd, prompt

@@ -31,6 +31,7 @@ func TestInstall_WritesEmbeddedFiles(t *testing.T) {
 		if d.IsDir() {
 			return nil
 		}
+
 		want, err := skills.FS.ReadFile(path)
 		require.NoError(t, err)
 		rel, err := filepath.Rel(skillName, path)
@@ -96,6 +97,7 @@ func TestHash_MatchesIndependentWalk(t *testing.T) {
 		if d.IsDir() {
 			return nil
 		}
+
 		data, err := skills.FS.ReadFile(path)
 		require.NoError(t, err)
 		h.Write([]byte(strings.TrimPrefix(path, skillName+"/")))

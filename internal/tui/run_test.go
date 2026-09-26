@@ -26,6 +26,7 @@ func TestMain(m *testing.M) {
 		fmt.Fprintln(os.Stderr, "fakeclaude: create temp dir:", err)
 		os.Exit(1)
 	}
+
 	build := exec.Command("go", "build", "-o", filepath.Join(dir, "claude"), "../looper/testdata/fakeclaude")
 	build.Stdout = os.Stderr
 	build.Stderr = os.Stderr
@@ -34,6 +35,7 @@ func TestMain(m *testing.M) {
 		_ = os.RemoveAll(dir)
 		os.Exit(1)
 	}
+
 	fakeClaudeDir = dir
 	code := m.Run()
 	_ = os.RemoveAll(dir)
@@ -90,6 +92,7 @@ func TestRun_TwoTasksCompleteThenQuit(t *testing.T) {
 		if err != nil {
 			return false
 		}
+
 		tl, err := tasks.ParseTasks(data)
 		return err == nil && tl.Tasks[0].State == tasks.CompletedState && tl.Tasks[1].State == tasks.CompletedState
 	}, 10*time.Second, 10*time.Millisecond, "tasks never completed")
@@ -102,6 +105,7 @@ func TestRun_TwoTasksCompleteThenQuit(t *testing.T) {
 			if _, err := w.Write([]byte("q")); err != nil {
 				return
 			}
+
 			time.Sleep(50 * time.Millisecond)
 		}
 	}()

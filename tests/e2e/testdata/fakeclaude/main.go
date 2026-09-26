@@ -77,6 +77,7 @@ func main() {
 		if err != nil {
 			fail("marshal record: %v", err)
 		}
+
 		data = append(data, '\n')
 		if err := appendUnderRoot(recordFile, data, 0o600); err != nil {
 			fail("write record file: %v", err)
@@ -94,11 +95,13 @@ func main() {
 		if err != nil {
 			fail("resolve self executable: %v", err)
 		}
+
 		cmd := exec.Command(self)
 		cmd.Env = append(os.Environ(), "FAKECLAUDE_MODE=descendant")
 		if err := cmd.Start(); err != nil {
 			fail("start descendant: %v", err)
 		}
+
 		if err := writeUnderRoot(descendantPIDFile, []byte(strconv.Itoa(cmd.Process.Pid)), 0o600); err != nil {
 			_ = cmd.Process.Kill()
 			fail("write descendant pid file: %v", err)
@@ -125,6 +128,7 @@ func main() {
 		if err != nil {
 			fail("invalid FAKECLAUDE_EXIT_CODE %q: %v", raw, err)
 		}
+
 		exitCode = code
 	}
 
@@ -161,17 +165,20 @@ func withRootFile(path string, flag int, perm os.FileMode, data []byte) error {
 	if err != nil {
 		return fmt.Errorf("open root %q: %w", dir, err)
 	}
+
 	defer func() { _ = root.Close() }()
 
 	f, err := root.OpenFile(base, flag, perm)
 	if err != nil {
 		return fmt.Errorf("open %q under root %q: %w", base, dir, err)
 	}
+
 	defer func() { _ = f.Close() }()
 
 	if _, err := f.Write(data); err != nil {
 		return fmt.Errorf("write %q under root %q: %w", base, dir, err)
 	}
+
 	return nil
 }
 

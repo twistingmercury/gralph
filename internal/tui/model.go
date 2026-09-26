@@ -92,6 +92,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.done {
 			return m, tea.Quit
 		}
+
 		m.confirming = false
 		m.stopBy = "signal"
 		m.legend.SetContent(legend)
@@ -104,18 +105,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cancel()
 				m.stopBy = "user"
 			}
+
 			return m, nil
 		}
+
 		if k == "q" || k == "ctrl+c" {
 			if m.done {
 				return m, tea.Quit
 			}
+
 			if m.stopBy == "" {
 				m.confirming = true
 				m.legend.SetContent(stopPrompt)
 			}
+
 			return m, nil
 		}
+
 		vp := m.panes()[m.focus]
 		switch k {
 		case "tab":
@@ -162,6 +168,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.exitCode = 1
 				return m, tea.Quit
 			}
+
 			m.done = true
 			switch {
 			case msg.Err == nil:
@@ -190,6 +197,7 @@ func (m Model) Summary() string {
 	if m.stopBy != "" {
 		return "Run stopped by " + m.stopBy
 	}
+
 	return m.status
 }
 
@@ -255,6 +263,7 @@ func (m *Model) renderTasks() {
 		if !ok {
 			icon = "  "
 		}
+
 		text := fmt.Sprintf("%d: %s: %s", t.ID, t.Name, t.State)
 		rows = append(rows, icon+" "+rowStyles[t.State].Render(text))
 	}

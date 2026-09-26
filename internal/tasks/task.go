@@ -243,6 +243,7 @@ func checkTags(n *yaml.Node) error {
 	if n.Kind != yaml.DocumentNode && n.Kind != yaml.AliasNode && n.Kind != 0 && !allowedTags[n.Tag] {
 		return fmt.Errorf("line %d: tag %s is not allowed", n.Line, n.Tag)
 	}
+
 	for _, c := range n.Content {
 		if err := checkTags(c); err != nil {
 			return err
@@ -260,6 +261,7 @@ func SaveTasks(path string, tl TaskList) error {
 	if err := enc.Encode(tl); err != nil {
 		return fmt.Errorf("failed to encode tasks: %w", err)
 	}
+
 	if err := enc.Close(); err != nil {
 		return fmt.Errorf("failed to encode tasks: %w", err)
 	}
@@ -270,6 +272,7 @@ func SaveTasks(path string, tl TaskList) error {
 		_ = os.Remove(tmpPath)
 		return fmt.Errorf("failed to save tasks to %q: %w", cleanPath, err)
 	}
+
 	if err := os.Rename(tmpPath, cleanPath); err != nil {
 		_ = os.Remove(tmpPath)
 		return fmt.Errorf("failed to save tasks to %q: %w", cleanPath, err)

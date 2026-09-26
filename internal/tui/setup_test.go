@@ -35,6 +35,7 @@ func isQuit(cmd tea.Cmd) bool {
 	if cmd == nil {
 		return false
 	}
+
 	_, ok := cmd().(tea.QuitMsg)
 	return ok
 }
@@ -59,6 +60,7 @@ func TestSetup_RejectsInvalidPaths(t *testing.T) {
 			if tc.tasks {
 				s = NewSetup("", "given.md")
 			}
+
 			s, cmd := enterPath(t, s, tc.path)
 
 			assert.False(t, isQuit(cmd))

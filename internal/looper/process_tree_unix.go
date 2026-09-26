@@ -28,11 +28,14 @@ func terminateProcessTree(process *os.Process) error {
 	if process == nil {
 		return os.ErrProcessDone
 	}
+
 	if err := syscall.Kill(-process.Pid, syscall.SIGKILL); err != nil {
 		if errors.Is(err, syscall.ESRCH) {
 			return os.ErrProcessDone
 		}
+
 		return err
 	}
+
 	return nil
 }

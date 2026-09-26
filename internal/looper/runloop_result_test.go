@@ -96,6 +96,7 @@ func TestRunLoop_ResultLineOutcomes(t *testing.T) {
 			if tt.exit != "" {
 				t.Setenv("FAKE_CLAUDE_EXIT", tt.exit)
 			}
+
 			if tt.outputSet {
 				t.Setenv("FAKE_CLAUDE_OUTPUT", tt.output)
 			}

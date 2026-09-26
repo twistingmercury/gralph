@@ -90,6 +90,7 @@ func main() {
 		if err != nil {
 			fail("invalid FAKE_CLAUDE_EXIT %q: %v", raw, err)
 		}
+
 		exitCode = code
 	}
 
@@ -140,6 +141,7 @@ func writeStream(exitCode int) {
 		if err != nil {
 			fail("invalid FAKE_CLAUDE_BIG_EVENT %q: %v", raw, err)
 		}
+
 		const prefix, suffix = `{"type":"user","message":{"content":[{"type":"text","text":"`, `"}]}}`
 		pad := max(size-len(prefix)-len(suffix), 0)
 		fmt.Println(prefix + strings.Repeat("x", pad) + suffix)
@@ -148,14 +150,17 @@ func writeStream(exitCode int) {
 	if exitCode != 0 {
 		return
 	}
+
 	text, ok := os.LookupEnv("FAKE_CLAUDE_OUTPUT")
 	if !ok {
 		text = defaultResult
 	}
+
 	encoded, err := json.Marshal(text)
 	if err != nil {
 		fail("encode result: %v", err)
 	}
+
 	fmt.Printf("{\"type\":\"result\",\"subtype\":\"success\",\"result\":%s}\n", encoded)
 }
 
@@ -183,17 +188,20 @@ func withRootFile(path string, flag int, perm os.FileMode, data []byte) error {
 	if err != nil {
 		return fmt.Errorf("open root %q: %w", dir, err)
 	}
+
 	defer func() { _ = root.Close() }()
 
 	f, err := root.OpenFile(base, flag, perm)
 	if err != nil {
 		return fmt.Errorf("open %q under root %q: %w", base, dir, err)
 	}
+
 	defer func() { _ = f.Close() }()
 
 	if _, err := f.Write(data); err != nil {
 		return fmt.Errorf("write %q under root %q: %w", base, dir, err)
 	}
+
 	return nil
 }
 
@@ -204,6 +212,7 @@ func blockForever() {
 			fail("write ready file: %v", err)
 		}
 	}
+
 	for {
 		time.Sleep(time.Hour)
 	}

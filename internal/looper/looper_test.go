@@ -80,8 +80,10 @@ func readFakeClaudeRecords(t *testing.T, path string) []string {
 		if os.IsNotExist(err) {
 			return nil
 		}
+
 		require.NoError(t, err)
 	}
+
 	if len(data) == 0 {
 		return nil
 	}

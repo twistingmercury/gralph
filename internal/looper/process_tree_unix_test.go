@@ -21,6 +21,7 @@ func TestTerminateProcessTree(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	descendantReadyPath := t.TempDir() + "/descendant-ready"
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -85,14 +86,17 @@ func TestProcessTreeHelper(t *testing.T) {
 		if readyPath == "" {
 			os.Exit(2)
 		}
+
 		cmd := exec.Command(os.Args[0], "-test.run=^TestProcessTreeHelper$", "--", "--process-tree-helper=descendant")
 		if err := cmd.Start(); err != nil {
 			os.Exit(3)
 		}
+
 		if err := os.WriteFile(readyPath, []byte(strconv.Itoa(cmd.Process.Pid)), 0o600); err != nil {
 			_ = cmd.Process.Kill()
 			os.Exit(4)
 		}
+
 		for {
 			time.Sleep(time.Hour)
 		}
@@ -120,11 +124,14 @@ func waitForProcessTreePID(t *testing.T, path string, waitErrCh <-chan error) in
 			if err != nil {
 				t.Fatalf("parse descendant PID %q: %v", data, err)
 			}
+
 			return pid
 		}
+
 		if !os.IsNotExist(err) {
 			t.Fatalf("read descendant ready file: %v", err)
 		}
+
 		select {
 		case err := <-waitErrCh:
 			t.Fatalf("process exited before descendant was ready: %v", err)
@@ -141,6 +148,7 @@ func unixProcessIsRunning(pid int) bool {
 	if err != nil && err != syscall.EPERM {
 		return false
 	}
+
 	stat, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
 	if err != nil {
 		// No /proc (darwin), or the process was reaped between the signal
@@ -148,10 +156,12 @@ func unixProcessIsRunning(pid int) bool {
 		err := syscall.Kill(pid, 0)
 		return err == nil || err == syscall.EPERM
 	}
+
 	closingParen := strings.LastIndexByte(string(stat), ')')
 	if closingParen == -1 {
 		return true
 	}
+
 	fields := strings.Fields(string(stat[closingParen+1:]))
 	return len(fields) == 0 || (fields[0] != "Z" && fields[0] != "X")
 }

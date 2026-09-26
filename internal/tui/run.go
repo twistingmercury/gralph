@@ -38,6 +38,7 @@ func Run(ctx context.Context, prompt string, tl *tasks.TaskList, tasksFile strin
 		<-loopDone
 		return 0, "", err
 	}
+
 	<-loopDone
 	m := final.(Model)
 	return m.ExitCode(), m.Summary(), nil

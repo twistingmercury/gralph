@@ -34,12 +34,15 @@ func NewSetup(tasksPath, promptPath string) SetupModel {
 	if tasksPath == "" {
 		s.fields = append(s.fields, newSetupField("tasks file: ", true))
 	}
+
 	if promptPath == "" {
 		s.fields = append(s.fields, newSetupField("prompt file: ", false))
 	}
+
 	if len(s.fields) > 0 {
 		s.fields[0].input.Focus()
 	}
+
 	return s
 }
 
@@ -50,6 +53,7 @@ func Setup(tasksPath, promptPath string, opts ...tea.ProgramOption) (SetupModel,
 	if err != nil {
 		return SetupModel{}, err
 	}
+
 	return final.(SetupModel), nil
 }
 
@@ -66,6 +70,7 @@ func (s SetupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if s.focus == len(s.fields) {
 		return s, nil
 	}
+
 	if msg, ok := msg.(tea.KeyPressMsg); ok {
 		switch msg.String() {
 		case "esc", "ctrl+c":
@@ -75,6 +80,7 @@ func (s SetupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return s.submit()
 		}
 	}
+
 	var cmd tea.Cmd
 	s.fields[s.focus].input, cmd = s.fields[s.focus].input.Update(msg)
 	return s, cmd
@@ -96,16 +102,19 @@ func (s SetupModel) submit() (tea.Model, tea.Cmd) {
 			s.promptPath, s.prompt = path, prompt
 		}
 	}
+
 	if err != nil {
 		f.err = err.Error()
 		return s, nil
 	}
+
 	f.err = ""
 	f.input.Blur()
 	s.focus++
 	if s.focus == len(s.fields) {
 		return s, tea.Quit
 	}
+
 	return s, s.fields[s.focus].input.Focus()
 }
 

@@ -263,6 +263,7 @@ func step(t *testing.T, m Model, msg tea.Msg) (Model, bool) {
 	if cmd == nil {
 		return next.(Model), false
 	}
+
 	_, quit := cmd().(tea.QuitMsg)
 	return next.(Model), quit
 }

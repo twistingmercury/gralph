@@ -55,6 +55,7 @@ func runTests(m *testing.M) int {
 		fmt.Fprintf(os.Stderr, "failed to create temp dir: %v\n", err)
 		return 1
 	}
+
 	defer func() {
 		if err := os.RemoveAll(tmpDir); err != nil {
 			fmt.Fprintf(os.Stderr, "failed to remove temp dir %s: %v\n", tmpDir, err)
@@ -76,6 +77,7 @@ func runTests(m *testing.M) int {
 			fmt.Fprintf(os.Stderr, "failed to get working dir: %v\n", err)
 			return 1
 		}
+
 		projectRoot := filepath.Join(wd, "..", "..")
 
 		build := exec.Command("go", "build", "-o", testBinaryPath, "./cmd/main") // #nosec G204 -- fixed literal args
@@ -93,6 +95,7 @@ func runTests(m *testing.M) int {
 		fmt.Fprintf(os.Stderr, "failed to create fake claude bin dir: %v\n", err)
 		return 1
 	}
+
 	fakeClaudeBin := filepath.Join(fakeClaudeDir, "claude")
 	build := exec.Command("go", "build", "-o", fakeClaudeBin, "./testdata/fakeclaude")
 	build.Stdout = os.Stdout

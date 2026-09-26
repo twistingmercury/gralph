@@ -25,6 +25,7 @@ func Install() (string, error) {
 	if err != nil {
 		return "", err
 	}
+
 	dest := filepath.Join(home, ".claude", "skills", skillName)
 
 	if err := os.RemoveAll(dest); err != nil {
@@ -40,6 +41,7 @@ func Install() (string, error) {
 	if err != nil {
 		return "", err
 	}
+
 	stamp := version.Version() + "\n" + hash + "\n"
 	if err := os.WriteFile(filepath.Join(dest, "VERSION"), []byte(stamp), 0o600); err != nil {
 		return "", err
@@ -83,10 +85,12 @@ func Hash() (string, error) {
 		if err != nil || d.IsDir() {
 			return err
 		}
+
 		data, err := skills.FS.ReadFile(path)
 		if err != nil {
 			return err
 		}
+
 		h.Write([]byte(strings.TrimPrefix(path, skillName+"/")))
 		h.Write(data)
 		return nil
@@ -94,6 +98,7 @@ func Hash() (string, error) {
 	if err != nil {
 		return "", err
 	}
+
 	return "sha256:" + hex.EncodeToString(h.Sum(nil)), nil
 }
 
@@ -105,6 +110,7 @@ func Check() error {
 	if err != nil {
 		return err
 	}
+
 	dest := filepath.Join(home, ".claude", "skills", skillName)
 
 	if _, err := os.Stat(dest); errors.Is(err, fs.ErrNotExist) {
@@ -124,9 +130,11 @@ func Check() error {
 		if lines[0] != "" {
 			installedBy = lines[0]
 		}
+
 		if len(lines) > 1 && lines[1] == hash {
 			return nil
 		}
 	}
+
 	return fmt.Errorf("the gralph-docs-writer skill is outdated (installed by %s, this is gralph %s).\nRun: gralph --install-skill", installedBy, version.Version())
 }

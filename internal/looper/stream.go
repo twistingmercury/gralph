@@ -102,6 +102,7 @@ func runTaskStream(ctx context.Context, p string, task tasks.Task, report func(E
 	if err != nil {
 		return "", "", fmt.Errorf("task %d: %s: %w", task.ID, task.Name, err)
 	}
+
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
 		return "", "", fmt.Errorf("task %d: %s: %w", task.ID, task.Name, err)
@@ -160,6 +161,7 @@ func readLines(r io.Reader, fn func(line []byte)) {
 		if len(line) > 0 {
 			fn(line)
 		}
+
 		if err != nil {
 			return
 		}

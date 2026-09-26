@@ -46,6 +46,7 @@ func main() {
 			_, _ = fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			os.Exit(1)
 		}
+
 		return
 	}
 
@@ -91,6 +92,7 @@ func runTUI(ctx context.Context) int {
 			_, _ = fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			return 1
 		}
+
 		if err != nil {
 			_, _ = fmt.Fprintf(os.Stderr, "error: failed to start loop runner: %v\n", err)
 			return 1
@@ -103,13 +105,16 @@ func runTUI(ctx context.Context) int {
 			_, _ = fmt.Fprintf(os.Stderr, "error: %v\nrun with --no-tui to use plain output\n", err)
 			return 1
 		}
+
 		if s.Cancelled() {
 			_, _ = fmt.Fprintln(os.Stderr, "error: setup cancelled")
 			return 1
 		}
+
 		if tasksPath == "" {
 			tasksPath, tasklist = s.TasksPath(), s.Tasks()
 		}
+
 		if promptPath == "" {
 			prompt = s.Prompt()
 		}
