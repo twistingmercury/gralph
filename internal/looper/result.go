@@ -2,6 +2,7 @@ package looper
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 
 	"github.com/twistingmercury/gralph/internal/tasks"
@@ -38,12 +39,12 @@ func parseResult(line string) (state, errMsg string, ok bool) {
 // session's trailing JSON result line even when that line is wrapped in a
 // Markdown code fence.
 func lastResultLine(output string) string {
-	lines := strings.Split(output, "\n")
-	for i := len(lines) - 1; i >= 0; i-- {
-		line := strings.TrimSpace(lines[i])
+	for _, l := range slices.Backward(strings.Split(output, "\n")) {
+		line := strings.TrimSpace(l)
 		if line == "" || strings.HasPrefix(line, "```") {
 			continue
 		}
+
 		return line
 	}
 	return ""
