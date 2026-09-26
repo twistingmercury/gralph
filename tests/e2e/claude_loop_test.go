@@ -18,7 +18,9 @@ import (
 // claude invocation, its prompt never echoed, just the skip message on
 // stdout), the non-completed tasks run in file order with the exact
 // documented stdin wire contract, and once every invocation exits 0 the
-// tasks.yaml on disk is rewritten with every task marked completed.
+// tasks.yaml on disk is rewritten with every task marked completed. The ids
+// are out of order, so sorting by id would change both the run order and the
+// saved order.
 func TestLoop_RunsEveryTaskInOrder(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -28,14 +30,14 @@ func TestLoop_RunsEveryTaskInOrder(t *testing.T) {
 	sharedPrompt := strings.TrimSpace(promptBody)
 
 	tasksYAML := `tasks:
-  - id: 1
+  - id: 20
     name: First task
     prompt: Do the first thing.
     state: completed
-  - id: 2
+  - id: 30
     name: Second task
     prompt: Do the second thing.
-  - id: 3
+  - id: 10
     name: Third task
     prompt: Do the third thing.
     state: pending
@@ -50,7 +52,7 @@ func TestLoop_RunsEveryTaskInOrder(t *testing.T) {
 	res := runGralph(t, 15*time.Second, []string{"--prompt=" + promptPath, "--tasks=" + tasksPath}, env)
 	require.Equal(t, 0, res.exitCode, "stdout:\n%s\nstderr:\n%s", res.stdout, res.stderr)
 
-	assert.Contains(t, res.stdout, "task 1: First task already completed, skipping")
+	assert.Contains(t, res.stdout, "task 20: First task already completed, skipping")
 	assert.NotContains(t, res.stdout, "Do the first thing.", "expected the completed task's prompt never to be printed")
 
 	records := readFakeClaudeRecords(t, recordFile)
@@ -62,8 +64,8 @@ func TestLoop_RunsEveryTaskInOrder(t *testing.T) {
 		name   string
 		prompt string
 	}{
-		{2, "Second task", "Do the second thing."},
-		{3, "Third task", "Do the third thing."},
+		{30, "Second task", "Do the second thing."},
+		{10, "Third task", "Do the third thing."},
 	}
 	for i, want := range wantTasks {
 		assert.Equal(t, wantArgv, records[i].Argv, "argv for invocation %d", i)
@@ -72,10 +74,10 @@ func TestLoop_RunsEveryTaskInOrder(t *testing.T) {
 
 	after := readTasksYAML(t, tasksPath)
 	require.Len(t, after.Tasks, 3)
-	states := taskStates(after)
-	assert.Equal(t, "completed", states[1], "expected the already-completed task to remain completed")
-	assert.Equal(t, "completed", states[2], "expected the second task to be written back as completed")
-	assert.Equal(t, "completed", states[3], "expected the third task to be written back as completed")
+	for i, wantID := range []int{20, 30, 10} {
+		assert.Equal(t, wantID, after.Tasks[i].ID, "expected the saved file to keep file order at index %d", i)
+		assert.Equal(t, "completed", after.Tasks[i].State, "expected task %d to be completed", after.Tasks[i].ID)
+	}
 
 	assertNoTmpFile(t, tasksPath)
 }
