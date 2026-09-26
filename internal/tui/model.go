@@ -26,7 +26,9 @@ type interruptedMsg struct{}
 var (
 	border  = lipgloss.NewStyle().Border(lipgloss.NormalBorder())
 	focused = border.BorderForeground(lipgloss.Color("12"))
-	title   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("0")).Background(lipgloss.Color("12"))
+	// Exact colors, not palette slots, so neither the terminal theme nor
+	// bold-as-bright rendering can wash out the title's contrast.
+	title = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFFFFF")).Background(lipgloss.Color("#1E40AF"))
 )
 
 var icons = map[string]string{
