@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/twistingmercury/gralph/internal/tasks"
@@ -204,31 +205,41 @@ func runLoop(ctx context.Context, p string, tl *tasks.TaskList, tasksFile string
 // echoed to stdout, claude's stdout teed to the terminal, stderr inherited.
 // It returns the task's outcome, or an error when ctx was cancelled.
 func runTaskPlain(ctx context.Context, p string, task tasks.Task) (state, errMsg string, err error) {
-	const claude = "claude"
-	const print = "--print"
-	const skipPermissions = "--dangerously-skip-permissions"
+	cmd, prompt := claudeCmd(ctx, p, task, false)
 
 	// formatting it to make it easier to read by a human
-	prompt := fmt.Sprintf("%s\n\n%s\n", p, task.String())
-
 	fmt.Println(prompt)
-
-	cmd := exec.CommandContext(ctx, claude, print, skipPermissions)
-	configureProcessTree(cmd)
-	cmd.Stdin = strings.NewReader(prompt)
 
 	var out bytes.Buffer
 	cmd.Stdout = io.MultiWriter(os.Stdout, &out)
 	cmd.Stderr = os.Stderr
 
-	runErr := cmd.Run()
+	return finishTask(ctx, task, cmd.Run(), out.String())
+}
 
+// claudeCmd builds the claude command for task, in its own process group
+// with the combined prompt on stdin, and also returns that prompt text. With
+// stream, the stream-json flags go right after --print.
+func claudeCmd(ctx context.Context, p string, task tasks.Task, stream bool) (*exec.Cmd, string) {
+	prompt := fmt.Sprintf("%s\n\n%s\n", p, task.String())
+	cmd := exec.CommandContext(ctx, "claude", "--print", "--dangerously-skip-permissions")
+	if stream {
+		cmd.Args = slices.Insert(cmd.Args, 2, "--output-format", "stream-json", "--verbose")
+	}
+	configureProcessTree(cmd)
+	cmd.Stdin = strings.NewReader(prompt)
+	return cmd, prompt
+}
+
+// finishTask turns claude's exit and output into the task's outcome, or an
+// error when ctx was cancelled.
+func finishTask(ctx context.Context, task tasks.Task, runErr error, output string) (state, errMsg string, err error) {
 	if runErr != nil && ctx.Err() != nil {
 		// Cancelled by SIGINT/SIGTERM: leave the task's state and the
 		// tasks file untouched so a re-run picks up where it left off.
 		return "", "", fmt.Errorf("task %d: %s failed: %w", task.ID, task.Name, runErr)
 	}
 
-	state, errMsg = outcome(runErr, lastResultLine(out.String()))
+	state, errMsg = outcome(runErr, lastResultLine(output))
 	return state, errMsg, nil
 }

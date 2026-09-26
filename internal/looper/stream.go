@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os/exec"
 	"strings"
 
 	"github.com/twistingmercury/gralph/internal/tasks"
@@ -80,18 +79,7 @@ func parseStreamLine(line []byte) (activity []string, result string, isResult bo
 // result event's text. It returns the task's outcome, or an error when ctx
 // was cancelled.
 func runTaskStream(ctx context.Context, p string, task tasks.Task, report func(Event)) (state, errMsg string, err error) {
-	const claude = "claude"
-	const print = "--print"
-	const outputFormat = "--output-format"
-	const streamJSON = "stream-json"
-	const verbose = "--verbose"
-	const skipPermissions = "--dangerously-skip-permissions"
-
-	prompt := fmt.Sprintf("%s\n\n%s\n", p, task.String())
-
-	cmd := exec.CommandContext(ctx, claude, print, outputFormat, streamJSON, verbose, skipPermissions)
-	configureProcessTree(cmd)
-	cmd.Stdin = strings.NewReader(prompt)
+	cmd, _ := claudeCmd(ctx, p, task, true)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -127,14 +115,7 @@ func runTaskStream(ctx context.Context, p string, task tasks.Task, report func(E
 		runErr = cmd.Wait()
 	}
 
-	if runErr != nil && ctx.Err() != nil {
-		// Cancelled by SIGINT/SIGTERM: leave the task's state and the
-		// tasks file untouched so a re-run picks up where it left off.
-		return "", "", fmt.Errorf("task %d: %s failed: %w", task.ID, task.Name, runErr)
-	}
-
-	state, errMsg = outcome(runErr, lastResultLine(resultText))
-	return state, errMsg, nil
+	return finishTask(ctx, task, runErr, resultText)
 }
 
 // readLines calls fn with each line read from r, including a final line with
