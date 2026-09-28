@@ -1,4 +1,4 @@
-FROM ghcr.io/twistingmercury/golang-tooling:go1.27.1 AS builder
+FROM ghcr.io/twistingmercury/golang-tooling:go1.27.1@sha256:39debe49c68483caef3f4df8589031de35f1e0dea22cd0b7a30195a5925234bb AS builder
 
 ARG BUILD_VER
 ARG BUILD_DATE
@@ -21,7 +21,7 @@ RUN golangci-lint run
 RUN govulncheck ./...
 RUN gosec ./...
 
-RUN go test ./...
+RUN CGO_ENABLED=1 go test -race ./...
 
 RUN CGO_ENABLED=0 GOARCH=amd64 GOOS=darwin go build --ldflags "${LD_FLAGS}" -o /.bin/amd64/darwin/gralph ./cmd/main
 RUN CGO_ENABLED=0 GOARCH=arm64 GOOS=darwin go build --ldflags "${LD_FLAGS}" -o /.bin/arm64/darwin/gralph ./cmd/main
