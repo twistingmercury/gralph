@@ -185,10 +185,10 @@ graph TB
 
 **Responsibilities:**
 - `runGates` runs after `finishTask` returns `completed`, on both task paths, before the state is saved (ADR-013); it is skipped when the task has no gates or the session failed
-- Run the task's gates in file order, one at a time, each as `sh -c <cmd>` in gralph's working directory, with no stdin, in its own process group (`configureProcessTree`)
+- Run the task's gates in file order, one at a time, each through `sh` in gralph's working directory, with no stdin, in its own process group (`configureProcessTree`). The argv is fixed at `sh -c 'eval "$GRALPH_GATE"'` and the `cmd` text travels in the `GRALPH_GATE` environment variable, so no task-file text is ever put into an argv
 - Stop at the first gate that exits non-zero or cannot be started: the task becomes `failed` with error `gate "<cmd>" failed: <exit error>`, and later gates do not run
 - Plain path (`report == nil`): print `gate: <cmd>` to stdout, then let the gate's stdout and stderr pass straight through
-- TUI path (`report != nil`): write nothing to gralph's stdout/stderr; report `Activity` `→ gate <cmd>`, then one `Activity` per line of the gate's stdout and stderr
+- TUI path (`report != nil`): write nothing to gralph's stdout/stderr; report `Activity` `→ gate <first line of cmd>`, then one `Activity` per line of the gate's stdout and stderr
 - On context cancellation, return the error without a state, like a cancelled session: the task and the file stay untouched
 
 **Key Characteristics:**
@@ -348,7 +348,7 @@ graph LR
 | Gralph → Filesystem (read)            | Prompt, task files  | Files must be readable; content is not sanitized           |
 | Gralph ← Filesystem (write)           | Task state          | Atomic writes; temp-file + rename ensures consistency      |
 | Gralph → Claude (subprocess)          | Combined prompt     | Passed on stdin; fixed argv per mode: plain `--print --dangerously-skip-permissions`, TUI adds `--output-format stream-json --verbose` |
-| Gralph → Gate command (subprocess)    | `cmd` text from tasks.yaml | Run as `sh -c <cmd>` in gralph's working directory, unsandboxed; only the exit code is used |
+| Gralph → Gate command (subprocess)    | `cmd` text from tasks.yaml | Evaluated by `sh` (text passed in `GRALPH_GATE`) in gralph's working directory, unsandboxed; only the exit code is used |
 | Claude → Gralph (subprocess output)   | Stdout, stderr, exit code | Parsed for JSON result line; plain mode passes all other output through, the TUI shows it as activity only |
 
 ### Process Boundary: Gralph Process Group
