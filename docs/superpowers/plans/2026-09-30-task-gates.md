@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 >
+> **Status:** executed on 2026-09-30 (commits `1:` to `5:` on `feature/gates`). Afterwards the gate call was changed from passing the command in a `GRALPH_GATE` environment variable to plain `sh -c <cmd>` under an owner-approved `#nosec G204`; this plan was updated to show the code as shipped.
+>
 > This plan is executed as a Gralph loop: `.local/gates/tasks.yaml` and `.local/gates/prompt.md` carry one loop task per plan task.
 
 **Goal:** Let a task in `tasks.yaml` list `gates`, shell commands gralph runs itself after a session reports `completed`, and mark the task completed only when every gate exits zero.
@@ -18,12 +20,12 @@
 - Gates are never sent to Claude. The stdin text stays `fmt.Sprintf("%s\n\n%s\n", prompt, task.String())` and `Task.String()` must not include gates.
 - A task with no `gates`, or an empty list, behaves exactly as before. Existing unit and e2e tests keep passing unchanged.
 - Gates run only after a session that exited zero with the `completed` result line.
-- The gate argv is the constant `sh -c 'eval "$GRALPH_GATE"'`; the `cmd` text goes in the `GRALPH_GATE` environment variable. Never put task-file text in an argv: gosec G204 rejects it (checked: `exec.CommandContext(ctx, "sh", "-c", gate.Cmd)` fails `make analyze`).
+- Each gate runs as `exec.CommandContext(ctx, "sh", "-c", gate.Cmd)`. gosec flags that call (G204); the finding is accepted by design, and the line carries the one `// #nosec G204` the owner explicitly approved. Keep that comment and its reason on the line.
 - Failed gate error text is exactly `gate "<cmd>" failed: <exit error>`, built with `fmt.Sprintf("gate %q failed: %s", cmd, err)`.
 - Plain mode prints exactly `gate: <cmd>` and a newline to stdout before each gate. The stream path reports the `Activity` line `→ gate <first line of cmd>`.
 - No timeout, no retry, no file-level gates, no new event kinds, no new interfaces, no new dependencies.
 - `looper` never imports `tui` or Bubble Tea. Unix only.
-- Never add `//nolint` or `// #nosec`. Go tests use testify (`require` for preconditions, `assert` for checks).
+- Never add `//nolint` or `// #nosec`, apart from the one owner-approved `#nosec G204` on the gate call. Go tests use testify (`require` for preconditions, `assert` for checks).
 - Code style, for every line written or moved: return early, keep the happy path at the left margin, a blank line after every `if` block (except before a closing brace or `else`), callbacks longer than a line or two are named functions, comments say why.
 - YAML files use `.yaml`. Architecture docs are edited in place with `Version`/`Date`/`Notes` bumped; never create `_vNN` copies.
 - Quality gates for every task, from the repository root: `make test && make analyze && make build`. The e2e suite runs only inside `make build`.
@@ -646,14 +648,13 @@ func runGates(ctx context.Context, task tasks.Task, report func(Event)) (state, 
 	return tasks.CompletedState, "", nil
 }
 
-// runGate runs one gate through sh. The command text travels in the
-// GRALPH_GATE environment variable and the argv stays constant, so nothing
-// from the task file is ever spliced into a command line. The gate gets no
+// runGate runs one gate through `sh -c` so the command can use shell syntax
+// (pipes, &&, redirects). gosec's G204 finding is accepted on purpose: running
+// a command from the task file is the feature (ADR-013). The gate gets no
 // stdin and its own process group, like claude, so a cancel kills everything
 // it started.
 func runGate(ctx context.Context, task tasks.Task, gate tasks.Gate, report func(Event)) error {
-	cmd := exec.CommandContext(ctx, "sh", "-c", `eval "$GRALPH_GATE"`)
-	cmd.Env = append(os.Environ(), "GRALPH_GATE="+gate.Cmd)
+	cmd := exec.CommandContext(ctx, "sh", "-c", gate.Cmd) // #nosec G204 -- a gate is a command from the task file, run by design (ADR-013); suppression approved by the owner
 	configureProcessTree(cmd)
 
 	if report != nil {
@@ -758,7 +759,7 @@ Expected: `ok` (no TUI code changed; gate lines are ordinary `Activity` events).
 - [ ] **Step 7: Run the quality gates and commit**
 
 Run: `make test && make analyze && make build`
-Expected: all exit 0. `make analyze` must report no gosec issue for `gates.go`.
+Expected: all exit 0. `make analyze` must report no gosec issue for `gates.go` (the approved `#nosec G204` covers the gate call).
 
 ```bash
 git add internal/looper/gates.go internal/looper/gates_test.go internal/looper/looper.go internal/looper/stream.go
@@ -1196,7 +1197,7 @@ In "Key Considerations":
 In the `internal/looper` list, add this bullet after the bullet that begins `Outcome comes from the last non-blank line`:
 
 ```markdown
-  - Gates (ADR-013): `runTask` runs the session and, only when it returned `completed`, `runGates` (`gates.go`). Each `task.Gates` command runs in file order with the constant argv `sh -c 'eval "$GRALPH_GATE"'` and the command text in the `GRALPH_GATE` env var (never in argv: gosec G204), no stdin, in its own process group. The first non-zero exit makes the task `failed` with `gate "<cmd>" failed: <exit error>` and skips the rest. Plain mode prints `gate: <cmd>` and passes the gate's output through; the stream path reports `→ gate <first line of cmd>` and each output line as `Activity`. Gates are never sent to Claude: the wire contract above is unchanged.
+  - Gates (ADR-013): `runTask` runs the session and, only when it returned `completed`, `runGates` (`gates.go`). Each `task.Gates` command runs in file order as `sh -c <cmd>` (that call carries the one approved `// #nosec G204`; see Conventions), no stdin, in its own process group. The first non-zero exit makes the task `failed` with `gate "<cmd>" failed: <exit error>` and skips the rest. Plain mode prints `gate: <cmd>` and passes the gate's output through; the stream path reports `→ gate <first line of cmd>` and each output line as `Activity`. Gates are never sent to Claude: the wire contract above is unchanged.
 ```
 
 In the `Cancelling `ctx`` bullet, change it to read: `Cancelling `ctx` leaves the task's state and the file untouched, whether a session or a gate was running.`
@@ -1216,8 +1217,8 @@ In `docs/architecture/05_deployment_architecture.md`:
 Run: `grep -n 'gate' README.md CLAUDE.md docs/architecture/05_deployment_architecture.md | wc -l`
 Expected: 15 or more.
 
-Run: `grep -rn 'gate: \|→ gate \|GRALPH_GATE\|unknown key' internal/looper/gates.go internal/tasks/task.go`
-Expected: the strings the docs quote (`gate: `, `→ gate `, `GRALPH_GATE`, `unknown key; a gate has only cmd`) appear in the code as documented. Fix the docs, not the code, if they differ.
+Run: `grep -rn 'gate: \|→ gate \|nosec G204\|unknown key' internal/looper/gates.go internal/tasks/task.go`
+Expected: the strings the docs quote (`gate: `, `→ gate `, `#nosec G204`, `unknown key; a gate has only cmd`) appear in the code as documented. Fix the docs, not the code, if they differ.
 
 - [ ] **Step 7: Run the quality gates and commit**
 
