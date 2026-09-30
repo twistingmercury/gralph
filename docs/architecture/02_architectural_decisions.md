@@ -2,7 +2,7 @@
 
 > **Version**: v05
 > **Date**: 2026-09-30
-> **Notes**: ADR-013 adds per-task `gates`: commands gralph runs itself after a session reports `completed`; the task is completed only when every gate exits zero.
+> **Notes**: ADR-013 adds per-task `gates`: commands gralph runs itself after a session reports `completed`; the task is completed only when every gate exits zero. Gates run as `sh -c <cmd>` under one owner-approved `#nosec G204`.
 
 [Back to Overview](00_overview.md) | [Back to Project README](../../README.md)
 
@@ -419,7 +419,7 @@ When a session exits zero and ends with the `completed` result line (ADR-005), g
 - **A gate is any command, judged only by its exit code.** Gralph does not restrict what a gate does or look at its output. The skill suggests commands that exit non-zero when the check fails.
 - **Per-task only.** There is no file-level gate list, no timeout, and no retry.
 - **Validation happens at parse time**, in `internal/tasks`, with the existing error style (`tasks[<i>] (id <id>): gates[<j>]: cmd: <problem>`), so `--dry-run` and the setup screen catch a bad `gates` value. `gates` must be a sequence; each element must be a mapping whose only key is `cmd`; `cmd` must be a nonblank string. The stored `cmd` is never altered. `SaveTasks` writes `gates` back unchanged (omitted when empty).
-- **How the command reaches the shell.** The argv is always `sh -c 'eval "$GRALPH_GATE"'`; the gate's `cmd` text is passed in the `GRALPH_GATE` environment variable, added to gralph's own environment for that one process. The shell evaluates exactly the text from the file, so pipes, substitutions, and multi-line commands work as they would with `sh -c <cmd>`, and no task-file text is ever put into an argv. That matters because gosec (G204) rejects a subprocess whose argv is built from a variable, and this project fixes findings instead of suppressing them.
+- **How the command reaches the shell.** Each gate runs as `sh -c <cmd>`, with the `cmd` text from the file as the script, so pipes, substitutions, and multi-line commands work. gosec flags this call (G204: a subprocess whose argv comes from a variable). The finding is accurate and accepted: running commands from the task file is what a gate is. The call carries a single `// #nosec G204` with its reason, approved by the project owner as an explicit exception to the "never add `#nosec`" rule. It is not a precedent; any other suppression needs the owner's explicit approval too.
 - **Process handling matches claude's** (ADR-007): each gate runs in its own process group with no stdin. Cancelling the context while a gate runs kills the group and leaves the task's state and the file untouched, so the next run starts that task again.
 - **Output.** Plain mode prints `gate: <cmd>` to stdout before each gate, and the gate's stdout and stderr pass straight through. On the TUI path gralph writes nothing itself: it reports an `Activity` event `→ gate <cmd>` (only the command's first line, so a multi-line command stays one activity line) and then one `Activity` event per line of the gate's stdout and stderr. The task stays `in progress` until its gates finish; `TaskFinished` is reported after them. No new event kinds.
 - **The skill** (`gralph-docs-writer`) gains `gates` in its template and field rules, and proposes each task's gates from the project's agreed quality gates plus the task's own checks. It keeps writing the prompt-side verification for Claude.
@@ -439,7 +439,7 @@ Alternatives not taken: letting the gates replace the result line (Claude can kn
 - A failed gate leaves whatever the session did, including commits, in the repository for a person to sort out
 - Resetting a gate-failed task to `pending` runs the whole session again, not just the gates; setting it to `completed` by hand skips the gates
 - Common gates are repeated in every task
-- A gate can read its own text in `GRALPH_GATE`, and a `GRALPH_GATE` already set in gralph's environment is replaced for the gate
+- The gate call carries the project's one approved inline gosec suppression (`#nosec G204`), which a later scanner upgrade or code move has to keep intact
 - A gate that never exits hangs the run until it is cancelled (no timeout)
 - A gate that changes files leaves those changes uncommitted for the next session
 - Claude is not told the gates, so a session can report `completed` and still fail one; the skill keeps the prompt-side verification and the gates in step

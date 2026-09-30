@@ -31,14 +31,13 @@ func runGates(ctx context.Context, task tasks.Task, report func(Event)) (state, 
 	return tasks.CompletedState, "", nil
 }
 
-// runGate runs one gate through sh. The command text travels in the
-// GRALPH_GATE environment variable and the argv stays constant, so nothing
-// from the task file is ever spliced into a command line. The gate gets no
+// runGate runs one gate through `sh -c` so the command can use shell syntax
+// (pipes, &&, redirects). gosec's G204 finding is accepted on purpose: running
+// a command from the task file is the feature (ADR-013). The gate gets no
 // stdin and its own process group, like claude, so a cancel kills everything
 // it started.
 func runGate(ctx context.Context, task tasks.Task, gate tasks.Gate, report func(Event)) error {
-	cmd := exec.CommandContext(ctx, "sh", "-c", `eval "$GRALPH_GATE"`)
-	cmd.Env = append(os.Environ(), "GRALPH_GATE="+gate.Cmd)
+	cmd := exec.CommandContext(ctx, "sh", "-c", gate.Cmd) // #nosec G204 -- a gate is a command from the task file, run by design (ADR-013); suppression approved by the owner
 	configureProcessTree(cmd)
 
 	if report != nil {
