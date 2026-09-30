@@ -170,14 +170,7 @@ func runLoop(ctx context.Context, p string, tl *tasks.TaskList, tasksFile string
 			report(Event{Kind: TaskStarted, Task: *task})
 		}
 
-		var state, errMsg string
-		var err error
-		if report == nil {
-			state, errMsg, err = runTaskPlain(ctx, p, *task)
-		} else {
-			state, errMsg, err = runTaskStream(ctx, p, *task, report)
-		}
-
+		state, errMsg, err := runTask(ctx, p, *task, report)
 		if err != nil {
 			return err
 		}
@@ -210,6 +203,23 @@ func runLoop(ctx context.Context, p string, tl *tasks.TaskList, tasksFile string
 	}
 
 	return nil
+}
+
+// runTask runs one task's session on the path report selects and, only when
+// the session completed, the task's gates. It returns the task's outcome, or
+// an error when ctx was cancelled.
+func runTask(ctx context.Context, p string, task tasks.Task, report func(Event)) (state, errMsg string, err error) {
+	if report == nil {
+		state, errMsg, err = runTaskPlain(ctx, p, task)
+	} else {
+		state, errMsg, err = runTaskStream(ctx, p, task, report)
+	}
+
+	if err != nil || state != tasks.CompletedState {
+		return state, errMsg, err
+	}
+
+	return runGates(ctx, task, report)
 }
 
 // runTaskPlain runs one task as plain mode always has: the combined prompt

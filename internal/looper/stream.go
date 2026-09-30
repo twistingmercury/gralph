@@ -133,10 +133,10 @@ type streamTask struct {
 // while the pipe still has unread lines.
 func (st *streamTask) readStderr(stderr io.Reader, done chan<- struct{}) {
 	defer close(done)
-	readLines(stderr, st.stderrLine)
+	readLines(stderr, st.rawLine)
 }
 
-func (st *streamTask) stderrLine(line []byte) {
+func (st *streamTask) rawLine(line []byte) {
 	st.report(Event{Kind: Activity, Task: st.task, Line: strings.TrimRight(string(line), "\r\n")})
 }
 
