@@ -1,8 +1,8 @@
 # Gralph — Requirements
 
-> **Version**: v03
-> **Date**: 2026-09-25
-> **Notes**: Added the full-screen TUI as a goal; the claude argv constraint now covers both task paths.
+> **Version**: v04
+> **Date**: 2026-09-30
+> **Notes**: Added gralph-run gates as a goal: a completed task is confirmed by commands from the task file, not only by the session's own report.
 
 [Back to Overview](00_overview.md) | [Back to Project README](../../README.md)
 
@@ -22,6 +22,7 @@ Claude Code users need a way to:
 - Define a sequence of related tasks
 - Run each in a fresh Claude session with a shared prompt
 - Track which tasks completed, which failed
+- Confirm each task's result with checks that do not depend on the session's own report
 - Block on failures until manually addressed
 - Resume interrupted runs without re-running completed work
 
@@ -36,6 +37,7 @@ Claude Code users need a way to:
 5. Exit non-zero if any task fails, so automation scripts can detect failure
 6. Be Claude Code only: no agent abstraction, no multi-provider support
 7. Run only on Unix (Linux, macOS, BSDs)
+8. Check a completed task independently: run the task's `gates` commands after the session and mark the task completed only when every one exits zero
 
 ### Secondary Goals
 
@@ -53,6 +55,9 @@ Claude Code users need a way to:
 - Configuration files or environment variable override of task/prompt paths
 - A TUI for `--dry-run`; it always prints plain text
 - Writing the TUI's `in progress` state to tasks.yaml
+- Sending a task's gates to Claude; they are gralph's check, and the stdin prompt does not include them
+- Gate timeouts, file-level gates shared by all tasks, or sandboxing what a gate command does
+- Re-running only the gates of a task; a task reset to `pending` runs its session again
 
 ## Success Criteria
 
@@ -62,6 +67,7 @@ Claude Code users need a way to:
 | State persistence                       | Atomic writes, no partial state       | E2E tests verify file state after each run      |
 | Failed task blocking                    | Gralph refuses to run with any failed | E2E test attempts run with failed task, expect exit 1 |
 | Dry-run accuracy                        | Task summary table matches actual run | Dry-run e2e tests compare output format         |
+| Gate enforcement                        | Completed only when every gate exits zero; gates skipped when the session failed | Unit and e2e tests run real shell commands as passing and failing gates |
 | Session independence                    | Each task has only its prompt + task  | Golden test asserts combined-prompt format      |
 | Exit code correctness                   | Zero only when all tasks complete     | E2E test matrix covers pass/fail/cancel cases   |
 | Signal handling                         | SIGINT/SIGTERM kills claude group    | Process tree test verifies Setpgid and signal   |

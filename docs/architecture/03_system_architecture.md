@@ -1,8 +1,8 @@
 # Gralph — System Architecture
 
-> **Version**: v05
-> **Date**: 2026-09-26
-> **Notes**: Named `LoadTasksReport` as the shared failed-task report used by `Start`, `DryRun`, and the TUI.
+> **Version**: v06
+> **Date**: 2026-09-30
+> **Notes**: Added the gate runner (ADR-013): per-task `gates` commands run by gralph after a `completed` session, on both task paths.
 
 [Back to Overview](00_overview.md) | [Back to Project README](../../README.md)
 
@@ -16,7 +16,7 @@
 
 ## Architecture Overview
 
-Gralph is organized into four layers: CLI entry point, terminal UI, looper orchestration, and task/state management. Dependencies point one way: `cmd/main` → `internal/tui` → `internal/looper` → `internal/tasks` (`cmd/main` also calls `internal/looper` directly). The looper loads both input files (prompt.md and tasks.yaml), validates preconditions, then walks each pending task, spawning a fresh Claude session with the combined prompt and reading the result to determine outcome.
+Gralph is organized into four layers: CLI entry point, terminal UI, looper orchestration, and task/state management. Dependencies point one way: `cmd/main` → `internal/tui` → `internal/looper` → `internal/tasks` (`cmd/main` also calls `internal/looper` directly). The looper loads both input files (prompt.md and tasks.yaml), validates preconditions, then walks each pending task, spawning a fresh Claude session with the combined prompt and reading the result to determine outcome. When the session reports `completed`, the looper runs the task's gates (ADR-013), commands from the task file, and the task is completed only if every one exits zero.
 
 `cmd/main` picks one of two modes (ADR-011):
 
@@ -38,7 +38,9 @@ graph TB
     ClaudePlain -->|stdout| ResultParser["internal/looper<br/>(lastResultLine, outcome)"]
     ClaudeStream -->|stream-json events| StreamParser["internal/looper<br/>(parseStreamLine)"]
     StreamParser -->|result event text| ResultParser
-    ResultParser -->|updates state| Looper
+    ResultParser -->|session outcome| Looper
+    Looper -->|completed session: runGates| Gates["sh -c cmd<br/>(one per gate)"]
+    Gates -->|exit code| Looper
     Looper -->|SaveTasks| TaskFile
 ```
 
@@ -93,10 +95,11 @@ graph TB
 - Run each task on one of two paths, picked by the `report` hook:
   - `report == nil` → `runTaskPlain`: spawn `claude --print --dangerously-skip-permissions` in a process group, echo the combined prompt, tee claude's stdout, inherit stderr
   - `report != nil` → `runTaskStream`: spawn `claude --print --output-format stream-json --verbose --dangerously-skip-permissions` in a process group, write nothing to gralph's stdout/stderr, report `TaskStarted`, `Activity` (parsed stdout events and raw stderr lines), and `TaskFinished` events, then `RunDone` from `Run`
-- Capture output, parse result line, determine outcome
+- Capture output, parse result line, determine the session's outcome
+- After a `completed` session, run the task's gates (`runGates`); a failing gate makes the task `failed`
 - Update task state and save atomically
 - Block on first failure
-- Handle SIGINT/SIGTERM via context cancellation (kills claude process group)
+- Handle SIGINT/SIGTERM via context cancellation (kills the claude or gate process group)
 
 **Key Characteristics:**
 
@@ -119,6 +122,7 @@ graph TB
   - `prompt`: required, non-empty string
   - `state`: optional string, must be "pending", "completed", or "failed"
   - `error`: optional string, written by gralph only
+  - `gates`: optional sequence; each element a mapping whose only key is `cmd`, a nonblank string (errors read `tasks[<i>] (id <id>): gates[<j>]: cmd: <problem>`); stored unaltered and written back by `SaveTasks`, omitted when empty
 - Normalize `state`: empty → `pending`
 - Save tasks back to YAML with 2-space indent, atomically (temp file + rename)
 
@@ -177,6 +181,26 @@ graph TB
 | Fence Handling      | Skips lines matching ^\`\`\`             |
 | JSON Parsing        | encoding/json; no custom unmarshallers  |
 
+### Gate Runner (internal/looper/gates.go)
+
+**Responsibilities:**
+- `runGates` runs after `finishTask` returns `completed`, on both task paths, before the state is saved (ADR-013); it is skipped when the task has no gates or the session failed
+- Run the task's gates in file order, one at a time, each as `sh -c <cmd>` in gralph's working directory, with no stdin, in its own process group (`configureProcessTree`)
+- Stop at the first gate that exits non-zero or cannot be started: the task becomes `failed` with error `gate "<cmd>" failed: <exit error>`, and later gates do not run
+- Plain path (`report == nil`): print `gate: <cmd>` to stdout, then let the gate's stdout and stderr pass straight through
+- TUI path (`report != nil`): write nothing to gralph's stdout/stderr; report `Activity` `→ gate <cmd>`, then one `Activity` per line of the gate's stdout and stderr
+- On context cancellation, return the error without a state, like a cancelled session: the task and the file stay untouched
+
+**Key Characteristics:**
+
+| Characteristic      | Value                                   |
+| ------------------- | --------------------------------------- |
+| Input               | The task's `Gates` (`[]tasks.Gate`, each a `Cmd` string) |
+| Output              | Nothing on success; the failed gate's error message; or a cancellation error |
+| Judged by           | Exit code only; output is shown, never parsed |
+| Seen by Claude      | Never; gates are not part of the stdin prompt |
+| Timeout / retry     | None                                    |
+
 ## Data Flow
 
 ### Normal Run (Happy Path)
@@ -188,6 +212,7 @@ sequenceDiagram
     participant Looper
     participant TaskParser
     participant Claude
+    participant Gates
     participant Filesystem
 
     User->>CLI: gralph -p prompt.md -t tasks.yaml
@@ -203,7 +228,11 @@ sequenceDiagram
         Looper->>Claude: exec with prompt on stdin
         Claude-->>Looper: stdout, stderr, exit code
         Looper->>Looper: parseResult(last line)
-        Looper->>Looper: determine outcome
+        Looper->>Looper: determine session outcome
+        opt Session completed and the task has gates
+            Looper->>Gates: sh -c cmd, one gate at a time
+            Gates-->>Looper: exit code (first non-zero fails the task)
+        end
         Looper->>TaskParser: SaveTasks(updated TaskList)
         TaskParser->>Filesystem: write to .tmp, rename over original
         TaskParser-->>Looper: success
@@ -238,7 +267,11 @@ sequenceDiagram
         Looper->>Claude: exec with stream-json argv, prompt on stdin
         Claude-->>Looper: stream-json events, stderr lines
         Looper-->>TUI: Activity (one per line)
-        Looper->>Looper: outcome from result event text, SaveTasks
+        Looper->>Looper: session outcome from result event text
+        opt Session completed and the task has gates
+            Looper-->>TUI: Activity (gate line, then its output lines)
+        end
+        Looper->>Looper: SaveTasks
         Looper-->>TUI: TaskFinished
     end
     Looper-->>TUI: RunDone
@@ -247,7 +280,7 @@ sequenceDiagram
     CLI->>User: summary line, exit 0 or 1
 ```
 
-A cancelled task sends no `TaskFinished`; `RunDone` follows with the cancellation error and the view shows that task as `pending`.
+A cancelled task, whether its session or one of its gates was running, sends no `TaskFinished`; `RunDone` follows with the cancellation error and the view shows that task as `pending`.
 
 ### Failed Task Blocking
 
@@ -283,13 +316,14 @@ sequenceDiagram
 | Looper      | TaskParser      | ParseTasks, SaveTasks functions  | Parse and serialize task lists             | YAML bytes         |
 | Looper      | Claude          | os/exec.Cmd, stdin/stdout/stderr | Invoke Claude session                      | Text (prompt)      |
 | Claude      | Looper          | stdout, exit code                | Return output and completion status        | Plain: text ending in a JSON result line; TUI: stream-json events, the `result` event's text ending in it |
+| Looper      | Gate commands   | os/exec.Cmd (`sh -c`), exit code | Check a completed task independently       | Shell command text; output shown, not parsed |
 | Looper      | ProcessManager  | Setpgid, kill(-pgid)             | Configure and control subprocess lifecycle | Unix signals       |
 
 ## Boundary Definitions
 
 ### Trust Boundary: Gralph Process vs. Filesystem
 
-Gralph reads the prompt and task files. Both must be treated as user-provided code (they are executed by Claude). Gralph does not sanitize or sandbox them; the user is responsible for not running gralph against untrusted prompts or task files.
+Gralph reads the prompt and task files. Both must be treated as user-provided code: they are executed by Claude, and each task's `gates` commands are run by gralph itself through `sh -c`. Gralph does not sanitize or sandbox them; the user is responsible for not running gralph against untrusted prompts or task files.
 
 ```mermaid
 graph LR
@@ -314,6 +348,7 @@ graph LR
 | Gralph → Filesystem (read)            | Prompt, task files  | Files must be readable; content is not sanitized           |
 | Gralph ← Filesystem (write)           | Task state          | Atomic writes; temp-file + rename ensures consistency      |
 | Gralph → Claude (subprocess)          | Combined prompt     | Passed on stdin; fixed argv per mode: plain `--print --dangerously-skip-permissions`, TUI adds `--output-format stream-json --verbose` |
+| Gralph → Gate command (subprocess)    | `cmd` text from tasks.yaml | Run as `sh -c <cmd>` in gralph's working directory, unsandboxed; only the exit code is used |
 | Claude → Gralph (subprocess output)   | Stdout, stderr, exit code | Parsed for JSON result line; plain mode passes all other output through, the TUI shows it as activity only |
 
 ### Process Boundary: Gralph Process Group
@@ -339,6 +374,7 @@ graph TB
 - Gralph configures Setpgid on the claude subprocess so it has its own process group ID
 - On signal, gralph's context cancels and kills the entire claude process group with kill(-pgid, signal)
 - Shell does not send signal directly to claude; only gralph receives it
+- Each gate command gets the same treatment: its own process group, killed as a group when the context cancels
 - In the TUI the terminal is raw, so a keyboard Ctrl-C is a key, not a signal: `q` or ctrl+c opens a `[y/N]` confirm, and only `y` cancels the run ("Run stopped by user"). An outside SIGINT/SIGTERM cancels at once with no confirm ("Run stopped by signal"). Either stop kills the process group, shows the running task as `pending`, leaves the file untouched, and exits 1
 - This ensures no orphaned claude processes if gralph is killed unexpectedly
 

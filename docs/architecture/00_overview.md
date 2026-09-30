@@ -1,8 +1,8 @@
 # Gralph — Architecture Overview
 
-> **Version**: v03
-> **Date**: 2026-09-25
-> **Notes**: Added the full-screen TUI (default in a terminal, live activity via stream-json) alongside the unchanged plain mode.
+> **Version**: v04
+> **Date**: 2026-09-30
+> **Notes**: Added gates: commands from the task file that gralph runs after a session reports `completed`.
 
 [Back to Project README](../../README.md)
 
@@ -27,8 +27,9 @@ The Ralph loop is a command sequence driven by a shared prompt and an ordered ta
 1. Loading a shared prompt and task list (both YAML)
 2. For each pending task, combining the prompt + task and starting a fresh `claude --print --dangerously-skip-permissions` session (in the TUI, with `--output-format stream-json --verbose` added)
 3. Reading Claude's output to determine success/failure
-4. Writing state back atomically
-5. Blocking on the first failure until a person intervenes
+4. When Claude reports success, running the task's `gates` (commands listed in the task file) and requiring every one to exit zero
+5. Writing state back atomically
+6. Blocking on the first failure until a person intervenes
 
 In a terminal, gralph shows the run in a full-screen view: the current task's prompt, the task list and statuses, and the current session's live activity. With `--no-tui`, `--dry-run`, or no terminal, it runs in plain mode and prints to stdout as it always has.
 
@@ -55,6 +56,7 @@ graph TB
 | Process Manager    | Spawns claude subprocess in its own process group; kills group on SIGINT/SIGTERM   |
 | State Persistence  | Atomic task state writes via temp-file + rename; YAML rewritten on every change    |
 | Result Interpreter | Parses JSON result line from claude output; missing/invalid line = failed          |
+| Gate Runner        | After a `completed` session, runs the task's `gates` commands with `sh -c`; any non-zero exit = failed |
 
 ## Key Principles
 
@@ -63,10 +65,11 @@ graph TB
 3. **Strict validation** — Invalid YAML elements (bad id, empty name/prompt, unknown state) reject the entire file at parse time.
 4. **Atomic state writes** — Task state written via temp-file + rename after every run, with no retry on write failure.
 5. **Outcome from JSON, not exit code** — Result determined by parsing the final non-blank JSON line; missing/invalid line is always failed, never a fallback to exit code.
-6. **Failed task blocks** — A failed task must be manually reset (state changed to pending or completed) before the next run. Gralph refuses to start with any failed task present.
-7. **Unix only** — Linux, macOS, BSDs. Windows support was removed deliberately and will not be reintroduced.
-8. **Plain mode intact** — The full-screen TUI is the default in a terminal, but plain mode (`--no-tui` or no terminal) keeps the same argv, output, and exit codes. One loop serves both, through a `report` hook.
-9. **Docker-first CI** — Lint, gosec, govulncheck, unit tests, and e2e all run inside the build container; this is the only supported CI path.
+6. **Gates confirm a completed task** — A session's `completed` is then checked by gralph itself: the task's `gates` commands run in order and every one must exit zero. Claude is never sent the gates.
+7. **Failed task blocks** — A failed task must be manually reset (state changed to pending or completed) before the next run. Gralph refuses to start with any failed task present.
+8. **Unix only** — Linux, macOS, BSDs. Windows support was removed deliberately and will not be reintroduced.
+9. **Plain mode intact** — The full-screen TUI is the default in a terminal, but plain mode (`--no-tui` or no terminal) keeps the same argv, output, and exit codes. One loop serves both, through a `report` hook.
+10. **Docker-first CI** — Lint, gosec, govulncheck, unit tests, and e2e all run inside the build container; this is the only supported CI path.
 
 ## Document Navigation
 
