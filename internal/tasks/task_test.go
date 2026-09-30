@@ -450,3 +450,96 @@ func TestSaveTasks_TargetDirNotWritable(t *testing.T) {
 	_, statErr := os.Stat(path + ".tmp")
 	assert.True(t, os.IsNotExist(statErr), "no .tmp file should remain after a failed save")
 }
+
+func TestParseTasks_ReadsGates(t *testing.T) {
+	yml := []byte(`tasks:
+  - id: 1
+    name: Gated
+    prompt: p
+    gates:
+      - cmd: go test ./...
+      - cmd: |
+          test -z "$(gofmt -l .)"
+  - id: 2
+    name: Ungated
+    prompt: p
+  - id: 3
+    name: Empty list
+    prompt: p
+    gates: []
+`)
+
+	got, err := ParseTasks(yml)
+	require.NoError(t, err)
+	require.Len(t, got.Tasks, 3)
+
+	want := []Gate{{Cmd: "go test ./..."}, {Cmd: "test -z \"$(gofmt -l .)\"\n"}}
+	assert.Equal(t, want, got.Tasks[0].Gates, "cmd text must be stored unaltered, in file order")
+	assert.Empty(t, got.Tasks[1].Gates)
+	assert.Empty(t, got.Tasks[2].Gates)
+}
+
+func TestTaskString_OmitsGates(t *testing.T) {
+	task := Task{ID: 1, Name: "First task", Prompt: "Do it.", Gates: []Gate{{Cmd: "go test ./..."}}}
+	assert.Equal(t, "1: First task\n\nDo it.", task.String(), "gates are gralph's check and must never reach the session")
+}
+
+func TestParseTasks_GateErrors(t *testing.T) {
+	tests := []struct {
+		name    string
+		gates   string
+		wantErr string
+	}{
+		{name: "null gates", gates: "gates:", wantErr: "tasks[0] (id 1): gates: must be a sequence"},
+		{name: "scalar gates", gates: "gates: go test ./...", wantErr: "tasks[0] (id 1): gates: must be a sequence"},
+		{name: "mapping gates", gates: "gates: {cmd: go test ./...}", wantErr: "tasks[0] (id 1): gates: must be a sequence"},
+		{name: "string element", gates: "gates: [go test ./...]", wantErr: "tasks[0] (id 1): gates[0]: must be a mapping"},
+		{name: "missing cmd", gates: "gates: [{}]", wantErr: "tasks[0] (id 1): gates[0]: cmd: is required"},
+		{name: "misspelled key", gates: "gates: [{command: a}]", wantErr: "tasks[0] (id 1): gates[0]: command: unknown key; a gate has only cmd"},
+		{name: "extra key", gates: "gates: [{cmd: a, timeout: 5}]", wantErr: "tasks[0] (id 1): gates[0]: timeout: unknown key; a gate has only cmd"},
+		{name: "duplicate cmd", gates: "gates: [{cmd: a, cmd: b}]", wantErr: "tasks[0] (id 1): gates[0]: cmd: duplicate key"},
+		{name: "integer cmd", gates: "gates: [{cmd: 5}]", wantErr: "tasks[0] (id 1): gates[0]: cmd: must be a string"},
+		{name: "null cmd", gates: "gates: [{cmd: }]", wantErr: "tasks[0] (id 1): gates[0]: cmd: must be a string"},
+		{name: "blank cmd", gates: `gates: [{cmd: "  "}]`, wantErr: "tasks[0] (id 1): gates[0]: cmd: must not be empty or whitespace"},
+		{name: "second gate invalid", gates: "gates: [{cmd: a}, {cmd: ''}]", wantErr: "tasks[0] (id 1): gates[1]: cmd: must not be empty or whitespace"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			yml := "tasks:\n  - id: 1\n    name: a\n    prompt: p\n    " + tt.gates + "\n"
+			got, err := ParseTasks([]byte(yml))
+			require.Error(t, err)
+			assert.ErrorContains(t, err, tt.wantErr)
+			assert.Equal(t, TaskList{}, got, "an error must return the zero TaskList, never a partial one")
+		})
+	}
+}
+
+func TestSaveTasks_GatesRoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "tasks.yaml")
+
+	want := TaskList{Tasks: []Task{
+		{ID: 1, Name: "First", Prompt: "p", State: PendingState, Gates: []Gate{
+			{Cmd: "go test ./..."},
+			{Cmd: "echo one\necho \"two\"\n"},
+		}},
+	}}
+	require.NoError(t, SaveTasks(path, want))
+
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+
+	got, err := ParseTasks(data)
+	require.NoError(t, err)
+	assert.Equal(t, want, got, "gates must round-trip verbatim and in order")
+}
+
+func TestSaveTasks_OmitsEmptyGates(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "tasks.yaml")
+
+	require.NoError(t, SaveTasks(path, TaskList{Tasks: []Task{{ID: 1, Name: "First", Prompt: "p", State: PendingState}}}))
+
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.NotContains(t, string(data), "gates", "a task without gates must not gain a gates key on save")
+}
