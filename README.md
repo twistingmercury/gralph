@@ -65,7 +65,7 @@ after `Some tasks failed previous runs:` instead, and each failed row ends in
 
 A task file is a `tasks` list. Each task needs a unique positive integer `id`,
 a `name` (unique, ignoring case and surrounding spaces), and a `prompt`. `state`
-is optional:
+and `gates` are optional:
 
 ```yaml
 tasks:
@@ -77,6 +77,8 @@ tasks:
 
       Verification:
       - Command: go test ./internal/widget/...
+    gates:
+      - cmd: go test ./internal/widget/...
   - id: 2
     name: Expose GET /widgets/{id}
     state: pending
@@ -87,6 +89,8 @@ tasks:
 - `state` is `pending`, `completed`, or `failed`. Leave it out for new work;
   it's read as `pending`.
 - Gralph adds an `error` field when a task fails. The session never writes it.
+- `gates` is a list of commands gralph runs itself once the task's session says
+  it's done (see [Gates](#gates)). Each entry has exactly one key, `cmd`.
 - Tasks run in file order. The `id` just identifies a task; it doesn't set the
   order.
 
@@ -127,7 +131,9 @@ output (lines that are just code fences don't count). Your shared prompt should
 ask Claude to end with a JSON line like `{"state": "completed", "error": ""}`.
 
 - If that line is valid JSON with `state: "completed"` **and** the session
-  exits zero, the task is `completed` and gralph saves the file.
+  exits zero, gralph runs the task's [gates](#gates), if it has any. When they
+  all pass, or there are none, the task is `completed` and gralph saves the
+  file.
 - Anything else marks the task `failed`: a `failed` state, a missing or broken
   line, or a non-zero exit. Gralph saves the file, reports
   `task <id>: <name> failed: <error>` (the JSON `error`, or the exit status if
@@ -147,6 +153,35 @@ file and renames it over the original), so a crash never leaves you with half a
 file. The catch: comments and custom formatting don't survive, and every task's
 `state` gets written out explicitly.
 
+### Gates
+
+Claude saying a task is done isn't proof. A task can list `gates`: commands
+gralph runs itself once the session exits zero and reports `completed`.
+
+- Gates run in file order, one at a time, through `sh`, from the directory you
+  started gralph in. Pipes and other shell syntax work.
+- A gate passes when it exits zero. Gralph doesn't read its output.
+- If every gate passes, the task is `completed`. The first gate that fails
+  marks the task `failed` with `gate "<cmd>" failed: <exit status>` as its
+  error, the rest of its gates are skipped, and the run stops like any other
+  failure.
+- Gates don't run when the session itself failed.
+- Claude never sees the gates. If you want Claude to run the same checks
+  before it finishes (you do), say so in the prompt.
+
+In plain mode gralph prints `gate: <cmd>` before each gate, and the gate's
+output passes straight through. In the full-screen view each gate shows up in
+the Claude activity pane as `→ gate <cmd>` followed by its output.
+
+A few things to know:
+
+- There's no timeout. A gate that never exits hangs the run until you stop it.
+- Write gates that check instead of fix: `test -z "$(gofmt -l .)"`, not
+  `gofmt -w .`. Nothing commits what a gate changes.
+- Resetting a gate-failed task to `pending` runs its whole session again, not
+  just the gates. Setting it to `completed` by hand skips them.
+- `--dry-run` checks that `gates` is well formed. It never runs a gate.
+
 ### The full-screen view
 
 The view has three panes, each with a title bar, over a one-line legend:
@@ -157,8 +192,9 @@ The view has three panes, each with a title bar, over a one-line legend:
   colored by state. The running task shows `in progress`; that's display only
   and never written to the file.
 - **Claude activity** (right): what the session is doing: Claude's text, one
-  `→ <tool> <target>` line per tool call, and anything on stderr. It keeps up
-  with new lines as long as you're scrolled to the bottom.
+  `→ <tool> <target>` line per tool call, anything on stderr, and then each
+  gate and its output. It keeps up with new lines as long as you're scrolled to
+  the bottom.
 
 Keys:
 
@@ -194,7 +230,8 @@ Want the background? The idea behind gralph is in
 - **You need the `claude` CLI on your `PATH`.** Gralph calls it directly.
 - **Only run task files you trust.** `--dangerously-skip-permissions` means
   Claude won't stop to ask before running commands or editing files. Treat the
-  prompt and task files like code you're about to run.
+  prompt and task files like code you're about to run. Gate commands are run by
+  gralph itself through `sh`, with no sandbox.
 - **Every session starts from scratch.** A session sees the shared prompt and
   its own task, nothing else. If a task depends on earlier work, say so in the
   prompt, or make sure the repository shows it.
@@ -204,8 +241,8 @@ Want the background? The idea behind gralph is in
   set that task's `state` back to `pending` (or `completed`) by hand, and run
   again.
 - **Ctrl-C stops the run cleanly.** In plain mode, SIGINT (Ctrl-C) or SIGTERM
-  stops the current Claude session and the run. Gralph kills Claude's whole
-  process group, so nothing Claude started is left running. The interrupted
+  stops the current Claude session or gate and the run. Gralph kills Claude's
+  whole process group, so nothing Claude started is left running. The interrupted
   task and the file stay as they were, so the next run picks it up again. In
   the full-screen view, Ctrl-C is just a key (see `q` above). A SIGINT or
   SIGTERM from outside stops a running loop without asking, closes the view,
