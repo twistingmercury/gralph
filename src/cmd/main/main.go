@@ -48,14 +48,12 @@ func main() {
 	session := validateSessionFlags()
 
 	if err := skillinstall.Check(); err != nil {
-		_, _ = fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		os.Exit(1)
+		fatal(err)
 	}
 
 	if *dryRunFlag {
 		if err := looper.DryRun(os.Stdout, *tasksFlag, *gateTimeoutFlag, *sandboxFlag, *commitFlag); err != nil {
-			_, _ = fmt.Fprintf(os.Stderr, "error: %v\n", err)
-			os.Exit(1)
+			fatal(err)
 		}
 
 		return
@@ -70,9 +68,15 @@ func main() {
 	}
 
 	if err := looper.Start(ctx, *promptFlag, *tasksFlag, *gateTimeoutFlag, session, *commitFlag); err != nil {
-		_, _ = fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		os.Exit(1)
+		fatal(err)
 	}
+}
+
+// fatal is the one way to fail at startup, so every startup error has the
+// same "error: " prefix and exit code 1.
+func fatal(err error) {
+	_, _ = fmt.Fprintf(os.Stderr, "error: %v\n", err)
+	os.Exit(1)
 }
 
 // isPlain reports whether gralph runs in plain mode: on --dry-run or
@@ -176,8 +180,7 @@ func checkInstallSkill() {
 
 	path, err := skillinstall.Install()
 	if err != nil {
-		_, _ = fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		os.Exit(1)
+		fatal(err)
 	}
 
 	fmt.Println(path)
@@ -192,8 +195,7 @@ func validateGateTimeout() {
 	}
 
 	if err := checkGateTimeout(*gateTimeoutFlag); err != nil {
-		_, _ = fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		os.Exit(1)
+		fatal(err)
 	}
 }
 
@@ -211,8 +213,7 @@ func checkGateTimeout(v string) error {
 func validateSessionFlags() []string {
 	args, err := sessionArgs(*sandboxFlag, *skipPermsFlag, *dryRunFlag)
 	if err != nil {
-		_, _ = fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		os.Exit(1)
+		fatal(err)
 	}
 
 	return args
