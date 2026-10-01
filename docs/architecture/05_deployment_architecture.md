@@ -1,8 +1,8 @@
 # Gralph — Deployment Architecture
 
-> **Version**: v07
+> **Version**: v08
 > **Date**: 2026-10-01
-> **Notes**: `make test` and the e2e container run tests without `-v`, so passing runs print one line per package.
+> **Notes**: Updated test coverage list to include sandbox flags, commits, and skill check; clarified e2e fake uses FAKECLAUDE_* env vars; fixed make install description (depends on local, so always rebuilds).
 
 [Back to Overview](00_overview.md) | [Back to Project README](../../README.md)
 
@@ -54,7 +54,7 @@ make local install   # builds native, copies to ~/go/bin
 gralph --version
 ```
 
-`make local` builds the binary to `.bin/local/gralph`. `make install` copies it to GOBIN (default `~/go/bin`). Always run both together; `make install` alone will copy a stale binary if the source changed.
+`make local` builds the binary to `.bin/local/gralph`. `make install` copies it to GOBIN (default `~/go/bin`); `make install` depends on `local`, so it always rebuilds.
 
 ### Release Binaries
 
@@ -77,7 +77,7 @@ one for your platform onto your PATH, or build from source with
 
 1. **Docker image build**: Uses `build/Dockerfile` with base image `ghcr.io/twistingmercury/golang-tooling:go1.27.1`; only `src/` (the Go module) is copied into the image
 2. **In-container lint**: goimports, golangci-lint, govulncheck, gosec
-3. **In-container unit tests**: `go test ./...`
+3. **In-container unit tests**: `CGO_ENABLED=1 go test -race ./...`
 4. **Cross-compilation**: Builds binaries for linux and darwin on amd64 and arm64
 5. **Binary export**: Outputs to `.bin/<arch>/<os>/gralph`
 6. **E2E tests**: Runs `tests/e2e` suite in a container using docker-compose
@@ -143,7 +143,7 @@ GitHub Actions runs on `develop` and `main` branches for both push and pull requ
 - Separate Go module at `tests/e2e/` (still at repository root); `go test ./...` from `src/` never includes them
 - Black-box: no internal imports, tests the gralph binary as a subprocess
 - Uses a fake `claude` executable (built in test setup) on PATH
-- Driven by env vars: `FAKE_CLAUDE_OUTPUT` to customize Claude's behavior
+- Driven by env vars: `FAKECLAUDE_*` to customize Claude's behavior
 - No terminal, so gralph always runs plain mode; the TUI is not e2e tested, and a test pins that `--no-tui` output matches the default
 - Tests cover:
   - Valid task files, completed tasks, failed tasks, missing result line
@@ -151,7 +151,10 @@ GitHub Actions runs on `develop` and `main` branches for both push and pull requ
   - Signal handling (SIGINT/SIGTERM kills claude group)
   - Dry-run validation (--dry-run works, doesn't run claude)
   - Prompt formatting (task + shared prompt combined correctly)
-  - Gates: passing gates, a failing gate (and the blocked next run), gates skipped after a failed session, dry-run gate validation
+  - Permission flags: `--sandbox-settings` and `--skip-permissions`, error cases (neither or both), settings file validation
+  - Gates: parsing, passing gates, a failing gate blocks the run, gates skipped after a failed session, dry-run gate validation, gate timeouts
+  - Commits: one commit per task after its gates pass, no commit for a failed task, the clean work tree and ignored task file checks, a rejecting hook, `--dry-run --commit`
+  - Skill check: a missing or outdated skill stops the run; `--install-skill`
 - Run via `make build` → docker-compose in container (authoritative)
 - Native e2e run possible with `make local && cd tests/e2e && GRALPH_BINARY=... go test` but not recommended (Go test cache can mask binary changes)
 

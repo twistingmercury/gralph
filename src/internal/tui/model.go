@@ -292,8 +292,8 @@ func pane(name string, vp viewport.Model) string {
 	return lipgloss.JoinVertical(lipgloss.Left, titleBar, body)
 }
 
-// layout sizes the panes to fill a width x height window, following
-// docs/tui_mock_up.txt; each pane gives up one line to its title bar.
+// layout sizes the panes to fill a width x height window; each pane gives up
+// one line to its title bar.
 func (m *Model) layout(width, height int) {
 	legendH := 3
 	topH := max(height-legendH, 0)

@@ -222,12 +222,15 @@ func TestLoop_ClaudeMissingFromPath(t *testing.T) {
 
 // TestIterationsFlagRejected verifies that --iterations no longer exists as
 // a flag: gralph must reject it as unknown rather than silently accepting or
-// ignoring it.
+// ignoring it. If the flag came back, this run would still exit non-zero for
+// the missing --prompt and usage would list the flag, so the unknown-flag
+// line and pflag's exit code 2 are what pin it.
 func TestIterationsFlagRejected(t *testing.T) {
 	t.Parallel()
 	result := runCLI(t, "--iterations=3")
-	require.NotEqual(t, 0, result.exitCode, "stdout:\n%s\nstderr:\n%s", result.stdout, result.stderr)
-	assert.Contains(t, strings.ToLower(result.stderr), "iterations")
+	require.Equal(t, 2, result.exitCode, "stdout:\n%s\nstderr:\n%s", result.stdout, result.stderr)
+	assert.Contains(t, result.stderr, "unknown flag: --iterations\n")
+	assert.NotContains(t, result.stderr, "required flag")
 }
 
 // TestStart_EmptyPrompt verifies that an empty prompt file fails startup

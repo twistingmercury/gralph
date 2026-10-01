@@ -114,3 +114,54 @@ func TestRunLoop_SavesAfterEachCompletedTask(t *testing.T) {
 	assert.Equal(t, tasks.CompletedState, saved.Tasks[0].State)
 	assert.Equal(t, tasks.PendingState, saved.Tasks[1].State)
 }
+
+// unsavableTasksFile returns a two-task list and a task file path whose
+// directory is gone, as when it is removed during a run. A read-only
+// directory would not do: the release build runs the tests as root, which
+// ignores directory permissions, so the save would succeed there.
+func unsavableTasksFile(t *testing.T) (string, *tasks.TaskList) {
+	t.Helper()
+
+	tasksYAML := "tasks:\n  - {id: 1, name: First, prompt: p1, state: pending}\n  - {id: 2, name: Second, prompt: p2, state: pending}\n"
+	tl, err := tasks.ParseTasks([]byte(tasksYAML))
+	require.NoError(t, err)
+
+	tasksPath := filepath.Join(t.TempDir(), "removed", "tasks.yaml")
+
+	return tasksPath, &tl
+}
+
+// TestRunLoop_FailedSaveAfterCompletedTaskStopsRun proves a completed task
+// whose state cannot be written stops the run: carrying on would run later
+// tasks while the file still calls this one pending, so the next run would
+// repeat it.
+func TestRunLoop_FailedSaveAfterCompletedTaskStopsRun(t *testing.T) {
+	useFakeClaude(t)
+	recordPath := filepath.Join(t.TempDir(), "record.log")
+	t.Setenv("FAKE_CLAUDE_RECORD", recordPath)
+	tasksPath, tl := unsavableTasksFile(t)
+
+	err := runLoop(context.Background(), "prompt", tl, tasksPath, "", bypass, nil, nil)
+
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "task 1: First: failed to save task state")
+
+	records := readFakeClaudeRecords(t, recordPath)
+	assert.Len(t, records, 1, "task 2 must never start once the save has failed")
+}
+
+// TestRunLoop_FailedSaveAfterFailedTaskReportsBoth proves that when the
+// session fails and the save fails too, the user is told both: the task
+// failure alone would hide that the file still says pending, and the save
+// failure alone would hide why the run stopped.
+func TestRunLoop_FailedSaveAfterFailedTaskReportsBoth(t *testing.T) {
+	useFakeClaude(t)
+	t.Setenv("FAKE_CLAUDE_OUTPUT", `{"state":"failed","error":"boom"}`)
+	tasksPath, tl := unsavableTasksFile(t)
+
+	err := runLoop(context.Background(), "prompt", tl, tasksPath, "", bypass, nil, nil)
+
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "task 1: First failed: boom")
+	assert.ErrorContains(t, err, "failed to save tasks to")
+}

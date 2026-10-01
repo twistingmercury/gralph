@@ -1,8 +1,8 @@
 # Gralph — Architecture Overview
 
-> **Version**: v07
-> **Date**: 2026-09-30
-> **Notes**: With `--commit`, the task file must be git-ignored or outside the repo; gralph uses plain `git add -A` without pathspec exclusions; git stops gracefully on cancel (ADR-015).
+> **Version**: v08
+> **Date**: 2026-10-01
+> **Notes**: Removed production-ready claim to match README's Emerging maturity label; clarified prompt is Markdown, task list is YAML.
 
 [Back to Project README](../../README.md)
 
@@ -18,13 +18,13 @@
 
 Gralph is a Go CLI that automates "Ralph loops": structured, multi-step AI workflows where a shared prompt is combined with sequential tasks and executed in fresh Claude sessions. Each task runs independently, with state tracked atomically in a YAML file. A failed task blocks the run until manually addressed, ensuring intentional intervention.
 
-Gralph was built specifically for Claude Code (`claude.ai/code`); an agent-agnostic runtime was prototyped and rolled back. The CLI is Unix-only, production-ready for CLI deployment, and designed for use by developers and automation scripts.
+Gralph was built specifically for Claude Code (`claude.ai/code`); an agent-agnostic runtime was prototyped and rolled back. The CLI is Unix-only and designed for use by developers and automation scripts.
 
 ## Core Concept
 
 The Ralph loop is a command sequence driven by a shared prompt and an ordered task list. Gralph implements this pattern by:
 
-1. Loading a shared prompt and task list (both YAML)
+1. Loading a shared prompt (Markdown) and task list (YAML)
 2. For each pending task, combining the prompt + task and starting a fresh `claude --print` session with the session flags chosen by `--sandbox-settings` (sandboxed) or `--skip-permissions` (no sandbox); the TUI adds `--output-format stream-json --verbose`
 3. Reading Claude's output to determine success/failure
 4. When Claude reports success, running the task's `gates` (commands listed in the task file) and requiring every one to exit zero

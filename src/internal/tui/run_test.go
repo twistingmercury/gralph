@@ -145,6 +145,43 @@ func TestRun_OutsideCancelStopsRun(t *testing.T) {
 	r := waitRun(t, done)
 	require.NoError(t, r.err)
 	assert.Equal(t, 1, r.code)
+	assert.Equal(t, "Run stopped by signal", r.summary)
+	got, err := os.ReadFile(tasksPath)
+	require.NoError(t, err)
+	assert.Equal(t, tasksYAML, string(got))
+}
+
+// The model tests only show that y calls whatever cancel the model was given;
+// this one shows Run gives it the cancel that stops the real session. The
+// context is never cancelled by the test itself, so only the keys can end the
+// run; the cleanup cancel is there to stop the fake claude if they do not.
+func TestRun_ConfirmedStopCancelsRun(t *testing.T) {
+	dir := t.TempDir()
+	readyPath := filepath.Join(dir, "ready")
+	tasksPath := filepath.Join(dir, "tasks.yaml")
+	t.Setenv("FAKE_CLAUDE_BLOCK", "1")
+	t.Setenv("FAKE_CLAUDE_READY", readyPath)
+	tasksYAML := "tasks:\n  - {id: 1, name: First, prompt: p1, state: pending}\n"
+	require.NoError(t, os.WriteFile(tasksPath, []byte(tasksYAML), 0o600))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	w, done := startRun(t, ctx, tasksPath)
+
+	require.Eventually(t, func() bool {
+		_, err := os.Stat(readyPath)
+		return err == nil
+	}, 10*time.Second, 10*time.Millisecond, "fake claude never became ready")
+
+	_, err := w.Write([]byte("q"))
+	require.NoError(t, err)
+	_, err = w.Write([]byte("y"))
+	require.NoError(t, err)
+
+	r := waitRun(t, done)
+	require.NoError(t, r.err)
+	assert.Equal(t, 1, r.code)
+	assert.Equal(t, "Run stopped by user", r.summary)
 	got, err := os.ReadFile(tasksPath)
 	require.NoError(t, err)
 	assert.Equal(t, tasksYAML, string(got))

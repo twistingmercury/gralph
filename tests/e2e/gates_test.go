@@ -267,6 +267,30 @@ func TestGates_BadGateTimeoutFlagRunsNothing(t *testing.T) {
 	}
 }
 
+// The flag is passed alone: with --prompt and --tasks also missing, only a
+// check that runs before the required-flag check reports the bad value.
+func TestGates_BadGateTimeoutFlagIsReportedBeforeAnythingElse(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		arg  string
+	}{
+		{name: "unitless", arg: "--gate-timeout=30"},
+		{name: "explicitly empty", arg: "--gate-timeout="},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			result := runCLI(t, tt.arg)
+
+			require.Equal(t, 1, result.exitCode, "stdout:\n%s\nstderr:\n%s", result.stdout, result.stderr)
+			assert.Contains(t, result.stderr, "error: --gate-timeout: must be a duration string such as 90s or 10m\n")
+			assert.NotContains(t, result.stderr, "required flag")
+		})
+	}
+}
+
 func TestGates_MultiLineGateErrorNamesOnlyTheFirstLine(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

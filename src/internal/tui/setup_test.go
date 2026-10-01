@@ -56,16 +56,24 @@ func TestSetup_RejectsInvalidPaths(t *testing.T) {
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			s := NewSetup("given.yaml", "")
+			givenTasks, givenPrompt := "given.yaml", ""
 			if tc.tasks {
-				s = NewSetup("", "given.md")
+				givenTasks, givenPrompt = "", "given.md"
 			}
+
+			s := NewSetup(givenTasks, givenPrompt)
 
 			s, cmd := enterPath(t, s, tc.path)
 
 			assert.False(t, isQuit(cmd))
 			assert.Equal(t, 0, s.focus)
 			assert.Contains(t, s.View().Content, tc.wantErr)
+			// The caller reads these once the screen closes; a rejected entry
+			// must not leave a path or loaded content behind for it to use.
+			assert.Equal(t, givenTasks, s.TasksPath())
+			assert.Equal(t, givenPrompt, s.PromptPath())
+			assert.Nil(t, s.Tasks())
+			assert.Empty(t, s.Prompt())
 		})
 	}
 }

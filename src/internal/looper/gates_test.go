@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -122,7 +123,6 @@ func TestRunLoop_GateShellBehavior(t *testing.T) {
 	}{
 		{name: "pipes and substitution", cmd: `test "$(printf ab | tr a-z A-Z)" = AB`},
 		{name: "multi-line command", cmd: "x=1\ntest \"$x\" = 1"},
-		{name: "stdin is empty, not inherited", cmd: `test -z "$(cat)"`},
 		{name: "exit code is reported", cmd: "exit 3", wantErr: `gate "exit 3" failed: exit status 3`},
 		{name: "command not found", cmd: "gralph-no-such-command", wantErr: `gate "gralph-no-such-command" failed: exit status 127`},
 		{name: "shell syntax error", cmd: `echo "unterminated`, wantErr: `gate "echo \"unterminated" failed: exit status`},
@@ -169,6 +169,66 @@ func TestRunLoop_PlainPrintsGateLineAndOutput(t *testing.T) {
 	_, err = buf.ReadFrom(r)
 	require.NoError(t, err)
 	assert.Contains(t, buf.String(), "gate: echo gate-says-hi\ngate-says-hi\n")
+}
+
+func TestRunLoop_PlainPassesGateStderrThrough(t *testing.T) {
+	useFakeClaude(t)
+	tasksPath := filepath.Join(t.TempDir(), "tasks.yaml")
+
+	origStderr := os.Stderr
+	t.Cleanup(func() { os.Stderr = origStderr })
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	os.Stderr = w
+
+	runErr := runLoop(context.Background(), "prompt", gatedTask(tasks.Gate{Cmd: "echo gate-stderr-marker >&2"}), tasksPath, "", bypass, nil, nil)
+
+	require.NoError(t, w.Close())
+	os.Stderr = origStderr
+	require.NoError(t, runErr)
+
+	var buf bytes.Buffer
+	_, err = buf.ReadFrom(r)
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "gate-stderr-marker\n", "a gate's stderr is where a failing check explains itself")
+}
+
+// Under go test stdin is already empty, so a gate that inherited it would
+// still read nothing. Stdin is pointed at a file with content for the length
+// of the test, which is why this test must never call t.Parallel.
+func TestRunLoop_GateStdinIsEmptyNotInherited(t *testing.T) {
+	useFakeClaude(t)
+	dir := t.TempDir()
+	tasksPath := filepath.Join(dir, "tasks.yaml")
+	stdinPath := filepath.Join(dir, "stdin")
+	require.NoError(t, os.WriteFile(stdinPath, []byte("gralph-stdin-marker\n"), 0o600))
+
+	stdin, err := os.Open(stdinPath)
+	require.NoError(t, err)
+	origStdin, origStdout := os.Stdin, os.Stdout
+	t.Cleanup(func() {
+		os.Stdin, os.Stdout = origStdin, origStdout
+		_ = stdin.Close()
+	})
+	os.Stdin = stdin
+
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	os.Stdout = w
+
+	// The brackets show everything the gate read before end-of-file.
+	gate := tasks.Gate{Cmd: `printf 'gate-read=[%s]\n' "$(cat)"`}
+	runErr := runLoop(context.Background(), "prompt", gatedTask(gate), tasksPath, "", bypass, nil, nil)
+
+	require.NoError(t, w.Close())
+	os.Stdout = origStdout
+	require.NoError(t, runErr)
+
+	var buf bytes.Buffer
+	_, err = buf.ReadFrom(r)
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "gate-read=[]\n", "the gate must see end-of-file before any input")
+	assert.NotContains(t, buf.String(), "gralph-stdin-marker", "gralph's stdin must not reach a gate")
 }
 
 func TestRun_GateOutputArrivesAsActivity(t *testing.T) {
@@ -325,6 +385,119 @@ func TestRun_GateTimeoutFailsTaskAndSkipsLaterGates(t *testing.T) {
 			assert.Equal(t, wantErr, saved.Tasks[0].Error)
 		})
 	}
+}
+
+// descendantSleep is the child a spawningGate leaves running. The odd duration
+// makes it findable (`pgrep -f 'sleep 7919'`) if a run ever leaks one.
+const descendantSleep = "sleep 7919"
+
+// spawningGate is a gate whose shell stays the parent of a long-lived child.
+// A bare `sleep` gate proves nothing about the process group: the shell
+// replaces itself with it, so killing the one direct child kills everything.
+// The child's output goes to /dev/null so that, if it does survive, the stream
+// path's pipes still close and the test fails on the pid instead of hanging.
+// The pid file is renamed into place so it is never seen half-written.
+func spawningGate(pidPath, timeout string) tasks.Gate {
+	cmd := descendantSleep + " >/dev/null 2>&1 & printf %s $! > '" + pidPath + ".tmp' && mv '" + pidPath + ".tmp' '" + pidPath + "'; wait"
+	return tasks.Gate{Cmd: cmd, Timeout: timeout}
+}
+
+// trackDescendant waits for a spawningGate's child and makes sure a failing
+// test cannot leave it running.
+func trackDescendant(t *testing.T, pidPath string, runErrCh <-chan error) int {
+	t.Helper()
+	pid := waitForProcessTreePID(t, pidPath, runErrCh)
+	t.Cleanup(func() { _ = syscall.Kill(pid, syscall.SIGKILL) })
+
+	return pid
+}
+
+func assertProcessGone(t *testing.T, pid int, msg string) {
+	t.Helper()
+	gone := func() bool { return !unixProcessIsRunning(pid) }
+	assert.Eventually(t, gone, 5*time.Second, 10*time.Millisecond, msg)
+}
+
+func TestRun_GateTimeoutKillsTheGatesDescendants(t *testing.T) {
+	tests := []struct {
+		name   string
+		stream bool
+	}{
+		{name: "plain"},
+		{name: "stream", stream: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) { gateTimeoutKillsDescendant(t, tt.stream) })
+	}
+}
+
+func gateTimeoutKillsDescendant(t *testing.T, stream bool) {
+	useFakeClaude(t)
+	dir := t.TempDir()
+	pidPath := filepath.Join(dir, "descendant-pid")
+
+	var rec recorder
+	var report func(Event)
+	if stream {
+		report = rec.report
+	}
+
+	// Long enough for the shell to record the pid before the deadline.
+	tl := gatedTask(spawningGate(pidPath, "500ms"))
+	err := Run(context.Background(), "prompt", tl, filepath.Join(dir, "tasks.yaml"), "", bypass, nil, report)
+
+	// The gate has already ended, so there is no run to watch while waiting.
+	pid := trackDescendant(t, pidPath, nil)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "timed out after 500ms")
+	assertProcessGone(t, pid, "a process the gate started must die with it on a timeout")
+}
+
+func TestRun_CancelDuringGateKillsTheGatesDescendants(t *testing.T) {
+	tests := []struct {
+		name   string
+		stream bool
+	}{
+		{name: "plain"},
+		{name: "stream", stream: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) { cancelDuringGateKillsDescendant(t, tt.stream) })
+	}
+}
+
+func cancelDuringGateKillsDescendant(t *testing.T, stream bool) {
+	useFakeClaude(t)
+	dir := t.TempDir()
+	pidPath := filepath.Join(dir, "descendant-pid")
+
+	var rec recorder
+	var report func(Event)
+	if stream {
+		report = rec.report
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	tl := gatedTask(spawningGate(pidPath, ""))
+	errCh := make(chan error, 1)
+	go func() { errCh <- Run(ctx, "prompt", tl, filepath.Join(dir, "tasks.yaml"), "", bypass, nil, report) }()
+
+	pid := trackDescendant(t, pidPath, errCh)
+	cancel()
+
+	select {
+	case err := <-errCh:
+		require.Error(t, err)
+		assert.ErrorContains(t, err, "task 1: First failed: gate")
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run did not return after a cancel during a gate")
+	}
+
+	assertProcessGone(t, pid, "a process the gate started must die with it on a cancel")
 }
 
 func TestRun_GateWithinTimeoutPasses(t *testing.T) {

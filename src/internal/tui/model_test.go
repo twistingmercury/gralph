@@ -71,21 +71,26 @@ func TestUpdate_StatusesFollowEvents(t *testing.T) {
 	assert.Contains(t, render(m), row("✅", "1: First: completed", tasks.CompletedState))
 }
 
+// The styles are spelled out here rather than read from rowStyles, so the test
+// says which state gets which colour and a swap in that map fails it.
 func TestRenderTasks_RowFormatAndStylePerState(t *testing.T) {
 	states := []struct {
 		state, icon string
+		style       lipgloss.Style
 	}{
-		{tasks.PendingState, "  "},
-		{inProgressState, "▶ "},
-		{tasks.CompletedState, "✅"},
-		{tasks.FailedState, "❌"},
+		{tasks.PendingState, "  ", lipgloss.NewStyle().Foreground(lipgloss.Color("7"))},
+		{inProgressState, "▶ ", lipgloss.NewStyle().Italic(true).Foreground(lipgloss.Color("3"))},
+		{tasks.CompletedState, "✅", lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("10"))},
+		{tasks.FailedState, "❌", lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("9"))},
 	}
 	for _, tc := range states {
 		t.Run(tc.state, func(t *testing.T) {
 			m := New(&tasks.TaskList{Tasks: []tasks.Task{{ID: 26, Name: "Name", Prompt: "p", State: tc.state}}}, func() {})
+			text := "26: Name: " + tc.state
+			styled := tc.style.Render(text)
 
-			assert.Equal(t, row(tc.icon, "26: Name: "+tc.state, tc.state), m.taskPane.GetContent())
-			assert.NotEqual(t, "26: Name: "+tc.state, rowStyles[tc.state].Render("26: Name: "+tc.state))
+			assert.Equal(t, tc.icon+" "+styled, m.taskPane.GetContent())
+			assert.NotEqual(t, text, styled)
 		})
 	}
 }
@@ -324,6 +329,64 @@ func TestUpdate_InterruptedQuitsAfterRunDoneWithoutPrompt(t *testing.T) {
 	assert.Equal(t, 1, m.ExitCode())
 	assert.Equal(t, "Run stopped by signal", m.Summary())
 	assert.Equal(t, tasks.PendingState, m.tasks[0].State)
+}
+
+// A finished run holds the view open for q, and no RunDone is left to close
+// it, so a signal has to close it itself or the process outlives the signal.
+func TestUpdate_InterruptedAfterRunDoneQuits(t *testing.T) {
+	m, _ := runningModel(t, func() {})
+	m, quit := step(t, m, looper.Event{Kind: looper.RunDone})
+	require.False(t, quit)
+
+	m, quit = step(t, m, interruptedMsg{})
+	assert.True(t, quit)
+	assert.Equal(t, 0, m.ExitCode())
+	assert.Equal(t, "All tasks completed", m.Summary(), "the run's outcome stands, the signal stopped nothing")
+}
+
+// A prompt left open over a finished run would swallow the q that should exit,
+// and a y would report a stop that never happened.
+func TestUpdate_RunDoneClosesStopPrompt(t *testing.T) {
+	cancelled := false
+	m, _ := runningModel(t, func() { cancelled = true })
+	m = update(t, m, key('q'))
+	require.Contains(t, render(m), stopPrompt)
+
+	m, quit := step(t, m, looper.Event{Kind: looper.RunDone, Err: errors.New("disk full")})
+	assert.False(t, quit)
+	assert.NotContains(t, render(m), stopPrompt)
+	assert.Contains(t, render(m), "Run stopped: disk full · "+legend)
+
+	m, quit = step(t, m, key('q'))
+	assert.True(t, quit, "q exits a finished run instead of answering the prompt")
+	assert.False(t, cancelled)
+	assert.Contains(t, render(m), "Run stopped: disk full · "+legend)
+	assert.Equal(t, "Run stopped: disk full", m.Summary())
+}
+
+// The signal already stops the run, so the question on screen is moot: left
+// open, it would take the next key as its answer and a y would claim the stop
+// for the user.
+func TestUpdate_InterruptedClosesStopPrompt(t *testing.T) {
+	cancelled := false
+	m, _ := runningModel(t, func() { cancelled = true })
+	m = update(t, m, key('q'))
+	require.Contains(t, render(m), stopPrompt)
+
+	m, quit := step(t, m, interruptedMsg{})
+	assert.False(t, quit, "waits for RunDone")
+	assert.NotContains(t, render(m), stopPrompt)
+	assert.Contains(t, render(m), legend)
+
+	m, quit = step(t, m, key('y'))
+	assert.False(t, quit)
+	assert.False(t, cancelled, "y answers nothing once the prompt is closed")
+	assert.Equal(t, "Run stopped by signal", m.Summary())
+
+	m, quit = step(t, m, looper.Event{Kind: looper.RunDone, Err: context.Canceled})
+	assert.True(t, quit)
+	assert.Equal(t, 1, m.ExitCode())
+	assert.Equal(t, "Run stopped by signal", m.Summary())
 }
 
 func TestUpdate_SuccessHoldsUntilQuit(t *testing.T) {
