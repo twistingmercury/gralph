@@ -39,6 +39,14 @@ its timeout; the first gate that fails or times out marks the task `failed` and
 stops the run. Gates are never sent to the session, so the prompt must still
 tell Claude what to verify.
 
+With the `--commit` flag, Gralph also commits each task itself: once the
+session reported `completed` and every gate passed, it commits everything the
+task changed except `tasks.yaml`, with the task's `name` as the commit message.
+A failed task is not committed; its changes stay in the work tree for a person
+to sort out. Such a run needs a clean Git work tree to start, so the pair must
+be ignored by Git or kept outside the repository. Without the flag, Gralph
+never touches Git.
+
 A `tasks.yaml` that does not match the rules below is invalid and Gralph
 refuses to run it. There is no migration from other formats or older states.
 
@@ -65,6 +73,11 @@ in place when authorized.
    Every task's Verification lists the agreed gates, plus its own
    task-specific checks, so Claude runs them. The same commands also go in
    each task's `gates` list (step 5), so Gralph checks them itself.
+   Then ask whether the run will use `gralph --commit`. If it will, the
+   session must not commit: the `Commits` line in `prompt.md` reads "Do not
+   commit. Leave your changes in the work tree.", task names are written as
+   commit subjects (imperative, under about 70 characters), and no task prompt
+   mentions committing.
 4. Draft the task list and show the user a summary, one line per task:
    `<id>: <name> - <one short sentence>`. Nothing else goes in the summary.
    Ask whether they approve it or want changes. Revise and show the summary
@@ -103,10 +116,11 @@ in place when authorized.
 7. Write `prompt.md` from the prompt template. Replace every `GENERATE_*` token
    with project content and actual paths: full build/test commands and the
    project's commit policy, since the session sees only this prompt and one
-   task. Keep commits conditional on the project's authorization. Keep the
-   Rules and Finish sections as written so the pair works without this skill
-   installed. Apart from the quality gates, keep generic rules out of task
-   prompts; they live once, in `prompt.md`.
+   task. For a `--commit` run the `Commits` line tells the session not to
+   commit; otherwise keep commits conditional on the project's authorization.
+   Keep the Rules and Finish sections as written so the pair works without
+   this skill installed. Apart from the quality gates, keep generic rules out
+   of task prompts; they live once, in `prompt.md`.
 8. Validate `tasks.yaml` with `gralph -t <tasks.yaml> --dry-run`: it applies
    the same rules a real run does and exits non-zero on an invalid file. If
    `gralph` is not installed, check YAML syntax and the field rules in step 5
@@ -115,6 +129,10 @@ in place when authorized.
    `GENERATE_*` token remains in either file.
 9. Report both output paths and the checks performed. Do not launch the loop
    merely to validate generated files.
+   For a `--commit` run, also tell the user the `.gitignore` line that keeps
+   the pair out of Git (the output directory, or `tasks.yaml` and `prompt.md`),
+   unless the files are outside the repository or already ignored. Do not edit
+   `.gitignore` yourself unless asked.
 
 ## Task scope
 
@@ -134,5 +152,6 @@ quality gates on its own. When one step would break the gates until another
 lands, put the prerequisite step first (for example, update test fixtures
 before the change that needs them).
 
-Honor project policies for source commits, and never instruct the session to
-edit or commit `tasks.yaml`.
+Honor project policies for source commits unless the run uses `--commit`, where
+Gralph does the committing, and never instruct the session to edit or commit
+`tasks.yaml`.
