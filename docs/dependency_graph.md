@@ -3,7 +3,7 @@
 Package-level dependencies of the `src/` module. Standard library, third-party
 modules, test files, and `tests/` are left out.
 
-Solid arrows are Go imports. Dotted arrows are the embed and the build output.
+Solid arrows are Go imports. Dotted arrows are the embed.
 
 ```mermaid
 graph TD

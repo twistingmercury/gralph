@@ -1,8 +1,8 @@
 # Gralph — Architectural Decisions
 
-> **Version**: v10
-> **Date**: 2026-09-30
-> **Notes**: ADR-015 revised after review: gralph no longer names the task file to git, so with `--commit` the task file must be git-ignored or outside the repository; git is stopped with SIGTERM before SIGKILL; a git failure at startup is an error, not "no repository".
+> **Version**: v11
+> **Date**: 2026-10-01
+> **Notes**: Added amendment notes to ADR-001, ADR-003, ADR-011 and ADR-013 (amended by ADR-014 about session flags), and ADR-009 (amended by ADR-010 about stale skill detection); aligned ADR-013 and ADR-014 titles in summary table with headings.
 
 [Back to Overview](00_overview.md) | [Back to Project README](../../README.md)
 
@@ -38,8 +38,8 @@ Each architectural decision is recorded as an ADR with the following structure:
 | ADR-010 | Refuse to run with a stale installed skill     | Accepted | 2026-09-25 |
 | ADR-011 | Full-screen TUI by default, plain mode intact  | Accepted | 2026-09-25 |
 | ADR-012 | Bubble Tea v2 for the TUI, confined to its use | Accepted | 2026-09-25 |
-| ADR-013 | Gralph runs a task's gates after a session     | Accepted | 2026-09-30 |
-| ADR-014 | Sandboxed sessions; bypass only on request     | Accepted | 2026-09-30 |
+| ADR-013 | Gralph runs a task's gates after a completed session | Accepted | 2026-09-30 |
+| ADR-014 | Sessions run in Claude Code's sandbox; bypass only on request | Accepted | 2026-09-30 |
 | ADR-015 | Gralph commits a completed task on request     | Accepted | 2026-09-30 |
 
 ## Decisions
@@ -55,6 +55,8 @@ Early versions of gralph (tags v0.4.0–v0.5.2) attempted to build an agent-agno
 **Decision:**
 
 Gralph is Claude Code only. No agent abstraction layer, no provider profiles, no `--agent-*` flags. The CLI invokes `claude --print --dangerously-skip-permissions` directly, coupling the tool to Claude Code as a deliberate design choice.
+
+*Amended by ADR-014:* Sessions run with `--permission-mode acceptEdits --settings <merged JSON>` (sandboxed) or `--dangerously-skip-permissions` (not sandboxed), chosen by `--sandbox-settings` or `--skip-permissions`.
 
 **Consequences:**
 
@@ -120,6 +122,8 @@ Early versions (through v0.6.0) included an `--iterations` flag to retry failed 
 **Decision:**
 
 Each task runs in exactly one fresh `claude --print --dangerously-skip-permissions` session. There is no `--iterations` flag, no retry, no fallback logic. A failed task blocks the run. To resume, a person must inspect the failure, fix the cause (in the repo or the task prompt), then manually set the task's state to `pending` (or `completed`) before running again.
+
+*Amended by ADR-014:* The session flags are chosen by `--sandbox-settings` (sandboxed) or `--skip-permissions` (no sandbox).
 
 **Consequences:**
 
@@ -310,8 +314,11 @@ _Positive:_
 _Negative:_
 
 - Any local edits to the installed skill folder are lost on reinstall
-- Skill changes ship only with a new binary; a stale install is not detected during normal runs
 - Two install paths exist (flag for users, script for development)
+
+- Skill changes ship only with a new binary; a stale install is not detected during normal runs
+
+*Amended by ADR-010:* A stale install is now detected: a run or dry run exits 1 and tells the user to run `gralph --install-skill`.
 
 ---
 
@@ -367,6 +374,8 @@ There is one loop. `looper.Run` → `runLoop` takes a `report func(Event)` hook:
 - `report == nil` (plain): `runTaskPlain` runs `claude --print --dangerously-skip-permissions`, echoes the combined prompt, tees claude's stdout, and inherits stderr, exactly as before.
 - `report != nil` (TUI): `runTaskStream` runs `claude --print --output-format stream-json --verbose --dangerously-skip-permissions`, writes nothing to gralph's stdout or stderr, and reports `TaskStarted`, `Activity` (assistant text and tool calls, and claude's stderr lines), and `TaskFinished` events, then a final `RunDone`. The outcome comes from the `result` event's text with the same rules as plain mode.
 
+*Amended by ADR-014:* The session flags are `--permission-mode acceptEdits --settings <merged JSON>` (sandboxed) or `--dangerously-skip-permissions` (not sandboxed), chosen by `--sandbox-settings` or `--skip-permissions`.
+
 Both paths send the same combined prompt on stdin, and the loop rules (skip completed, save after every task, stop on first failure, cancel leaves the task untouched) live once in `runLoop`. Stream-json is used only on the TUI path. There are no runner, storage, or writer interfaces: `runLoop` still execs claude inline, and tests still drive a fake `claude` on `PATH`. `in progress` is display only and never written to `tasks.yaml`.
 
 **Consequences:**
@@ -397,7 +406,7 @@ ADR-011 needs a full-screen terminal UI: an alt screen, resizable panes, scrolli
 
 **Decision:**
 
-The TUI uses Bubble Tea v2 only: `charm.land/bubbletea/v2`, `charm.land/bubbles/v2` (viewport, textinput), and `charm.land/lipgloss/v2`. The v1 `github.com/charmbracelet/bubbletea`, `bubbles`, and `lipgloss` modules are never imported. These modules are imported only by `internal/tui` and `cmd/main`; `internal/looper` and `internal/tasks` never import them, so dependencies point one way: `cmd/main` → `internal/tui` → `internal/looper` → `internal/tasks`. The looper reaches the TUI only through the `report` hook, which `tui.Run` forwards to the program with `Send`. `cmd/main` uses `github.com/charmbracelet/x/term` for the terminal check. Bubble Tea's own signal handling is off (`tea.WithoutSignalHandler`), so the SIGINT/SIGTERM context from `cmd/main` stays the only outside stop.
+The TUI uses Bubble Tea v2 only: `charm.land/bubbletea/v2`, `charm.land/bubbles/v2` (viewport, textinput), and `charm.land/lipgloss/v2`. The v1 `github.com/charmbracelet/bubbletea`, `bubbles`, and `lipgloss` modules are never imported. These modules are imported only by `internal/tui`; `cmd/main`, `internal/looper`, and `internal/tasks` never import them, so dependencies point one way: `cmd/main` → `internal/tui` → `internal/looper` → `internal/tasks`. The looper reaches the TUI only through the `report` hook, which `tui.Run` forwards to the program with `Send`. `cmd/main` uses `github.com/charmbracelet/x/term` for the terminal check. Bubble Tea's own signal handling is off (`tea.WithoutSignalHandler`), so the SIGINT/SIGTERM context from `cmd/main` stays the only outside stop.
 
 **Consequences:**
 
@@ -467,7 +476,7 @@ _Positive:_
 
 _Negative:_
 
-- Gate commands are shell text from the task file, run without a sandbox; the file was already code to be trusted (it drives `--dangerously-skip-permissions`), and now gralph executes part of it directly
+- Gate commands are shell text from the task file, run without a sandbox; the file was already code to be trusted (it drives `--dangerously-skip-permissions`), and now gralph executes part of it directly. *Amended by ADR-014:* sessions no longer always run with `--dangerously-skip-permissions`; gates still run without a sandbox either way
 - A failed gate leaves whatever the session did, including commits, in the repository for a person to sort out
 - Resetting a gate-failed task to `pending` runs the whole session again, not just the gates; setting it to `completed` by hand skips the gates
 - Common gates are repeated in every task

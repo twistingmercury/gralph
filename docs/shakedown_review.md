@@ -4,8 +4,8 @@ Date: 2026-10-01, against `develop` at `fb47f35` (v0.9.2).
 
 The last four items of the shakedown: whether the tests assert things that
 matter, docs drift, stale leftovers, and the sandbox's placeholder dotfiles.
-Review only. Nothing listed here was fixed, except the leftovers in section 4.
-These are findings to pick from.
+The findings below are as they were found. What was done about them since is
+in "Outcome".
 
 How it was done: four independent reviewers (looper unit tests, the other unit
 tests, the e2e suite, the docs), plus a direct check of the sandbox behaviour.
@@ -24,6 +24,70 @@ the tests, so their findings are marked:
 | Docs              | The PR #22 renames left one stale name. Older drift is real, mostly in `03` (section 2)   |
 | Sandbox dotfiles  | A real hazard for `--commit`, not seen to bite yet (section 3)                            |
 | Stale leftovers   | Dealt with (section 4)                                                                    |
+
+## Outcome
+
+Applied on branch `maint/shakedown-leftovers`. The test findings were closed by
+a 10-task gralph loop run with `--commit`, one commit per task. Every task
+changed test files only, and each new or tightened test was shown to fail with
+the behaviour broken before the production code was restored.
+
+### Tests
+
+| Finding                                   | Result                                                                                   |
+| ----------------------------------------- | ---------------------------------------------------------------------------------------- |
+| T1                                        | Closed: a failed save stops the run, after a completed task and after a failed one       |
+| T2                                        | Closed: a failed save leaves the existing file untouched; the 2-space indent is pinned   |
+| T3                                        | Closed: `q` then `y` against a real blocked session, at the `tui.Run` level              |
+| T4                                        | Closed: `--iterations` must be rejected as an unknown flag                               |
+| T5                                        | Closed: the full commit message is asserted                                              |
+| T6                                        | Closed: a root-anchored ignore rule checked from a subdirectory                          |
+| T7                                        | Closed: a gate's child process is gone after a timeout and after a cancel                |
+| T8                                        | Closed: a gate's stderr reaches gralph's stderr in plain mode                            |
+| T9                                        | Closed: a bad or empty `--gate-timeout` is reported before any other flag error          |
+| T10                                       | Closed: the three confirm-prompt cases                                                   |
+| T11                                       | Not done, on purpose: `runTUI` reads the global flags and needs a terminal, so testing it means changing production code first |
+| `WithoutSignalHandler`, git's `WaitDelay` | Accepted as is                                                                           |
+
+From "Tests that prove less than their name says":
+
+| Test                                                         | Result                                           |
+| ------------------------------------------------------------ | ------------------------------------------------ |
+| `TestMissingPrompt`, `TestMissingTasks`, the dry-run half    | Closed: they match the error line, not the usage |
+| `TestHelpFlag`                                               | Closed: `--gate-timeout` and `--commit` added    |
+| `TestNonexistentFiles`                                       | Closed: the tasks-file error is asserted too     |
+| Gate "stdin is empty, not inherited"                         | Closed: replaced by a test with a real stdin     |
+| Commit "from a subdirectory"                                 | Closed by T6                                     |
+| `TestRun_NothingToCommitStillCompletes`                      | Closed: no `commit:` line when nothing is staged |
+| "StylePerState", the rejected setup entry, the signal summary | Closed                                          |
+| The skill hash test, e2e "git is never touched"              | Not done                                         |
+| Loose `NotEqual(0)` exit codes                               | Tightened only in the tests the loop touched     |
+
+Not done: everything under "Helpers" (including the environment leak),
+"Brittle", "Redundant", and "Other gaps".
+
+One thing the loop got wrong and that was fixed by hand afterwards: tests that
+forced a failed save with a read-only directory. The release build runs the
+unit tests as root, which ignores directory permissions, so T1's tests failed
+there and T2's skipped. Both now fail the save in a way that holds for any
+user. `TestSaveTasks_TargetDirNotWritable`, which predates this work, still
+skips as root.
+
+### Docs
+
+D1 to D14 and the cosmetic list are fixed, in place, on the same branch. The
+five architecture docs that changed had their Version, Date, and Notes bumped.
+
+- The older ADRs (001, 003, 009, 011, 013) keep their original text and carry
+  an "Amended by" note pointing at ADR-010 or ADR-014.
+- `03` now threads `--commit` through its flag list, diagrams, component table,
+  and process control section.
+- The `make install` warning is gone from `CLAUDE.md`, the README, and `05`.
+
+### Sandbox dotfiles
+
+No decision yet. The loop's shared prompt told sessions to leave the
+placeholder files alone and not report them (option 2, for that run only).
 
 ## 1. Do the tests assert things that matter?
 

@@ -20,7 +20,6 @@ context instead of one long session that drifts.
 - [How it works](#how-it-works)
 - [Key Considerations](#key-considerations)
 - [Development Considerations](#development-considerations)
-- [Versioning](#versioning)
 - [License](#license)
 
 ## Usage
@@ -516,9 +515,7 @@ make local install   # builds .bin/local/gralph, then copies it to ~/go/bin
 gralph --version
 ```
 
-Heads up: `make install` only copies the last local build, so always run it
-with `make local` like above, or you'll install a stale binary. `make help`
-lists every target.
+`make help` lists every target.
 
 `make build` is the release build, and it's exactly what CI runs
 ([build/build.sh](build/build.sh) is the only thing the CI workflow executes).

@@ -1,8 +1,8 @@
 # Gralph — Requirements
 
-> **Version**: v08
-> **Date**: 2026-09-30
-> **Notes**: With `--commit`, the task file must be git-ignored or outside the repo; gralph refuses to start otherwise; plain `git add -A` stages everything; git stops gracefully on cancel (ADR-015).
+> **Version**: v09
+> **Date**: 2026-10-01
+> **Notes**: Clarified Bubble Tea v2 modules imported only by internal/tui; cmd/main imports only x/term for terminal detection.
 
 [Back to Overview](00_overview.md) | [Back to Project README](../../README.md)
 
@@ -92,7 +92,7 @@ Claude Code users need a way to:
 - **No injectable runner** — Both test suites use a fake `claude` on PATH to drive the looper; runLoop execs inline
 - **Prompt passed via stdin** — Claude is invoked as `claude --print` plus the session flags, with the prompt on stdin: `--permission-mode acceptEdits --settings <merged JSON>` for `--sandbox-settings`, or `--dangerously-skip-permissions` for `--skip-permissions`. The TUI path adds `--output-format stream-json --verbose` right after `--print`; plain mode's output stays as it is
 - **Claude Code's sandbox** — Sandboxed runs need what it needs: bubblewrap and socat on Linux, Seatbelt on macOS. On the BSDs only `--skip-permissions` works
-- **Bubble Tea v2 only** — `charm.land/bubbletea/v2`, `bubbles/v2`, `lipgloss/v2`, imported only by `internal/tui` and `cmd/main`; never the v1 `github.com/charmbracelet/*` modules
+- **Bubble Tea v2 only** — `charm.land/bubbletea/v2`, `bubbles/v2`, `lipgloss/v2`, imported only by `internal/tui`; `cmd/main` imports `github.com/charmbracelet/x/term` for terminal detection only; never the v1 `github.com/charmbracelet/*` modules
 
 ### Business Constraints
 

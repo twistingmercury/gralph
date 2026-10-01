@@ -1,8 +1,8 @@
 # Gralph — System Architecture
 
-> **Version**: v10
-> **Date**: 2026-09-30
-> **Notes**: With `--commit`, the task file must be git-ignored or outside the repo; gralph checks this at startup; plain `git add -A` stages everything; git stops gracefully on cancel (ADR-015).
+> **Version**: v11
+> **Date**: 2026-10-01
+> **Notes**: Fixed gate validation rules (cmd required, timeout optional string); added git node and commit step to diagrams; clarified process control for graceful git stop; added whitespace trim to name uniqueness; added `--commit` to the flag list and to the `Start`/`Run` calls in the diagrams; fixed output case (PrintTasks) and Timeout type (string, not duration).
 
 [Back to Overview](00_overview.md) | [Back to Project README](../../README.md)
 
@@ -49,6 +49,8 @@ graph TB
     ResultParser -->|session outcome| Looper
     Looper -->|completed session: runGates| Gates["sh -c cmd<br/>(one per gate)"]
     Gates -->|exit code| Looper
+    Looper -->|gates pass: commit| Git["git add -A<br/>git commit -m<br/>(with --commit)"]
+    Git -->|exit code| Looper
     Looper -->|SaveTasks| TaskFile
 ```
 
@@ -57,7 +59,7 @@ graph TB
 ### CLI Entrypoint (cmd/main)
 
 **Responsibilities:**
-- Parse command-line flags (--prompt, --tasks, --sandbox-settings, --skip-permissions, --dry-run, --no-tui, --gate-timeout, --install-skill, --version)
+- Parse command-line flags (--prompt, --tasks, --sandbox-settings, --skip-permissions, --dry-run, --no-tui, --gate-timeout, --commit, --install-skill, --version)
 - Validate `--gate-timeout` (if set) before any load or run; bad value exits 1
 - Choose the mode: plain when `--dry-run`, `--no-tui`, or stdin or stdout is not a terminal (`github.com/charmbracelet/x/term`); otherwise the TUI
 - Pick the session flags (`validateSessionFlags`/`sessionArgs`), after the `--gate-timeout` check and plain mode's required flags and before the skill check: `looper.SandboxArgs` for `--sandbox-settings`, `looper.BypassArgs` for `--skip-permissions`. Both flags together, or neither on a real run, exits 1; an empty `--sandbox-settings=` counts as not passed. A dry run needs neither, but a settings file it is given is still checked. The result goes to `looper.Start` and `tui.Run`
@@ -130,11 +132,11 @@ graph TB
 - Unmarshal YAML without custom tags (rejects non-core tags)
 - Validate each task element in sequence:
   - `id`: required, positive int16, unique
-  - `name`: required, non-empty string, unique (case-insensitive)
+  - `name`: required, non-empty string, unique (case-insensitive, whitespace trimmed)
   - `prompt`: required, non-empty string
   - `state`: optional string, must be "pending", "completed", or "failed"
   - `error`: optional string, written by gralph only
-  - `gates`: optional sequence; each element a mapping whose only key is `cmd`, a nonblank string (errors read `tasks[<i>] (id <id>): gates[<j>]: cmd: <problem>`); stored unaltered and written back by `SaveTasks`, omitted when empty
+  - `gates`: optional sequence; each element a mapping with keys `cmd` (required, nonblank string) and `timeout` (optional, a duration string like `90s` or `10m`); unknown keys are rejected (errors read `tasks[<i>] (id <id>): gates[<j>]: <field>: <problem>`); stored unaltered and written back by `SaveTasks`, omitted when empty
 - Normalize `state`: empty → `pending`
 - Save tasks back to YAML with 2-space indent, atomically (temp file + rename)
 
@@ -150,9 +152,10 @@ graph TB
 ### Process Tree Manager (internal/looper/process_tree_unix.go)
 
 **Responsibilities:**
-- Configure spawned claude process to run in its own process group (Setpgid)
+- Configure spawned claude and gate processes to run in their own process group (Setpgid)
 - On signal (SIGINT, SIGTERM), kill the entire process group
-- Ensure no orphaned claude processes remain after cancellation
+- For git commits (when `--commit` is set), send SIGTERM first (`stopProcessTree`), wait up to 2 seconds (`gitStopGrace`), then SIGKILL only if still alive, so git can clean up its `index.lock` file
+- Ensure no orphaned processes remain after cancellation
 
 **Key Characteristics:**
 
@@ -160,7 +163,7 @@ graph TB
 | ------------------- | ------------------------------------------- |
 | OS Support          | Unix only (Linux, macOS, BSDs)              |
 | Signal Handling     | SIGINT, SIGTERM from context cancellation   |
-| Process Control     | kill(-pgid, signal) to terminate group      |
+| Process Control     | kill(-pgid, signal) to terminate group; SIGTERM then SIGKILL for git with 2s grace period |
 
 ### Stream Parser (internal/looper/stream.go)
 
@@ -207,7 +210,7 @@ graph TB
 
 | Characteristic      | Value                                   |
 | ------------------- | --------------------------------------- |
-| Input               | The task's `Gates` (`[]tasks.Gate`, each with `Cmd` string and optional `Timeout` duration) |
+| Input               | The task's `Gates` (`[]tasks.Gate`, each with `Cmd` string and optional `Timeout` string, parsed as a duration at run time) |
 | Output              | Nothing on success; the failed gate's error message; or a cancellation error |
 | Judged by           | Exit code only; output is shown, never parsed |
 | Seen by Claude      | Never; gates are not part of the stdin prompt |
@@ -258,7 +261,7 @@ sequenceDiagram
     CLI->>Looper: SandboxArgs(sandbox.json)
     Looper->>Filesystem: read sandbox.json
     Looper-->>CLI: session flags
-    CLI->>Looper: Start(ctx, prompt.md, tasks.yaml, gateTimeout, sessionArgs)
+    CLI->>Looper: Start(ctx, prompt.md, tasks.yaml, gateTimeout, sessionArgs, commit)
     Looper->>Filesystem: read prompt.md
     Looper->>Filesystem: read tasks.yaml
     Looper->>TaskParser: ParseTasks(yaml bytes)
@@ -275,7 +278,7 @@ sequenceDiagram
             Looper->>Gates: sh -c cmd, one gate at a time
             Gates-->>Looper: exit code (first non-zero fails the task)
         end
-        opt --commit and inside a git work tree
+        opt All gates passed and --commit is set
             Looper->>Git: add -A, then commit -m with the task name
             Git-->>Looper: exit code (non-zero fails the task)
         end
@@ -300,13 +303,13 @@ sequenceDiagram
     participant Claude
 
     User->>CLI: gralph [-p prompt.md] [-t tasks.yaml] (in a terminal)
-    CLI->>Looper: LoadPrompt / LoadTasks for the given paths
+    CLI->>Looper: LoadPrompt / LoadTasksReport for the given paths
     opt A path is missing
         CLI->>TUI: Setup(tasksPath, promptPath)
         TUI->>Looper: LoadTasks / LoadPrompt on each entry
         TUI-->>CLI: paths, prompt, task list
     end
-    CLI->>TUI: Run(ctx, prompt, tl, tasksFile, gateTimeout, sessionArgs)
+    CLI->>TUI: Run(ctx, prompt, tl, tasksFile, gateTimeout, sessionArgs, repo)
     TUI->>Looper: Run(runCtx, ..., report) in a goroutine
     loop For each pending task
         Looper-->>TUI: TaskStarted
@@ -316,6 +319,9 @@ sequenceDiagram
         Looper->>Looper: session outcome from result event text
         opt Session completed and the task has gates
             Looper-->>TUI: Activity (gate line, then its output lines)
+        end
+        opt All gates passed and --commit is set
+            Looper-->>TUI: Activity (commit line, then git output lines)
         end
         Looper->>Looper: SaveTasks
         Looper-->>TUI: TaskFinished
@@ -338,12 +344,12 @@ sequenceDiagram
     participant Filesystem
 
     User->>CLI: gralph -p prompt.md -t tasks.yaml --skip-permissions
-    CLI->>Looper: Start(ctx, prompt.md, tasks.yaml, gateTimeout, sessionArgs)
+    CLI->>Looper: Start(ctx, prompt.md, tasks.yaml, gateTimeout, sessionArgs, commit)
     Looper->>Filesystem: read tasks.yaml
     Looper->>Looper: ParseTasks
     Looper->>Looper: scan for failed tasks
     alt Any task.state == "failed"
-        Looper->>Looper: printTasks to stdout
+        Looper->>Looper: PrintTasks to stdout
         Looper-->>CLI: error("fix failed tasks...")
     else None failed
         Looper->>Looper: runLoop proceeds
@@ -363,6 +369,7 @@ sequenceDiagram
 | Looper      | Claude          | os/exec.Cmd, stdin/stdout/stderr | Invoke Claude session                      | Text (prompt)      |
 | Claude      | Looper          | stdout, exit code                | Return output and completion status        | Plain: text ending in a JSON result line; TUI: stream-json events, the `result` event's text ending in it |
 | Looper      | Gate commands   | os/exec.Cmd (`sh -c`), exit code | Check a completed task independently       | Shell command text; output shown, not parsed |
+| Looper      | Git             | os/exec.Cmd, stdin/stdout/stderr | Commit completed task's changes            | Shell commands (git add -A, git commit -m); output shown, not parsed |
 | Looper      | ProcessManager  | Setpgid, kill(-pgid)             | Configure and control subprocess lifecycle | Unix signals       |
 
 ## Boundary Definitions
