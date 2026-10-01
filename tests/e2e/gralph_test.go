@@ -71,17 +71,18 @@ func runTests(m *testing.M) int {
 		testBinaryPath = filepath.Join(tmpDir, "gralph")
 
 		// During `go test`, working directory is set to the package directory (tests/e2e).
-		// Two levels up reaches the module root.
+		// Two levels up reaches the repo root; gralph's own module lives in
+		// its src/ directory, and `go build` must run inside that module.
 		wd, err := os.Getwd()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "failed to get working dir: %v\n", err)
 			return 1
 		}
 
-		projectRoot := filepath.Join(wd, "..", "..")
+		moduleRoot := filepath.Join(wd, "..", "..", "src")
 
 		build := exec.Command("go", "build", "-o", testBinaryPath, "./cmd/main") // #nosec G204 -- fixed literal args
-		build.Dir = projectRoot
+		build.Dir = moduleRoot
 		build.Stdout = os.Stdout
 		build.Stderr = os.Stderr
 		if err := build.Run(); err != nil {

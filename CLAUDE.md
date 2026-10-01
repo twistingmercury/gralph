@@ -10,7 +10,7 @@ Gralph is a Go CLI that runs a "Ralph loop": for each open task it invokes `clau
 
 ```bash
 make local      # native build -> .bin/local/gralph (version ldflags from git tags)
-make test       # unit tests: go test -v ./cmd/... ./internal/...
+make test       # unit tests: go test -v ./cmd/... ./internal/... (run from src/)
 make analyze    # goimports -w (rewrites files), golangci-lint, govulncheck, gosec
 make build      # Docker release build (build/build.sh) — the only thing CI runs; also the only
                 # supported way to run the e2e suite (in a container, tests/docker-compose.yaml)
@@ -19,14 +19,15 @@ make build      # Docker release build (build/build.sh) — the only thing CI ru
 Single tests:
 
 ```bash
-go test ./internal/tasks -run TestParseTasks_Valid -count=1
+cd src && go test ./internal/tasks -run TestParseTasks_Valid -count=1
 # debugging shortcut only — the suite is meant to run in the container
 make local && cd tests/e2e && GRALPH_BINARY=$PWD/../../.bin/local/gralph go test -run TestName -count=1 .
 ```
 
 Easy to get wrong:
 
-- `tests/e2e` is a **separate Go module**; `go test ./...` from the root never runs it.
+- The Go module is in `src/`. `go test ./...` from the repository root finds no module; run from `src/` or use `make test`.
+- `tests/e2e` is a **separate Go module** at the repository root; `go test ./...` from `src/` never runs it.
 - A native e2e run can print a **cached pass** after the binary changed (Go's test cache does not track the exec'd binary); always pass `-count=1`. A failed signal test run natively can leave a sleeping fake `claude` behind — harmless in the container, where the suite belongs.
 - `make install` only copies `.bin/local/gralph`. Run `make local install`, or the installed binary and its `--version` are stale.
 - `make build` runs lint, govulncheck, gosec, and unit tests **inside** `build/Dockerfile`, so any of them fails CI. Reproduce with `docker build --target builder -f build/Dockerfile .`. Its `-X` version ldflags must stay in sync with the Makefile's.
@@ -34,6 +35,8 @@ Easy to get wrong:
 - Validate a task file without running anything: `.bin/local/gralph -t <tasks.yaml> --dry-run`.
 
 ## Architecture
+
+The Go module lives in `src/` (`go.mod` there); go commands run from `src/` or via the root Makefile. Package paths in this file are relative to `src/`.
 
 `cmd/main` → `internal/tui` → `internal/looper` → `internal/tasks` (`cmd/main` also calls `looper` directly). `looper` never imports `tui` or any Bubble Tea module; `tasks` imports neither. Bubble Tea is v2 only (`charm.land/bubbletea/v2`, `bubbles/v2`, `lipgloss/v2`); never import the `github.com/charmbracelet` v1 modules.
 
@@ -64,6 +67,6 @@ Easy to get wrong:
   - Callbacks longer than a line or two are named functions, not inline func literals.
   - Comments explain *why* code exists or is shaped the way it is, not what it does.
 - YAML files use `.yaml`, never `.yml`.
-- `skills/gralph-docs-writer/` generates the `tasks.yaml` + `prompt.md` pair; its field rules must match `internal/tasks`. Its `templates/` are the only authoritative task-file and prompt templates; do not add templates elsewhere. `skills/embed.go` embeds the folder in the binary; `gralph --install-skill` (`internal/skillinstall`, runs before the `--prompt`/`--tasks` checks) removes `~/.claude/skills/gralph-docs-writer` and writes the embedded copy, so the installed skill matches the binary. Runs and dry-runs call `skillinstall.Check` after the flag checks and exit 1 unless `~/.claude/skills/gralph-docs-writer/VERSION` carries this binary's skill hash, so the e2e suite runs gralph with a `HOME` where `TestMain` has already run `--install-skill` (`skillHome`); a test that needs a different `HOME` passes its own. `scripts/install_skill.sh` stays for development: it installs whatever is in the working tree by `rm -rf` + copy into `~/.claude/skills` (override with `SKILLS_DIR`).
+- `src/skills/gralph-docs-writer/` generates the `tasks.yaml` + `prompt.md` pair; its field rules must match `internal/tasks`. Its `templates/` are the only authoritative task-file and prompt templates; do not add templates elsewhere. `src/skills/embed.go` embeds the folder in the binary; `gralph --install-skill` (`internal/skillinstall`, runs before the `--prompt`/`--tasks` checks) removes `~/.claude/skills/gralph-docs-writer` and writes the embedded copy, so the installed skill matches the binary. Runs and dry-runs call `skillinstall.Check` after the flag checks and exit 1 unless `~/.claude/skills/gralph-docs-writer/VERSION` carries this binary's skill hash, so the e2e suite runs gralph with a `HOME` where `TestMain` has already run `--install-skill` (`skillHome`); a test that needs a different `HOME` passes its own. `scripts/install_skill.sh` stays for development: it installs whatever is in the working tree by `rm -rf` + copy into `~/.claude/skills` (override with `SKILLS_DIR`).
 - `docs/architecture/` files are named `NN_name.md` with no version suffix; the version lives only in each file's `Version`/`Date`/`Notes` metadata. Edit a doc in place and bump that metadata; do not create `_vNN` copies (the global `/arch-docs` skill does, so do not follow its file naming here). Keep the ADRs in `02_architectural_decisions.md` in step with design changes.
 - PRs target `develop`. Versions are SemVer git tags; there is no CHANGELOG.

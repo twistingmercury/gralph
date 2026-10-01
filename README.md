@@ -1,8 +1,8 @@
 # Gralph
 
-> **Maturity Level**: Emerging - under active development; the CLI contract has already changed between minor versions
-> **Version**: v0.8.1
-
+> **Maturity Level**: Emerging - under active development; the CLI contract has already changed between minor versions  
+> **Version**: v0.8.1  
+>
 > - **Emerging**: Prototype, not production-ready, expect breaking changes
 > - **Basic**: Production-ready but actively evolving, expect minor version changes
 > - **Mature**: Stable, battle-tested, changes are rare
@@ -105,8 +105,8 @@ tasks:
 ### The gralph-docs-writer skill
 
 Writing a good task file by hand is tedious, so gralph ships a Claude Code
-skill, [gralph-docs-writer](skills/gralph-docs-writer/SKILL.md), that turns a
-plan into a task file and shared prompt. It's built into the binary:
+skill, [gralph-docs-writer](src/skills/gralph-docs-writer/SKILL.md), that turns
+a plan into a task file and shared prompt. It's built into the binary:
 
 ```bash
 gralph --install-skill
@@ -296,14 +296,16 @@ container. If it passes locally, CI should pass too.
 ### Testing
 
 ```bash
-make test      # unit tests: go test -v ./cmd/... ./internal/...
+make test      # unit tests: go test -v ./cmd/... ./internal/... (run from src/)
 make analyze   # goimports, golangci-lint, govulncheck, gosec (tools must be on PATH)
 ```
 
-One gotcha: `tests/e2e` is its own Go module, so `go test ./...` from the
-repository root never runs it. Use `make build` for that. The e2e suite uses a
-fake `claude` on `PATH`, so you don't need the real Claude CLI or a network
-connection.
+One gotcha: the Go module is in `src/`. `go test ./...` from the repository root
+finds no module; use `make test` instead, or run go commands from inside `src/`.
+`tests/e2e` is its own Go module at the repository root, so `go test ./...` from
+`src/` never includes it. Use `make build` to run the full e2e suite. The e2e
+suite uses a fake `claude` on `PATH`, so you don't need the real Claude CLI or a
+network connection.
 
 ### Versioning
 

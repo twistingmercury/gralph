@@ -8,12 +8,12 @@ ARG LD_FLAGS="-s -w -X 'github.com/twistingmercury/gralph/internal/version.versi
 
 WORKDIR /workspace
 
-COPY go.mod go.sum ./
+COPY src/go.mod src/go.sum ./
 # go mod verify asserts downloads match committed checksums without mutating go.sum.
 # Run `make tidy` locally if you need to update go.sum.
 RUN go mod verify
 
-COPY . .
+COPY src/ .
 
 ## Run linters, formatters, security scanners, etc
 RUN goimports -w .
