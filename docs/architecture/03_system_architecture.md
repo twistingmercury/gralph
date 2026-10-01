@@ -1,8 +1,8 @@
 # Gralph — System Architecture
 
-> **Version**: v08
+> **Version**: v09
 > **Date**: 2026-09-30
-> **Notes**: Sessions run with flags picked by `--sandbox-settings` (Claude Code's sandbox, three keys forced) or `--skip-permissions` (ADR-014); added `sandbox.go` and the settings file as an input.
+> **Notes**: With `--commit`, gralph commits each task after its gates pass (ADR-015); added `commit.go` and the Committer component.
 
 [Back to Overview](00_overview.md) | [Back to Project README](../../README.md)
 
@@ -16,7 +16,7 @@
 
 ## Architecture Overview
 
-Gralph is organized into four layers: CLI entry point, terminal UI, looper orchestration, and task/state management. Dependencies point one way: `cmd/main` → `internal/tui` → `internal/looper` → `internal/tasks` (`cmd/main` also calls `internal/looper` directly). The looper loads both input files (prompt.md and tasks.yaml), validates preconditions, then walks each pending task, spawning a fresh Claude session with the combined prompt and reading the result to determine outcome. When the session reports `completed`, the looper runs the task's gates (ADR-013), commands from the task file, and the task is completed only if every one exits zero.
+Gralph is organized into four layers: CLI entry point, terminal UI, looper orchestration, and task/state management. Dependencies point one way: `cmd/main` → `internal/tui` → `internal/looper` → `internal/tasks` (`cmd/main` also calls `internal/looper` directly). The looper loads both input files (prompt.md and tasks.yaml), validates preconditions, then walks each pending task, spawning a fresh Claude session with the combined prompt and reading the result to determine outcome. When the session reports `completed`, the looper runs the task's gates (ADR-013), commands from the task file, and the task is completed only if every one exits zero. With `--commit` (ADR-015), inside a git work tree, the looper then commits the task's changes under the task's name; a commit git refuses fails the task.
 
 Every session's argv is `claude --print` plus the **session flags** (ADR-014), which `cmd/main` picks once from the two permission flags and passes down as `sessionArgs`:
 
@@ -118,7 +118,7 @@ graph TB
 | Characteristic      | Value                                   |
 | ------------------- | --------------------------------------- |
 | Language            | Go 1.27.1+                              |
-| Core Function       | `Run(ctx, prompt, tl, tasksFile, gateTimeout, sessionArgs, report)` runs the loop; `Start(ctx, promptFile, tasksFile, gateTimeout, sessionArgs)` is plain mode's load + `Run(..., nil)` |
+| Core Function       | `Run(ctx, prompt, tl, tasksFile, gateTimeout, sessionArgs, repo, report)` runs the loop; `Start(ctx, promptFile, tasksFile, gateTimeout, sessionArgs, commit)` is plain mode's load + `Run(..., repo, nil)` where `repo` comes from `repoFor`; `DryRun(w, tasksFile, gateTimeout, sandboxFile, commit)` validates without running |
 | Scaling Model       | Sequential tasks; on the TUI path stdout and stderr are read concurrently, so `report` may be called from more than one goroutine |
 | Communication       | Reads files, spawns subprocess, reads stdout (plain text or stream-json) |
 | UI dependency       | None; never imports `internal/tui` or Bubble Tea |
@@ -213,6 +213,30 @@ graph TB
 | Seen by Claude      | Never; gates are not part of the stdin prompt |
 | Timeout / retry     | Always a timeout: `--gate-timeout` if passed, else the gate's `timeout`, else 10m. No retry |
 
+### Committer (internal/looper/commit.go)
+
+**Responsibilities:**
+- `OpenRepo(tasksFile)` finds the git work tree around the working directory (or returns nil if outside one or git cannot be run); inside one, the tree must be clean apart from tasksFile, so that each commit holds exactly one task's work
+- `repo.commit` runs only after the session and every gate returned `completed` (ADR-015): `git add -A` to stage everything, then `git commit -m <task name>` when anything is staged, both over the whole work tree minus the task file
+- The task file is left out with a `:(exclude,literal)` pathspec only when it lies inside the work tree and git does not ignore it: `git add` refuses a pathspec that names an ignored path, and such a file is never staged anyway
+- `repoFor` gives `Start` and `DryRun` their `*Repo`: nil without `--commit`, and outside a work tree it prints `commit: not a git repository, nothing will be committed`. `cmd/main` calls `OpenRepo` directly for the TUI, which prints no notice. A dirty tree is the error `--commit needs a clean work tree; commit, stash, or remove:` plus the `git status --porcelain` lines, before any session
+- Nothing staged means no commit and the task stays `completed`; a non-zero exit makes it `failed` with `commit failed: <exit error>` (in practice e.g. `commit failed: exit status 1`)
+- Git runs from the work tree root in its own process group with no stdin, like a gate; on cancellation, the task and file stay untouched
+- Plain path (`report == nil`): once something is staged, print `commit: <first line of name>` to stdout; git's output passes straight through
+- TUI path (`report != nil`): write nothing to gralph's stdout/stderr; report `Activity` `→ commit <first line of name>` once something is staged, and each git output line as `Activity`
+- Git commands are built by `(*Repo).git`, which appends arguments to a constant `git` command; keep it that way so gosec stays quiet without a suppression
+- Gralph never pushes, resets, stashes, or passes `--no-verify`
+
+**Key Characteristics:**
+
+| Characteristic      | Value                                   |
+| ------------------- | --------------------------------------- |
+| Input               | A `*Repo`, the task                     |
+| Output              | Completed (and committed), or failed with error message |
+| Judged by           | Exit code only; git output is shown    |
+| Seen by Claude      | Never                                   |
+| Sandbox Coverage    | None; git runs unsandboxed with hooks |
+
 ## Data Flow
 
 ### Normal Run (Happy Path)
@@ -225,6 +249,7 @@ sequenceDiagram
     participant TaskParser
     participant Claude
     participant Gates
+    participant Git
     participant Filesystem
 
     User->>CLI: gralph -p prompt.md -t tasks.yaml --sandbox-settings sandbox.json
@@ -247,6 +272,10 @@ sequenceDiagram
         opt Session completed and the task has gates
             Looper->>Gates: sh -c cmd, one gate at a time
             Gates-->>Looper: exit code (first non-zero fails the task)
+        end
+        opt --commit and inside a git work tree
+            Looper->>Git: add -A, then commit -m with the task name
+            Git-->>Looper: exit code (non-zero fails the task)
         end
         Looper->>TaskParser: SaveTasks(updated TaskList)
         TaskParser->>Filesystem: write to .tmp, rename over original
@@ -340,7 +369,7 @@ sequenceDiagram
 
 Gralph reads the prompt and task files. Both must be treated as user-provided code: they are executed by Claude, and each task's `gates` commands are run by gralph itself through `sh -c`. Gralph does not sanitize or sandbox them; the user is responsible for not running gralph against untrusted prompts or task files.
 
-The sandbox settings file (`--sandbox-settings`, ADR-014) is a third input. Gralph reads it once at startup and never writes it. It must hold a JSON object; gralph forces `sandbox.enabled: true`, `sandbox.allowUnsandboxedCommands: false`, and `sandbox.failIfUnavailable: true` on top and passes every other key to Claude untouched, so the file cannot turn the sandbox off, but whatever else it opens up is opened. The sandbox limits what a session's shell commands can read, write, and reach; it does not cover gates. With `--skip-permissions` there is no settings file and no limit on the session.
+The sandbox settings file (`--sandbox-settings`, ADR-014) is a third input. Gralph reads it once at startup and never writes it. It must hold a JSON object; gralph forces `sandbox.enabled: true`, `sandbox.allowUnsandboxedCommands: false`, and `sandbox.failIfUnavailable: true` on top and passes every other key to Claude untouched, so the file cannot turn the sandbox off, but whatever else it opens up is opened. The sandbox limits what a session's shell commands can read, write, and reach; it does not cover gates or commits. With `--skip-permissions` there is no settings file and no limit on the session.
 
 ```mermaid
 graph LR
@@ -349,6 +378,7 @@ graph LR
         PromptFile["prompt.md"]
         TaskFile["tasks.yaml"]
         SettingsFile["sandbox settings file"]
+        Git["git repository<br/>(with hooks)"]
     end
     subgraph External["Untrusted External"]
         Claude["claude --print"]
@@ -358,6 +388,8 @@ graph LR
     Gralph -->|reads once| SettingsFile
     Gralph -->|executes|Claude
     Claude -->|returns result| Gralph
+    Gralph -->|"add -A, commit -m (unsandboxed)"| Git
+    Git -->|exit code| Gralph
 ```
 
 **Boundary Rules:**
@@ -369,6 +401,7 @@ graph LR
 | Gralph ← Filesystem (write)           | Task state          | Atomic writes; temp-file + rename ensures consistency      |
 | Gralph → Claude (subprocess)          | Combined prompt     | Passed on stdin; argv is `--print`, then `--output-format stream-json --verbose` in the TUI, then the session flags: `--permission-mode acceptEdits --settings <merged JSON>` (`--sandbox-settings`) or `--dangerously-skip-permissions` (`--skip-permissions`) |
 | Gralph → Gate command (subprocess)    | `cmd` text from tasks.yaml | Run as `sh -c <cmd>` in gralph's working directory, unsandboxed; only the exit code is used |
+| Gralph → Git (subprocess)             | `add -A` and `commit -m <task name>` | Run from the work tree root over the whole tree minus the task file, unsandboxed, with repository hooks running; only the exit code is used; gralph never pushes, resets, stashes, or bypasses hooks |
 | Claude → Gralph (subprocess output)   | Stdout, stderr, exit code | Parsed for JSON result line; plain mode passes all other output through, the TUI shows it as activity only |
 
 ### Process Boundary: Gralph Process Group
