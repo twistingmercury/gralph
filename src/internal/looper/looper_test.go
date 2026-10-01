@@ -69,6 +69,10 @@ func useFakeClaude(t *testing.T) {
 	t.Setenv("PATH", fakeClaudeDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
+// bypass is the session flags most tests run with; the fake claude ignores
+// them, so only the argv tests care which flags they are.
+var bypass = BypassArgs()
+
 // readFakeClaudeRecords recovers the exact stdin of every fake claude
 // invocation, in call order. A missing or empty record file means claude was
 // never invoked.
@@ -124,7 +128,7 @@ func TestStart_MissingPromptFile(t *testing.T) {
 	dir := t.TempDir()
 	tasksPath := writeTasksFile(t, dir, validTasksYAML)
 
-	err := Start(context.Background(), filepath.Join(dir, "missing.md"), tasksPath, "")
+	err := Start(context.Background(), filepath.Join(dir, "missing.md"), tasksPath, "", bypass)
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "failed to start loop runner")
 	assert.ErrorContains(t, err, "prompt file")
@@ -134,7 +138,7 @@ func TestStart_MissingTasksFile(t *testing.T) {
 	dir := t.TempDir()
 	promptPath := writePromptFile(t, dir, "Do the task.\n")
 
-	err := Start(context.Background(), promptPath, filepath.Join(dir, "missing.yaml"), "")
+	err := Start(context.Background(), promptPath, filepath.Join(dir, "missing.yaml"), "", bypass)
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "failed to start loop runner")
 	assert.ErrorContains(t, err, "tasks file")
@@ -145,7 +149,7 @@ func TestStart_EmptyPrompt(t *testing.T) {
 	promptPath := writePromptFile(t, dir, "")
 	tasksPath := writeTasksFile(t, dir, validTasksYAML)
 
-	err := Start(context.Background(), promptPath, tasksPath, "")
+	err := Start(context.Background(), promptPath, tasksPath, "", bypass)
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "the prompt file is empty")
 }
@@ -155,7 +159,7 @@ func TestStart_WhitespaceOnlyPrompt(t *testing.T) {
 	promptPath := writePromptFile(t, dir, "  \t\n  ")
 	tasksPath := writeTasksFile(t, dir, validTasksYAML)
 
-	err := Start(context.Background(), promptPath, tasksPath, "")
+	err := Start(context.Background(), promptPath, tasksPath, "", bypass)
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "the prompt file is just whitespace")
 }
@@ -165,7 +169,7 @@ func TestStart_InvalidTasksYAML(t *testing.T) {
 	promptPath := writePromptFile(t, dir, "Do the task.\n")
 	tasksPath := writeTasksFile(t, dir, "tasks:\n  - {id: 1, name: a, prompt: p, state: bogus}\n")
 
-	err := Start(context.Background(), promptPath, tasksPath, "")
+	err := Start(context.Background(), promptPath, tasksPath, "", bypass)
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "failed to parse tasks yaml")
 }
@@ -178,11 +182,11 @@ func TestStart_LoadFailuresKeepTheErrorChain(t *testing.T) {
 	promptPath := writePromptFile(t, dir, "Do the task.\n")
 	tasksPath := writeTasksFile(t, dir, validTasksYAML)
 
-	err := Start(context.Background(), filepath.Join(dir, "missing.md"), tasksPath, "")
+	err := Start(context.Background(), filepath.Join(dir, "missing.md"), tasksPath, "", bypass)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, os.ErrNotExist)
 
-	err = Start(context.Background(), promptPath, filepath.Join(dir, "missing.yaml"), "")
+	err = Start(context.Background(), promptPath, filepath.Join(dir, "missing.yaml"), "", bypass)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, os.ErrNotExist)
 }
@@ -194,7 +198,7 @@ func TestStart_RunLoopFailureIsWrappedWithLoopErrorPrefix(t *testing.T) {
 	promptPath := writePromptFile(t, dir, "Do the task.\n")
 	tasksPath := writeTasksFile(t, dir, validTasksYAML)
 
-	err := Start(context.Background(), promptPath, tasksPath, "")
+	err := Start(context.Background(), promptPath, tasksPath, "", bypass)
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "loop error")
 	assert.ErrorContains(t, err, "task 1: First task failed")
@@ -209,7 +213,7 @@ func TestStart_Success(t *testing.T) {
 	recordPath := filepath.Join(dir, "record.log")
 	t.Setenv("FAKE_CLAUDE_RECORD", recordPath)
 
-	err := Start(context.Background(), promptPath, tasksPath, "")
+	err := Start(context.Background(), promptPath, tasksPath, "", bypass)
 	require.NoError(t, err)
 
 	records := readFakeClaudeRecords(t, recordPath)
@@ -361,7 +365,7 @@ func TestRunLoop_HappyPathInvokesInOrderWithExactStdin(t *testing.T) {
 		{ID: 3, Name: "Third", Prompt: "Do the third thing."},
 	}}
 
-	err := runLoop(context.Background(), p, tl, tasksPath, "", nil)
+	err := runLoop(context.Background(), p, tl, tasksPath, "", bypass, nil)
 	require.NoError(t, err)
 
 	records := readFakeClaudeRecords(t, recordPath)
@@ -391,7 +395,7 @@ func TestRunLoop_NonZeroExitStopsAtFirstTask(t *testing.T) {
 		{ID: 2, Name: "Second", Prompt: "p2"},
 	}}
 
-	err := runLoop(context.Background(), "prompt", tl, tasksPath, "", nil)
+	err := runLoop(context.Background(), "prompt", tl, tasksPath, "", bypass, nil)
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "task 1: First failed")
 	assert.ErrorContains(t, err, "exit status 1")
@@ -412,7 +416,7 @@ func TestRunLoop_ClaudeMissingFromPath(t *testing.T) {
 
 	tl := &tasks.TaskList{Tasks: []tasks.Task{{ID: 1, Name: "Only", Prompt: "p"}}}
 
-	err := runLoop(context.Background(), "prompt", tl, tasksPath, "", nil)
+	err := runLoop(context.Background(), "prompt", tl, tasksPath, "", bypass, nil)
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "task")
 	assert.ErrorContains(t, err, "failed")
@@ -435,7 +439,7 @@ func TestRunLoop_ContextAlreadyCancelled(t *testing.T) {
 
 	tl := &tasks.TaskList{Tasks: []tasks.Task{{ID: 1, Name: "Only", Prompt: "p"}}}
 
-	err := runLoop(ctx, "prompt", tl, tasksPath, "", nil)
+	err := runLoop(ctx, "prompt", tl, tasksPath, "", bypass, nil)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, context.Canceled)
 
@@ -462,7 +466,7 @@ func TestRunLoop_PrintsPromptToStdout(t *testing.T) {
 	require.NoError(t, err)
 	os.Stdout = w
 
-	runErr := runLoop(context.Background(), "Follow the runbook.", tl, tasksPath, "", nil)
+	runErr := runLoop(context.Background(), "Follow the runbook.", tl, tasksPath, "", bypass, nil)
 
 	require.NoError(t, w.Close())
 	os.Stdout = origStdout
@@ -485,7 +489,7 @@ func TestRunLoop_EmptyTaskList(t *testing.T) {
 	tasksPath := filepath.Join(dir, "tasks.yaml")
 	t.Setenv("FAKE_CLAUDE_RECORD", recordPath)
 
-	err := runLoop(context.Background(), "prompt", &tasks.TaskList{}, tasksPath, "", nil)
+	err := runLoop(context.Background(), "prompt", &tasks.TaskList{}, tasksPath, "", bypass, nil)
 	require.NoError(t, err)
 
 	records := readFakeClaudeRecords(t, recordPath)
@@ -511,7 +515,7 @@ func TestRunLoop_SkipsCompletedTasks(t *testing.T) {
 	require.NoError(t, err)
 	os.Stdout = w
 
-	runErr := runLoop(context.Background(), "prompt", tl, tasksPath, "", nil)
+	runErr := runLoop(context.Background(), "prompt", tl, tasksPath, "", bypass, nil)
 
 	require.NoError(t, w.Close())
 	os.Stdout = origStdout
@@ -560,7 +564,7 @@ func TestStart_RefusesWhenAnyTaskFailed(t *testing.T) {
 `
 	tasksPath := writeTasksFile(t, dir, content)
 
-	err := Start(context.Background(), promptPath, tasksPath, "")
+	err := Start(context.Background(), promptPath, tasksPath, "", bypass)
 	require.Error(t, err)
 	assert.EqualError(t, err, "fix the failed tasks and set their state to pending before running")
 	assert.ErrorIs(t, err, ErrFailedTasks)
@@ -576,7 +580,7 @@ func TestDryRun_ValidFile(t *testing.T) {
 	tasksPath := writeTasksFile(t, dir, validTasksYAML)
 
 	var out bytes.Buffer
-	require.NoError(t, DryRun(&out, tasksPath, ""))
+	require.NoError(t, DryRun(&out, tasksPath, "", ""))
 	want := "   ID  STATE      NAME\n" +
 		"   --  ---------  ----\n" +
 		"    1  PENDING    First task\n" +
@@ -601,7 +605,7 @@ func TestDryRun_NoFailedTasksTable(t *testing.T) {
 	tasksPath := writeTasksFile(t, dir, content)
 
 	var out bytes.Buffer
-	require.NoError(t, DryRun(&out, tasksPath, ""))
+	require.NoError(t, DryRun(&out, tasksPath, "", ""))
 	want := "    ID  STATE      NAME\n" +
 		"   ---  ---------  ----\n" +
 		"✅   1  \033[92mCOMPLETED\033[0m  First task\n" +
@@ -615,7 +619,7 @@ func TestDryRun_InvalidFile(t *testing.T) {
 	tasksPath := writeTasksFile(t, dir, "tasks:\n  - {id: 1, name: a, prompt: p, state: bogus}\n")
 
 	var out bytes.Buffer
-	err := DryRun(&out, tasksPath, "")
+	err := DryRun(&out, tasksPath, "", "")
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "failed to parse tasks yaml")
 	assert.Empty(t, out.String())
@@ -643,7 +647,7 @@ func TestDryRun_FlagsFailedTasks(t *testing.T) {
 	tasksPath := writeTasksFile(t, dir, content)
 
 	var out bytes.Buffer
-	require.NoError(t, DryRun(&out, tasksPath, ""))
+	require.NoError(t, DryRun(&out, tasksPath, "", ""))
 	want := "Some tasks failed previous runs:\n" +
 		"    ID  STATE      NAME\n" +
 		"   ---  ---------  ----\n" +
@@ -696,7 +700,7 @@ func TestDryRun_ListsEffectiveGateTimeouts(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var out bytes.Buffer
-			require.NoError(t, DryRun(&out, tasksPath, tt.override))
+			require.NoError(t, DryRun(&out, tasksPath, tt.override, ""))
 
 			got := out.String()
 			assert.Contains(t, got, "NAME\n", "the task table comes first")
@@ -710,8 +714,38 @@ func TestDryRun_NoGatesPrintsNoGateLines(t *testing.T) {
 	require.NoError(t, os.WriteFile(tasksPath, []byte("tasks:\n  - {id: 1, name: First, prompt: p}\n"), 0o600))
 
 	var out bytes.Buffer
-	require.NoError(t, DryRun(&out, tasksPath, "2m"))
+	require.NoError(t, DryRun(&out, tasksPath, "2m", ""))
 
 	assert.NotContains(t, out.String(), "gate")
 	assert.True(t, strings.HasSuffix(out.String(), "First\n"+tasksPath+" is valid\n"))
+}
+
+func TestRunTaskPlain_ArgvIsPrintThenSessionArgs(t *testing.T) {
+	useFakeClaude(t)
+	dir := t.TempDir()
+	argsPath := filepath.Join(dir, "args")
+	t.Setenv("FAKE_CLAUDE_ARGS", argsPath)
+
+	sessionArgs := []string{"--permission-mode", "acceptEdits", "--settings", `{"sandbox":{"enabled":true}}`}
+	tl := &tasks.TaskList{Tasks: []tasks.Task{{ID: 1, Name: "First", Prompt: "Do the first thing."}}}
+	require.NoError(t, runLoop(context.Background(), "prompt", tl, filepath.Join(dir, "tasks.yaml"), "", sessionArgs, nil))
+
+	args, err := os.ReadFile(argsPath)
+	require.NoError(t, err)
+	assert.Equal(t, "--print --permission-mode acceptEdits --settings {\"sandbox\":{\"enabled\":true}}\n", string(args))
+}
+
+func TestDryRun_NamesSandboxSettings(t *testing.T) {
+	dir := t.TempDir()
+	tasksPath := writeTasksFile(t, dir, validTasksYAML)
+
+	var out bytes.Buffer
+	require.NoError(t, DryRun(&out, tasksPath, "", "sandbox.json"))
+	want := "   ID  STATE      NAME\n" +
+		"   --  ---------  ----\n" +
+		"    1  PENDING    First task\n" +
+		"    2  PENDING    Second task\n" +
+		"sandbox settings: sandbox.json\n" +
+		tasksPath + " is valid\n"
+	assert.Equal(t, want, out.String())
 }

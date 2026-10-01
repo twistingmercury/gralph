@@ -95,8 +95,8 @@ func toolActivity(name string, input toolInput) string {
 // nothing to gralph's own stdout or stderr. The outcome comes from the
 // result event's text. It returns the task's outcome, or an error when ctx
 // was cancelled.
-func runTaskStream(ctx context.Context, p string, task tasks.Task, report func(Event)) (state, errMsg string, err error) {
-	cmd, _ := claudeCmd(ctx, p, task, true)
+func runTaskStream(ctx context.Context, p string, task tasks.Task, sessionArgs []string, report func(Event)) (state, errMsg string, err error) {
+	cmd, _ := claudeCmd(ctx, p, task, sessionArgs, true)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {

@@ -12,7 +12,7 @@ Gralph reads two files:
 For each pending task, gralph:
 
 1. Combines the shared prompt with the task's prompt
-2. Spawns a fresh `claude --print --dangerously-skip-permissions` session with the combined prompt on stdin
+2. Spawns a fresh `claude --print` session with the combined prompt on stdin. The session runs in Claude Code's sandbox, set up by the file you pass with `--sandbox-settings`; it runs without one only if you ask for that by name with `--skip-permissions`
 3. Reads Claude's output, looks for a JSON result line, and determines success/failure
 4. Updates task state (pending, completed, failed) and writes it back to tasks.yaml atomically
 5. Blocks on the first failure until manually addressed

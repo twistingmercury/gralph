@@ -44,7 +44,7 @@ func TestSkillCheck(t *testing.T) {
 	lines[1] = "sha256:0000"
 	require.NoError(t, os.WriteFile(versionPath, []byte(strings.Join(lines, "\n")), 0o600))
 
-	for _, args := range [][]string{dryRun, {"-t", tasksPath, "-p", promptPath}} {
+	for _, args := range [][]string{dryRun, {"--skip-permissions", "-t", tasksPath, "-p", promptPath}} {
 		res = runGralph(t, defaultTimeout, args, env)
 		require.Equal(t, 1, res.exitCode, "args=%v\nstdout:\n%s\nstderr:\n%s", args, res.stdout, res.stderr)
 		assert.Contains(t, res.stderr, "is outdated")

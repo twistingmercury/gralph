@@ -1,8 +1,8 @@
 # Gralph — Requirements
 
-> **Version**: v05
+> **Version**: v06
 > **Date**: 2026-09-30
-> **Notes**: Gate timeouts are now in scope: a per-gate `timeout`, the `--gate-timeout` flag, and a built-in 10m default. File-level gates and a file-level timeout key remain out of scope.
+> **Notes**: Sandboxed sessions are now a goal: a run needs `--sandbox-settings` or `--skip-permissions` (ADR-014). Gralph-managed containers and toolchain detection are out of scope.
 
 [Back to Overview](00_overview.md) | [Back to Project README](../../README.md)
 
@@ -23,6 +23,7 @@ Claude Code users need a way to:
 - Run each in a fresh Claude session with a shared prompt
 - Track which tasks completed, which failed
 - Confirm each task's result with checks that do not depend on the session's own report
+- Limit what an unattended session can read, write, and reach on the network
 - Block on failures until manually addressed
 - Resume interrupted runs without re-running completed work
 
@@ -38,6 +39,7 @@ Claude Code users need a way to:
 6. Be Claude Code only: no agent abstraction, no multi-provider support
 7. Run only on Unix (Linux, macOS, BSDs)
 8. Check a completed task independently: run the task's `gates` commands after the session and mark the task completed only when every one exits zero
+9. Run sessions in Claude Code's sandbox, set up by the user's `--sandbox-settings` file; run without one only when the user asks by name with `--skip-permissions`. There is no default
 
 ### Secondary Goals
 
@@ -57,6 +59,8 @@ Claude Code users need a way to:
 - Writing the TUI's `in progress` state to tasks.yaml
 - Sending a task's gates to Claude; they are gralph's check, and the stdin prompt does not include them
 - File-level gates shared by all tasks, a file-level timeout key, running a gate with no time limit, or sandboxing what a gate command does
+- Gralph running sessions in a container it manages, or detecting the toolchain to guess sandbox paths; the settings file is the user's to write
+- Falling back to an unsandboxed run when the sandbox cannot start
 - Re-running only the gates of a task; a task reset to `pending` runs its session again
 
 ## Success Criteria
@@ -68,6 +72,7 @@ Claude Code users need a way to:
 | Failed task blocking                    | Gralph refuses to run with any failed | E2E test attempts run with failed task, expect exit 1 |
 | Dry-run accuracy                        | Task summary table matches actual run | Dry-run e2e tests compare output format         |
 | Gate enforcement                        | Completed only when every gate exits zero; gates skipped when the session failed | Unit and e2e tests run real shell commands as passing and failing gates |
+| Session permissions                     | Sandboxed argv with the three forced keys, or the bypass flag; neither or both flags exits 1 | Unit tests on the merged settings; e2e tests assert the recorded argv and the flag errors |
 | Session independence                    | Each task has only its prompt + task  | Golden test asserts combined-prompt format      |
 | Exit code correctness                   | Zero only when all tasks complete     | E2E test matrix covers pass/fail/cancel cases   |
 | Signal handling                         | SIGINT/SIGTERM kills claude group    | Process tree test verifies Setpgid and signal   |
@@ -81,7 +86,8 @@ Claude Code users need a way to:
 - **Unix process API** — Depends on Setpgid and process groups; Windows not supported
 - **Single-file YAML task input** — No migration from other formats; tasks.yaml must be valid on the first parse
 - **No injectable runner** — Both test suites use a fake `claude` on PATH to drive the looper; runLoop execs inline
-- **Prompt passed via stdin** — Claude is invoked as `claude --print --dangerously-skip-permissions` with prompt on stdin; the TUI path adds `--output-format stream-json --verbose`, and plain mode's argv and output stay as they are
+- **Prompt passed via stdin** — Claude is invoked as `claude --print` plus the session flags, with the prompt on stdin: `--permission-mode acceptEdits --settings <merged JSON>` for `--sandbox-settings`, or `--dangerously-skip-permissions` for `--skip-permissions`. The TUI path adds `--output-format stream-json --verbose` right after `--print`; plain mode's output stays as it is
+- **Claude Code's sandbox** — Sandboxed runs need what it needs: bubblewrap and socat on Linux, Seatbelt on macOS. On the BSDs only `--skip-permissions` works
 - **Bubble Tea v2 only** — `charm.land/bubbletea/v2`, `bubbles/v2`, `lipgloss/v2`, imported only by `internal/tui` and `cmd/main`; never the v1 `github.com/charmbracelet/*` modules
 
 ### Business Constraints

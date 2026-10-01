@@ -49,7 +49,7 @@ func TestLoop_RunsEveryTaskInOrder(t *testing.T) {
 		"FAKECLAUDE_RECORD_FILE": recordFile,
 	})
 
-	res := runGralph(t, 15*time.Second, []string{"--prompt=" + promptPath, "--tasks=" + tasksPath}, env)
+	res := runGralph(t, 15*time.Second, []string{"--skip-permissions", "--prompt=" + promptPath, "--tasks=" + tasksPath}, env)
 	require.Equal(t, 0, res.exitCode, "stdout:\n%s\nstderr:\n%s", res.stdout, res.stderr)
 
 	assert.Contains(t, res.stdout, "task 20: First task already completed, skipping")
@@ -108,7 +108,7 @@ func TestLoop_FailedTaskRefusesToRun(t *testing.T) {
 		"FAKECLAUDE_ATTEMPT_LOG_FILE": attemptLog,
 	})
 
-	res := runGralph(t, 15*time.Second, []string{"--prompt=" + promptPath, "--tasks=" + tasksPath}, env)
+	res := runGralph(t, 15*time.Second, []string{"--skip-permissions", "--prompt=" + promptPath, "--tasks=" + tasksPath}, env)
 
 	require.Equal(t, 1, res.exitCode, "stdout:\n%s\nstderr:\n%s", res.stdout, res.stderr)
 	assert.Contains(t, res.stdout, "Some tasks failed previous runs:\n")
@@ -152,7 +152,7 @@ func TestLoop_StopsOnFirstFailure(t *testing.T) {
 		"FAKECLAUDE_STDERR_MSG":       "claude-stderr-marker",
 	})
 
-	res := runGralph(t, 15*time.Second, []string{"--prompt=" + promptPath, "--tasks=" + tasksPath}, env)
+	res := runGralph(t, 15*time.Second, []string{"--skip-permissions", "--prompt=" + promptPath, "--tasks=" + tasksPath}, env)
 
 	require.NotEqual(t, 0, res.exitCode, "stdout:\n%s\nstderr:\n%s", res.stdout, res.stderr)
 	assert.Contains(t, res.stderr, "task 1: First task failed: exit status 3")
@@ -190,7 +190,7 @@ func TestLoop_PromptEchoedToStdout(t *testing.T) {
 `
 	tasksPath := writeTasksYAML(t, dir, tasksYAML)
 
-	res := runGralph(t, 15*time.Second, []string{"--prompt=" + promptPath, "--tasks=" + tasksPath}, gralphEnv(fakeClaudeDir, nil))
+	res := runGralph(t, 15*time.Second, []string{"--skip-permissions", "--prompt=" + promptPath, "--tasks=" + tasksPath}, gralphEnv(fakeClaudeDir, nil))
 	require.Equal(t, 0, res.exitCode, "stdout:\n%s\nstderr:\n%s", res.stdout, res.stderr)
 
 	assert.Contains(t, res.stdout, expectedStdin(sharedPrompt, 1, "First task", "Do the first thing."))
@@ -213,7 +213,7 @@ func TestLoop_ClaudeMissingFromPath(t *testing.T) {
 `)
 
 	env := gralphEnvWithPath(emptyPathDir, nil)
-	res := runGralph(t, 15*time.Second, []string{"--prompt=" + promptPath, "--tasks=" + tasksPath}, env)
+	res := runGralph(t, 15*time.Second, []string{"--skip-permissions", "--prompt=" + promptPath, "--tasks=" + tasksPath}, env)
 
 	require.NotEqual(t, 0, res.exitCode, "stdout:\n%s\nstderr:\n%s", res.stdout, res.stderr)
 	assert.Contains(t, res.stderr, "task 1: Only task failed")
@@ -275,7 +275,7 @@ func TestStart_AbandonedStateRejected(t *testing.T) {
 		"FAKECLAUDE_ATTEMPT_LOG_FILE": attemptLog,
 	})
 
-	res := runGralph(t, 15*time.Second, []string{"--prompt=" + promptPath, "--tasks=" + tasksPath}, env)
+	res := runGralph(t, 15*time.Second, []string{"--skip-permissions", "--prompt=" + promptPath, "--tasks=" + tasksPath}, env)
 
 	require.NotEqual(t, 0, res.exitCode, "stdout:\n%s\nstderr:\n%s", res.stdout, res.stderr)
 	assert.Contains(t, res.stderr, "failed to start loop runner")
@@ -307,7 +307,7 @@ func assertStartupFailure(t *testing.T, dir, promptPath, tasksPath, want string)
 		"FAKECLAUDE_ATTEMPT_LOG_FILE": attemptLog,
 	})
 
-	res := runGralph(t, 15*time.Second, []string{"--prompt=" + promptPath, "--tasks=" + tasksPath}, env)
+	res := runGralph(t, 15*time.Second, []string{"--skip-permissions", "--prompt=" + promptPath, "--tasks=" + tasksPath}, env)
 
 	require.NotEqual(t, 0, res.exitCode, "stdout:\n%s\nstderr:\n%s", res.stdout, res.stderr)
 	assert.Contains(t, res.stderr, "failed to start loop runner")

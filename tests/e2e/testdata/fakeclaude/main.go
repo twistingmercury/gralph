@@ -1,6 +1,6 @@
 // Command fakeclaude is a scriptable stand-in for the `claude` executable
-// used by the gralph e2e suite. gralph always invokes claude with a fixed
-// argv (`--print --dangerously-skip-permissions`) and the assembled prompt
+// used by the gralph e2e suite. gralph always invokes claude with an argv it
+// builds itself (`--print` plus the session flags) and the assembled prompt
 // on stdin, so this fixture cannot be driven via flags the way a normal CLI
 // fixture would be. Instead every behavior is controlled through
 // FAKECLAUDE_* environment variables, documented below.

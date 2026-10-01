@@ -1,8 +1,8 @@
 # Gralph — Architectural Decisions
 
-> **Version**: v07
+> **Version**: v08
 > **Date**: 2026-09-30
-> **Notes**: Go module moved to `src/` directory; ADR-009's paths to the embedded skill updated to match.
+> **Notes**: Added ADR-014: sessions run in Claude Code's sandbox from a `--sandbox-settings` file; `--skip-permissions` is the explicit way to keep the old bypass.
 
 [Back to Overview](00_overview.md) | [Back to Project README](../../README.md)
 
@@ -39,6 +39,7 @@ Each architectural decision is recorded as an ADR with the following structure:
 | ADR-011 | Full-screen TUI by default, plain mode intact  | Accepted | 2026-09-25 |
 | ADR-012 | Bubble Tea v2 for the TUI, confined to its use | Accepted | 2026-09-25 |
 | ADR-013 | Gralph runs a task's gates after a session     | Accepted | 2026-09-30 |
+| ADR-014 | Sandboxed sessions; bypass only on request     | Accepted | 2026-09-30 |
 
 ## Decisions
 
@@ -56,13 +57,15 @@ Gralph is Claude Code only. No agent abstraction layer, no provider profiles, no
 
 **Consequences:**
 
-*Positive:*
+_Positive:_
+
 - Simpler codebase: no provider interface, no profile configuration
 - Direct coupling to Claude Code's actual behavior (stdin/stdout, permission model)
 - Easier to reason about prompt delivery and result parsing
 - No false promise of portability to other LLM backends
 
-*Negative:*
+_Negative:_
+
 - Cannot be reused for non-Claude workflows
 - Tightly bound to Claude CLI; changes to claude --print could break compatibility
 - Users wanting OpenAI or other LLM support must fork or build a separate tool
@@ -76,6 +79,7 @@ Gralph is Claude Code only. No agent abstraction layer, no provider profiles, no
 **Context:**
 
 Task definitions need to be:
+
 1. Portable and versionable (YAML fits this well)
 2. Human-readable without special tooling
 3. Safe: a corrupted file should be rejected entirely, not partially loaded
@@ -88,13 +92,15 @@ Tasks are defined in a single tasks.yaml file with fields: id (positive int16), 
 
 **Consequences:**
 
-*Positive:*
+_Positive:_
+
 - Single source of truth: one file, parsed all-or-nothing
 - Validation is simple and deterministic; no partial states
 - Field rules in internal/tasks match skill generation rules, kept in sync manually
 - YAML is human-readable and standard in the Go ecosystem
 
-*Negative:*
+_Negative:_
+
 - A single typo in any task (e.g., id 0, empty prompt) fails the entire file parse
 - No backward compatibility or migration path if the task schema changes
 - Comments and custom formatting are lost when gralph rewrites the file
@@ -116,13 +122,15 @@ Each task runs in exactly one fresh `claude --print --dangerously-skip-permissio
 
 **Consequences:**
 
-*Positive:*
+_Positive:_
+
 - No test burden for retry logic, backoff, or fallback states
 - Clear responsibility model: gralph runs, humans fix
 - Easy to reason about: each task has one outcome
 - Simpler state machine: pending, completed, failed (no "abandoned" or attempt counts)
 
-*Negative:*
+_Negative:_
+
 - Users must manually fix tasks; no automatic recovery
 - If a failure is transient (e.g., network hiccup from Claude), user must reset and re-run
 - No ability to skip a task that is known-bad; only completed or pending are runnable
@@ -144,13 +152,15 @@ Gralph owns the task state (pending, completed, failed, error). After each task 
 
 **Consequences:**
 
-*Positive:*
+_Positive:_
+
 - Atomic writes guarantee consistency: either the old state or the new state, never partial
 - Single source of truth: the tasks.yaml file reflects gralph's knowledge of state
 - Error tracking: gralph records failure reasons (from JSON or exit code) for human review
 - Safe to resume: re-running gralph always reads the current persisted state
 
-*Negative:*
+_Negative:_
+
 - Comments and custom formatting in tasks.yaml are lost on each rewrite
 - Task state is ephemeral to the file; if tasks.yaml is edited by hand, those changes overwrite the file's state
 - If a session exits zero but writes no result line (or a malformed one), the task is marked failed; the session's actual work may have been done
@@ -171,13 +181,15 @@ Gralph reads the last non-blank line of Claude's output (skipping code-fence mar
 
 **Consequences:**
 
-*Positive:*
+_Positive:_
+
 - Outcome is explicit and independent of exit code noise (warnings, debug output)
 - Claude can signal failure even on zero exit (e.g., validation failed)
 - Result parsing is deterministic: last JSON line wins
 - Shared prompt controls the contract; gralph just reads what was promised
 
-*Negative:*
+_Negative:_
+
 - Shared prompt must document the result line format; mismatch causes all tasks to fail
 - If Claude's output has no JSON line, no valid JSON, or JSON without the right structure, task fails (no fallback to exit code)
 - Fence lines must be skipped; a result line wrapped in ``` will parse, but if it's the only line and misses code fence, parsing may fail
@@ -199,13 +211,15 @@ Before running, the looper checks if any task has `state: failed`. If so, gralph
 
 **Consequences:**
 
-*Positive:*
+_Positive:_
+
 - Failures are visible and explicit; loops cannot silently skip bad tasks
 - Users get a clear signal: fix this and resume
 - Prevents cascade failures (task 1 fails, task 2 tries to use task 1's output, also fails)
 - Encourages debugging: the person sees the failure and must understand why
 
-*Negative:*
+_Negative:_
+
 - Requires manual intervention; no hands-off automation for multi-hour loops
 - If a failure is transient, a second run is needed (no automatic retry)
 - Long workflows may require many manual resets if failures are frequent
@@ -227,13 +241,15 @@ Gralph runs only on Unix (Linux, macOS, BSDs). No Windows build target, no runti
 
 **Consequences:**
 
-*Positive:*
+_Positive:_
+
 - Simple, reliable process lifecycle: one signal kills the whole tree
 - Matches user expectations: Ctrl-C stops everything
 - No platform-specific code for Windows; simpler binary
 - Test suite uses Unix process APIs and knows it can rely on them
 
-*Negative:*
+_Negative:_
+
 - Cannot run on Windows; future contributors must not add Windows support back
 
 ---
@@ -252,14 +268,16 @@ The Makefile's `local` target builds a native binary. The `build` target runs `b
 
 **Consequences:**
 
-*Positive:*
+_Positive:_
+
 - One source of truth: build/build.sh is the canonical build
 - Reproducibility: CI and local builds use the same image
 - No tool version drift: linters and scanners are pinned in the Dockerfile
 - CI configuration is simple: just run build/build.sh
 - e2e tests have a fake claude on PATH and no network access needed
 
-*Negative:*
+_Negative:_
+
 - Docker is required for the full build; `make local` is native but not tested by CI
 - Build time is longer (Docker image pull, build, e2e container startup)
 - Native local development requires Go toolchain installed; Docker is not optional for release builds
@@ -282,12 +300,14 @@ The `gralph-docs-writer` skill generates task files that must satisfy the parser
 
 **Consequences:**
 
-*Positive:*
+_Positive:_
+
 - The installed skill always matches the binary's version and parser rules
 - Installing needs only the binary, not a repository checkout
 - Reinstalling is clean: stale files from an older skill are removed
 
-*Negative:*
+_Negative:_
+
 - Any local edits to the installed skill folder are lost on reinstall
 - Skill changes ship only with a new binary; a stale install is not detected during normal runs
 - Two install paths exist (flag for users, script for development)
@@ -314,12 +334,14 @@ A content hash was chosen over the version tag or the git commit:
 
 **Consequences:**
 
-*Positive:*
+_Positive:_
+
 - A stale or missing skill is caught before any task runs, with a one-line fix in the error
 - Reinstalls are required only when the skill content actually changes
 - Local and release builds of the same source agree on the hash
 
-*Negative:*
+_Negative:_
+
 - Every run and dry-run needs the skill installed, even when the user never generates task files with it
 - Local edits to the installed skill make every run fail until `--install-skill` overwrites them
 - Tests that run gralph need a `HOME` with the skill installed (the e2e suite's `skillHome`)
@@ -348,13 +370,15 @@ Both paths send the same combined prompt on stdin, and the loop rules (skip comp
 
 **Consequences:**
 
-*Positive:*
+_Positive:_
+
 - A run is easy to follow live: what Claude is doing, which task is running, which are done
 - Plain mode, its tests, and every script or CI job that uses gralph are unchanged
 - One copy of the loop rules; the two task paths differ only in how they talk to claude
 - The e2e suite needs no change: it has no terminal, so it always runs plain mode
 
-*Negative:*
+_Negative:_
+
 - Two ways to run claude, each with its own code and tests
 - The TUI path depends on the stream-json event format, which Claude Code may change; unknown events and undecodable lines are ignored, but a changed `result` event would fail every task
 - The TUI cannot be exercised by the e2e suite; it is tested through its Bubble Tea models and a manual run
@@ -376,12 +400,14 @@ The TUI uses Bubble Tea v2 only: `charm.land/bubbletea/v2`, `charm.land/bubbles/
 
 **Consequences:**
 
-*Positive:*
+_Positive:_
+
 - Layout, scrolling, input, and resize handling come from maintained libraries
 - The looper stays free of UI code and testable without a terminal
 - The models are plain values that tests drive directly with messages
 
-*Negative:*
+_Negative:_
+
 - New third-party dependencies to track and scan (govulncheck, gosec)
 - v2 differs from v1 (`View()` returns `tea.View`, keys are `tea.KeyPressMsg`), so most examples and answers written for v1 do not apply
 - If Bubble Tea fails to start despite the terminal check, gralph exits 1 and suggests `--no-tui`; there is no automatic fallback
@@ -431,13 +457,15 @@ Alternatives not taken: opt-in only with no default (leaves hand-written files u
 
 **Consequences:**
 
-*Positive:*
+_Positive:_
+
 - A `completed` state now means gralph itself saw every gate pass, not only that Claude said so
 - The same commands run the same way for every task and every run, independent of the session
 - Plain mode, the stdin contract, and task files without gates are unchanged
 - One place for the rule: both task paths go through the same gate runner after `finishTask`
 
-*Negative:*
+_Negative:_
+
 - Gate commands are shell text from the task file, run without a sandbox; the file was already code to be trusted (it drives `--dangerously-skip-permissions`), and now gralph executes part of it directly
 - A failed gate leaves whatever the session did, including commits, in the repository for a person to sort out
 - Resetting a gate-failed task to `pending` runs the whole session again, not just the gates; setting it to `completed` by hand skips the gates
@@ -446,6 +474,77 @@ Alternatives not taken: opt-in only with no default (leaves hand-written files u
 - A gate that never exits is killed by its timeout (the gate's value, `--gate-timeout`, or the 10m default); existing files without explicit timeouts now get the 10m limit instead of running indefinitely
 - A gate that changes files leaves those changes uncommitted for the next session
 - Claude is not told the gates, so a session can report `completed` and still fail one; the skill keeps the prompt-side verification and the gates in step
+
+---
+
+### ADR-014: Sessions run in Claude Code's sandbox; bypass only on request
+
+**Status:** Accepted
+
+**Context:**
+
+Every session has run as `claude --print --dangerously-skip-permissions` (ADR-001, ADR-003). That flag lets a session run any command and read or write anything the user can: the home directory, SSH keys, cloud credentials, the network. Gralph runs unattended across a whole task list, so nobody is watching when a task file is wrong, a session reads something hostile mid-task (prompt injection), or Claude simply makes a bad call. The only defence so far was a sentence in the README: only run task files you trust.
+
+Claude Code's own documentation says bypass mode is meant for containers and VMs. Claude Code also ships an OS-level sandbox (bubblewrap on Linux, Seatbelt on macOS), configured through its settings, that limits what shell commands and their children can read, write, and reach on the network.
+
+A spike on 2026-09-30 (Claude Code 2.1.286, Linux) ran the same eight probes headless under two configurations and checked the disk afterwards:
+
+| Probe                                   | Sandbox on, defaults, bypass flag kept | Tight sandbox, `--permission-mode acceptEdits` |
+| --------------------------------------- | -------------------------------------- | ---------------------------------------------- |
+| Shell write inside the project          | worked                                 | worked                                         |
+| Shell write outside the project         | blocked                                | blocked                                        |
+| Shell read of a file in the home dir    | leaked                                 | blocked                                        |
+| `curl` to the internet                  | went through                           | blocked                                        |
+| `go build` and run                      | failed (build cache read-only)         | worked (cache path allowed)                    |
+| Read tool on a file in the home dir     | leaked                                 | denied                                         |
+| Write tool outside the project          | wrote the file                         | denied                                         |
+| Session asks to run outside the sandbox | escaped                                | ignored                                        |
+
+Two things follow. Turning the sandbox on while keeping the bypass flag protects almost nothing: the session can ask to leave the sandbox and bypass mode approves it, and the Read and Write tools are not sandboxed at all. And the tight configuration is per project: Go needed read access to `GOROOT` and `GOPATH` and write access to its build cache, and every other toolchain has its own list. Gralph cannot know that list.
+
+**Decision:**
+
+A run needs exactly one of two new flags. There is no default.
+
+- `--sandbox-settings <path>`: a Claude Code settings JSON file. Gralph runs every session sandboxed with it.
+- `--skip-permissions`: no sandbox. Sessions run with `--dangerously-skip-permissions`, exactly as before this ADR. The user who passes it owns the result; the README says so in plain words.
+
+The rules:
+
+- **Neither flag, or both, is an error.** A real run (plain or TUI) with neither exits 1 with `error: pass --sandbox-settings <path>, or --skip-permissions to run without a sandbox`. Both together exits 1 with `error: --sandbox-settings and --skip-permissions cannot be used together`. Both checks happen in every mode, after the `--gate-timeout` check and plain mode's missing `--tasks`/`--prompt` check, and before the skill check and any task or prompt file loads. An empty `--sandbox-settings=` counts as not passed. The setup screen does not ask for either; it only asks for paths that have a safe meaning when missing.
+- **The settings file is validated before anything runs.** It must be readable and hold a JSON object; `sandbox`, when present, must be an object. Errors read `--sandbox-settings: <problem>` and exit 1. Gralph does not check the rest: unknown keys and bad values are Claude Code's to reject.
+- **Gralph forces three keys and leaves the rest alone.** On top of the user's file it sets `sandbox.enabled: true`, `sandbox.allowUnsandboxedCommands: false`, and `sandbox.failIfUnavailable: true`. The first turns the sandbox on. The second closes the escape hatch the spike showed. The third stops a file from asking Claude to carry on unsandboxed when the sandbox cannot start. Paths, domains, and every other settings key pass through untouched. The file on disk is never written.
+- **The argv.** Sandboxed sessions run as `claude --print --permission-mode acceptEdits --settings <merged JSON>`; the TUI path still inserts `--output-format stream-json --verbose` right after `--print`. With `--skip-permissions` the argv is today's, unchanged. The merged settings travel inline as one compact JSON argument, so there is no temporary file to clean up. Both paths still build the command in `claudeCmd` (ADR-011).
+- **Why `acceptEdits`.** It auto-approves file edits inside the working directory. Sandboxed shell commands are auto-approved by the sandbox's own default. Everything else that would prompt (a tool reading or writing outside the project, a web fetch with no allow rule) is denied, because a `--print` session has nobody to ask. The session sees the denial and carries on or gives up; the outcome rule (ADR-005) is unchanged.
+- **Read once.** The file is read, checked, and merged once at startup. Editing it during a run changes nothing until the next run.
+- **`--dry-run`** needs neither flag, since it runs nothing. Given `--sandbox-settings`, it validates the file and prints `sandbox settings: <path>` before the final `<tasks path> is valid` line. The both-flags error still applies.
+- **The stdin contract is unchanged**, as are task files, state handling, and gates.
+- **Gates are not sandboxed.** Gralph runs them itself through `sh` (ADR-013); this ADR covers sessions only.
+- **No detection, no fallback.** If the sandbox cannot start (no bubblewrap or socat, an unsupported OS), Claude exits non-zero and the task fails by the normal rule. Gralph does not probe for the sandbox and never drops to an unsandboxed run on its own.
+
+Alternatives not taken: tightening permissions with an allowlist of tools alone (a string check before the command runs; an allowed `make` or `go test` is still arbitrary code); gralph running sessions in a container (needs an image per toolchain, credential and file-ownership plumbing, gates moved inside, and a new way to kill the session); sandbox fields in the task file (grows the YAML format and the skill for something that belongs to the machine, not the task list); gralph guessing the toolchain's paths (guesswork, and wrong guesses fail in confusing ways); bypass as the default with the sandbox opt-in (the unsafe path stays the easy one).
+
+**Consequences:**
+
+_Positive:_
+
+- A session can no longer read the home directory, write outside the project, or reach the network unless the user's file allows it, and the operating system enforces that for shell commands whatever the session was told
+- The unsafe path still exists but has to be asked for by name on every run
+- One small seam: a load-and-merge function and a change to `claudeCmd`; the stdin contract, outcome rule, and process handling are untouched
+- No new dependency in gralph; the sandbox is Claude Code's
+
+_Negative:_
+
+- Breaking change: every existing invocation fails until it adds one of the two flags
+- The user has to write and maintain a settings file per project and toolchain (allowed paths, allowed domains); a file that is too tight makes tasks fail in ways that take a session to discover
+- Sandboxed runs need Claude Code's sandbox to work: bubblewrap and socat on Linux, Seatbelt on macOS; on the BSDs only `--skip-permissions` works
+- The file can still loosen things: `sandbox.excludedCommands`, broad `allowWrite` paths, and permission allow rules are the user's to set, and gralph does not second-guess them
+- The user's own Claude settings (`~/.claude/settings.json`, the project's `.claude/settings.json`) still merge in, so the same sandbox file can behave differently on two machines
+- Network limits are by hostname through a proxy; Claude Code's documentation notes that tricks such as domain fronting can get past it
+- The Read and Edit tools are held by permission rules, not the OS sandbox; that is as strong as Claude Code's permission checks
+- Gates still run unsandboxed
+- The merged JSON shows up in the process list as an argument; it holds paths and domains, not secrets, unless the user puts some there
+- Verified on Linux only; macOS and the TUI's stream-json argv were not part of the spike
 
 ---
 

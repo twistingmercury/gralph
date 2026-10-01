@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"slices"
 	"strings"
 
 	"github.com/twistingmercury/gralph/internal/tasks"
@@ -20,8 +19,9 @@ import (
 var ErrFailedTasks = errors.New("fix the failed tasks and set their state to pending before running")
 
 // Start runs the loop in plain mode. gateTimeout is the --gate-timeout value as
-// given, or "" when the flag was not passed.
-func Start(ctx context.Context, promptFile, tasksFile, gateTimeout string) error {
+// given, or "" when the flag was not passed. sessionArgs is the claude flags
+// that set what a session may do: SandboxArgs or BypassArgs.
+func Start(ctx context.Context, promptFile, tasksFile, gateTimeout string, sessionArgs []string) error {
 	prompt, err := LoadPrompt(promptFile)
 	if err != nil {
 		return fmt.Errorf("failed to start loop runner: %w", err)
@@ -36,7 +36,7 @@ func Start(ctx context.Context, promptFile, tasksFile, gateTimeout string) error
 		return fmt.Errorf("failed to start loop runner: %w", err)
 	}
 
-	if err := Run(ctx, prompt, tasklist, tasksFile, gateTimeout, nil); err != nil {
+	if err := Run(ctx, prompt, tasklist, tasksFile, gateTimeout, sessionArgs, nil); err != nil {
 		return fmt.Errorf("loop error: %w", err)
 	}
 
@@ -45,8 +45,9 @@ func Start(ctx context.Context, promptFile, tasksFile, gateTimeout string) error
 
 // DryRun validates tasksFile with the same checks Start uses and reports on
 // it to w without launching claude or writing any file. It also lists the
-// timeout each gate would run under, given gateTimeout as for Start.
-func DryRun(w io.Writer, tasksFile, gateTimeout string) error {
+// timeout each gate would run under, given gateTimeout as for Start, and
+// names sandboxFile, when not empty, as the settings a run would use.
+func DryRun(w io.Writer, tasksFile, gateTimeout, sandboxFile string) error {
 	tasklist, err := LoadTasksReport(w, tasksFile)
 	if errors.Is(err, ErrFailedTasks) {
 		return nil
@@ -58,6 +59,10 @@ func DryRun(w io.Writer, tasksFile, gateTimeout string) error {
 
 	PrintTasks(w, tasklist)
 	printGateLimits(w, tasklist, gateTimeout)
+	if sandboxFile != "" {
+		_, _ = fmt.Fprintf(w, "sandbox settings: %s\n", sandboxFile)
+	}
+
 	_, _ = fmt.Fprintf(w, "%s is valid\n", tasksFile)
 	return nil
 }
@@ -162,8 +167,9 @@ func LoadPrompt(path string) (string, error) {
 // claude then runs with stream-json output and its activity is reported
 // live. report may be called from more than one goroutine. gateTimeout, when
 // not empty, replaces every gate's timeout for this run; it is never saved.
-func Run(ctx context.Context, prompt string, tl *tasks.TaskList, tasksFile, gateTimeout string, report func(Event)) error {
-	err := runLoop(ctx, prompt, tl, tasksFile, gateTimeout, report)
+// sessionArgs is as for Start.
+func Run(ctx context.Context, prompt string, tl *tasks.TaskList, tasksFile, gateTimeout string, sessionArgs []string, report func(Event)) error {
+	err := runLoop(ctx, prompt, tl, tasksFile, gateTimeout, sessionArgs, report)
 	if report != nil {
 		report(Event{Kind: RunDone, Err: err})
 	}
@@ -171,7 +177,7 @@ func Run(ctx context.Context, prompt string, tl *tasks.TaskList, tasksFile, gate
 	return err
 }
 
-func runLoop(ctx context.Context, p string, tl *tasks.TaskList, tasksFile, gateTimeout string, report func(Event)) error {
+func runLoop(ctx context.Context, p string, tl *tasks.TaskList, tasksFile, gateTimeout string, sessionArgs []string, report func(Event)) error {
 	for i := range tl.Tasks {
 		task := &tl.Tasks[i]
 
@@ -187,7 +193,7 @@ func runLoop(ctx context.Context, p string, tl *tasks.TaskList, tasksFile, gateT
 			report(Event{Kind: TaskStarted, Task: *task})
 		}
 
-		state, errMsg, err := runTask(ctx, p, *task, gateTimeout, report)
+		state, errMsg, err := runTask(ctx, p, *task, gateTimeout, sessionArgs, report)
 		if err != nil {
 			return err
 		}
@@ -225,11 +231,11 @@ func runLoop(ctx context.Context, p string, tl *tasks.TaskList, tasksFile, gateT
 // runTask runs one task's session on the path report selects and, only when
 // the session completed, the task's gates. It returns the task's outcome, or
 // an error when ctx was cancelled.
-func runTask(ctx context.Context, p string, task tasks.Task, gateTimeout string, report func(Event)) (state, errMsg string, err error) {
+func runTask(ctx context.Context, p string, task tasks.Task, gateTimeout string, sessionArgs []string, report func(Event)) (state, errMsg string, err error) {
 	if report == nil {
-		state, errMsg, err = runTaskPlain(ctx, p, task)
+		state, errMsg, err = runTaskPlain(ctx, p, task, sessionArgs)
 	} else {
-		state, errMsg, err = runTaskStream(ctx, p, task, report)
+		state, errMsg, err = runTaskStream(ctx, p, task, sessionArgs, report)
 	}
 
 	if err != nil || state != tasks.CompletedState {
@@ -242,8 +248,8 @@ func runTask(ctx context.Context, p string, task tasks.Task, gateTimeout string,
 // runTaskPlain runs one task as plain mode always has: the combined prompt
 // echoed to stdout, claude's stdout teed to the terminal, stderr inherited.
 // It returns the task's outcome, or an error when ctx was cancelled.
-func runTaskPlain(ctx context.Context, p string, task tasks.Task) (state, errMsg string, err error) {
-	cmd, prompt := claudeCmd(ctx, p, task, false)
+func runTaskPlain(ctx context.Context, p string, task tasks.Task, sessionArgs []string) (state, errMsg string, err error) {
+	cmd, prompt := claudeCmd(ctx, p, task, sessionArgs, false)
 
 	fmt.Println(prompt)
 
@@ -255,15 +261,17 @@ func runTaskPlain(ctx context.Context, p string, task tasks.Task) (state, errMsg
 }
 
 // claudeCmd builds the claude command for task, in its own process group
-// with the combined prompt on stdin, and also returns that prompt text. With
-// stream, the stream-json flags go right after --print.
-func claudeCmd(ctx context.Context, p string, task tasks.Task, stream bool) (*exec.Cmd, string) {
+// with the combined prompt on stdin, and also returns that prompt text. The
+// argv is --print, then the stream-json flags when stream is set, then
+// sessionArgs.
+func claudeCmd(ctx context.Context, p string, task tasks.Task, sessionArgs []string, stream bool) (*exec.Cmd, string) {
 	prompt := fmt.Sprintf("%s\n\n%s\n", p, task.String())
-	cmd := exec.CommandContext(ctx, "claude", "--print", "--dangerously-skip-permissions")
+	cmd := exec.CommandContext(ctx, "claude", "--print")
 	if stream {
-		cmd.Args = slices.Insert(cmd.Args, 2, "--output-format", "stream-json", "--verbose")
+		cmd.Args = append(cmd.Args, "--output-format", "stream-json", "--verbose")
 	}
 
+	cmd.Args = append(cmd.Args, sessionArgs...)
 	configureProcessTree(cmd)
 	cmd.Stdin = strings.NewReader(prompt)
 	return cmd, prompt

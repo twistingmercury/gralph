@@ -179,7 +179,7 @@ func TestHelpFlag(t *testing.T) {
 	t.Parallel()
 	result := runCLI(t, "--help")
 	assert.Equal(t, 0, result.exitCode, "stderr: %s", result.stderr)
-	for _, flag := range []string{"--prompt", "--tasks", "--dry-run", "--no-tui", "--install-skill", "--version"} {
+	for _, flag := range []string{"--prompt", "--tasks", "--dry-run", "--no-tui", "--install-skill", "--version", "--sandbox-settings", "--skip-permissions"} {
 		assert.Contains(t, result.stderr, flag)
 	}
 }
@@ -215,6 +215,7 @@ func TestMissingBothRequiredFlags(t *testing.T) {
 func TestNonexistentFiles(t *testing.T) {
 	t.Parallel()
 	result := runCLI(t,
+		"--skip-permissions",
 		"--prompt=/nonexistent/prompt.md",
 		"--tasks=/nonexistent/tasks.yaml",
 	)
