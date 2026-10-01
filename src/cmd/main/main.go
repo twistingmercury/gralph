@@ -44,7 +44,7 @@ func main() {
 	}
 
 	if *dryRunFlag {
-		if err := looper.DryRun(os.Stdout, *tasksFlag, *gateTimeoutFlag); err != nil {
+		if err := looper.DryRun(os.Stdout, *tasksFlag, *gateTimeoutFlag, ""); err != nil {
 			_, _ = fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			os.Exit(1)
 		}
@@ -59,7 +59,7 @@ func main() {
 		os.Exit(runTUI(ctx))
 	}
 
-	if err := looper.Start(ctx, *promptFlag, *tasksFlag, *gateTimeoutFlag); err != nil {
+	if err := looper.Start(ctx, *promptFlag, *tasksFlag, *gateTimeoutFlag, looper.BypassArgs()); err != nil {
 		_, _ = fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
@@ -122,7 +122,7 @@ func runTUI(ctx context.Context) int {
 		}
 	}
 
-	code, summary, err := tui.Run(ctx, prompt, tasklist, tasksPath, *gateTimeoutFlag)
+	code, summary, err := tui.Run(ctx, prompt, tasklist, tasksPath, *gateTimeoutFlag, looper.BypassArgs())
 	if err != nil {
 		_, _ = fmt.Fprintf(os.Stderr, "error: %v\nrun with --no-tui to use plain output\n", err)
 		return 1

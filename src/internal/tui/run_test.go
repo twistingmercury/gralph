@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/twistingmercury/gralph/internal/looper"
 	"github.com/twistingmercury/gralph/internal/tasks"
 )
 
@@ -62,7 +63,7 @@ func startRun(t *testing.T, ctx context.Context, tasksPath string) (*io.PipeWrit
 	t.Cleanup(func() { _ = w.Close() })
 	done := make(chan runResult, 1)
 	go func() {
-		code, summary, err := Run(ctx, "prompt", &tl, tasksPath, "",
+		code, summary, err := Run(ctx, "prompt", &tl, tasksPath, "", looper.BypassArgs(),
 			tea.WithInput(in), tea.WithOutput(io.Discard), tea.WithWindowSize(120, 30))
 		done <- runResult{code, summary, err}
 	}()
