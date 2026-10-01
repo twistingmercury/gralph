@@ -1,8 +1,8 @@
 # Gralph
 
-> **Maturity Level**: Emerging - under active development; the CLI contract has already changed between minor versions
-> **Version**: v0.8.1
-
+> **Maturity Level**: Emerging - under active development; the CLI contract has already changed between minor versions  
+> **Version**: v0.8.1  
+>
 > - **Emerging**: Prototype, not production-ready, expect breaking changes
 > - **Basic**: Production-ready but actively evolving, expect minor version changes
 > - **Mature**: Stable, battle-tested, changes are rare
