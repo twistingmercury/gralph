@@ -20,8 +20,10 @@ var ErrFailedTasks = errors.New("fix the failed tasks and set their state to pen
 
 // Start runs the loop in plain mode. gateTimeout is the --gate-timeout value as
 // given, or "" when the flag was not passed. sessionArgs is the claude flags
-// that set what a session may do: SandboxArgs or BypassArgs.
-func Start(ctx context.Context, promptFile, tasksFile, gateTimeout string, sessionArgs []string) error {
+// that set what a session may do: SandboxArgs or BypassArgs. commit is the
+// --commit flag: each completed task is committed when gralph runs in a git
+// work tree, which must then be clean.
+func Start(ctx context.Context, promptFile, tasksFile, gateTimeout string, sessionArgs []string, commit bool) error {
 	prompt, err := LoadPrompt(promptFile)
 	if err != nil {
 		return fmt.Errorf("failed to start loop runner: %w", err)
@@ -36,7 +38,12 @@ func Start(ctx context.Context, promptFile, tasksFile, gateTimeout string, sessi
 		return fmt.Errorf("failed to start loop runner: %w", err)
 	}
 
-	if err := Run(ctx, prompt, tasklist, tasksFile, gateTimeout, sessionArgs, nil, nil); err != nil {
+	repo, err := repoFor(os.Stdout, tasksFile, commit)
+	if err != nil {
+		return err
+	}
+
+	if err := Run(ctx, prompt, tasklist, tasksFile, gateTimeout, sessionArgs, repo, nil); err != nil {
 		return fmt.Errorf("loop error: %w", err)
 	}
 
@@ -45,9 +52,10 @@ func Start(ctx context.Context, promptFile, tasksFile, gateTimeout string, sessi
 
 // DryRun validates tasksFile with the same checks Start uses and reports on
 // it to w without launching claude or writing any file. It also lists the
-// timeout each gate would run under, given gateTimeout as for Start, and
-// names sandboxFile, when not empty, as the settings a run would use.
-func DryRun(w io.Writer, tasksFile, gateTimeout, sandboxFile string) error {
+// timeout each gate would run under, given gateTimeout as for Start, names
+// sandboxFile, when not empty, as the settings a run would use, and, when
+// commit is set, applies Start's work tree check and names the tree.
+func DryRun(w io.Writer, tasksFile, gateTimeout, sandboxFile string, commit bool) error {
 	tasklist, err := LoadTasksReport(w, tasksFile)
 	if errors.Is(err, ErrFailedTasks) {
 		return nil
@@ -61,6 +69,15 @@ func DryRun(w io.Writer, tasksFile, gateTimeout, sandboxFile string) error {
 	printGateLimits(w, tasklist, gateTimeout)
 	if sandboxFile != "" {
 		_, _ = fmt.Fprintf(w, "sandbox settings: %s\n", sandboxFile)
+	}
+
+	repo, err := repoFor(w, tasksFile, commit)
+	if err != nil {
+		return err
+	}
+
+	if repo != nil {
+		_, _ = fmt.Fprintf(w, "commit: %s\n", repo.Root())
 	}
 
 	_, _ = fmt.Fprintf(w, "%s is valid\n", tasksFile)

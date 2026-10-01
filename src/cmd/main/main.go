@@ -28,6 +28,7 @@ var (
 	noTUIFlag       = pflag.Bool("no-tui", false, "Use plain output instead of the full-screen view")
 	sandboxFlag     = pflag.String("sandbox-settings", "", "Path to a Claude Code settings JSON file; sessions run in Claude's sandbox with it. A run needs this or --skip-permissions")
 	skipPermsFlag   = pflag.Bool("skip-permissions", false, "Run sessions with no sandbox and no permission checks (claude --dangerously-skip-permissions); what they do is on you")
+	commitFlag      = pflag.Bool("commit", false, "Commit each completed task with git after its gates pass, with the task name as the message; in a repository, the work tree must be clean")
 )
 
 func main() {
@@ -48,7 +49,7 @@ func main() {
 	}
 
 	if *dryRunFlag {
-		if err := looper.DryRun(os.Stdout, *tasksFlag, *gateTimeoutFlag, *sandboxFlag); err != nil {
+		if err := looper.DryRun(os.Stdout, *tasksFlag, *gateTimeoutFlag, *sandboxFlag, *commitFlag); err != nil {
 			_, _ = fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			os.Exit(1)
 		}
@@ -63,7 +64,7 @@ func main() {
 		os.Exit(runTUI(ctx, session))
 	}
 
-	if err := looper.Start(ctx, *promptFlag, *tasksFlag, *gateTimeoutFlag, session); err != nil {
+	if err := looper.Start(ctx, *promptFlag, *tasksFlag, *gateTimeoutFlag, session, *commitFlag); err != nil {
 		_, _ = fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
@@ -127,7 +128,18 @@ func runTUI(ctx context.Context, session []string) int {
 		}
 	}
 
-	code, summary, err := tui.Run(ctx, prompt, tasklist, tasksPath, *gateTimeoutFlag, session, nil)
+	// The view has nowhere to print plain mode's "not a git repository"
+	// notice, so the work tree is opened without it.
+	var repo *looper.Repo
+	if *commitFlag {
+		var err error
+		if repo, err = looper.OpenRepo(tasksPath); err != nil {
+			_, _ = fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			return 1
+		}
+	}
+
+	code, summary, err := tui.Run(ctx, prompt, tasklist, tasksPath, *gateTimeoutFlag, session, repo)
 	if err != nil {
 		_, _ = fmt.Fprintf(os.Stderr, "error: %v\nrun with --no-tui to use plain output\n", err)
 		return 1

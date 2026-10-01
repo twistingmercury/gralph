@@ -524,3 +524,97 @@ func TestRun_CancelDuringCommitLeavesFileUntouched(t *testing.T) {
 	assert.Equal(t, tasksYAML, string(got), "the tasks file must be byte-for-byte unchanged after a cancel during the commit")
 	assert.Equal(t, []string{"init"}, subjects(t, dir))
 }
+
+const validTasks = "tasks:\n  - {id: 1, name: First, prompt: p1}\n"
+
+func TestStart_CommitRefusesDirtyTreeBeforeAnySession(t *testing.T) {
+	useFakeClaude(t)
+	dir := initRepo(t)
+	recordPath := filepath.Join(tempDir(t), "record.log")
+	t.Setenv("FAKE_CLAUDE_RECORD", recordPath)
+	writeFile(t, filepath.Join(dir, "stray.txt"), "stray\n")
+	run := tempDir(t)
+	promptPath, tasksPath := filepath.Join(run, "prompt.md"), filepath.Join(run, "tasks.yaml")
+	writeFile(t, promptPath, "prompt\n")
+	writeFile(t, tasksPath, validTasks)
+
+	err := Start(context.Background(), promptPath, tasksPath, "", bypass, true)
+	require.EqualError(t, err, "--commit needs a clean work tree; commit, stash, or remove:\n?? stray.txt")
+
+	assert.Empty(t, readFakeClaudeRecords(t, recordPath), "claude must not run")
+	got, readErr := os.ReadFile(tasksPath)
+	require.NoError(t, readErr)
+	assert.Equal(t, validTasks, string(got), "the tasks file must be untouched")
+}
+
+func TestStart_CommitFlagCommitsTheTask(t *testing.T) {
+	useFakeClaude(t)
+	dir := initRepo(t)
+	run := tempDir(t)
+	promptPath, tasksPath := filepath.Join(run, "prompt.md"), filepath.Join(run, "tasks.yaml")
+	writeFile(t, promptPath, "prompt\n")
+	writeFile(t, tasksPath, "tasks:\n  - id: 1\n    name: First\n    prompt: p1\n    gates:\n      - cmd: echo work > one.txt\n")
+
+	require.NoError(t, Start(context.Background(), promptPath, tasksPath, "", bypass, true))
+	assert.Equal(t, []string{"First", "init"}, subjects(t, dir))
+}
+
+func TestStart_WithoutCommitFlagIgnoresADirtyTree(t *testing.T) {
+	useFakeClaude(t)
+	dir := initRepo(t)
+	writeFile(t, filepath.Join(dir, "stray.txt"), "stray\n")
+	run := tempDir(t)
+	promptPath, tasksPath := filepath.Join(run, "prompt.md"), filepath.Join(run, "tasks.yaml")
+	writeFile(t, promptPath, "prompt\n")
+	writeFile(t, tasksPath, validTasks)
+
+	require.NoError(t, Start(context.Background(), promptPath, tasksPath, "", bypass, false))
+	assert.Equal(t, []string{"init"}, subjects(t, dir))
+}
+
+func TestDryRun_Commit(t *testing.T) {
+	t.Run("clean repository names the work tree", func(t *testing.T) {
+		dir := initRepo(t)
+		tasksPath := filepath.Join(tempDir(t), "tasks.yaml")
+		writeFile(t, tasksPath, validTasks)
+
+		var out bytes.Buffer
+		require.NoError(t, DryRun(&out, tasksPath, "", "", true))
+		assert.True(t, strings.HasSuffix(out.String(), "commit: "+dir+"\n"+tasksPath+" is valid\n"), out.String())
+	})
+
+	t.Run("dirty repository is an error", func(t *testing.T) {
+		dir := initRepo(t)
+		writeFile(t, filepath.Join(dir, "stray.txt"), "stray\n")
+		tasksPath := filepath.Join(tempDir(t), "tasks.yaml")
+		writeFile(t, tasksPath, validTasks)
+
+		var out bytes.Buffer
+		err := DryRun(&out, tasksPath, "", "", true)
+		require.ErrorContains(t, err, "--commit needs a clean work tree")
+		assert.NotContains(t, out.String(), "is valid")
+	})
+
+	t.Run("outside a repository says nothing will be committed", func(t *testing.T) {
+		dir := tempDir(t)
+		isolateGit(t, dir)
+		t.Chdir(dir)
+		tasksPath := filepath.Join(dir, "tasks.yaml")
+		writeFile(t, tasksPath, validTasks)
+
+		var out bytes.Buffer
+		require.NoError(t, DryRun(&out, tasksPath, "", "", true))
+		assert.True(t, strings.HasSuffix(out.String(), "commit: not a git repository, nothing will be committed\n"+tasksPath+" is valid\n"), out.String())
+	})
+
+	t.Run("without the flag git is never consulted", func(t *testing.T) {
+		dir := initRepo(t)
+		writeFile(t, filepath.Join(dir, "stray.txt"), "stray\n")
+		tasksPath := filepath.Join(tempDir(t), "tasks.yaml")
+		writeFile(t, tasksPath, validTasks)
+
+		var out bytes.Buffer
+		require.NoError(t, DryRun(&out, tasksPath, "", "", false))
+		assert.NotContains(t, out.String(), "commit:")
+	})
+}

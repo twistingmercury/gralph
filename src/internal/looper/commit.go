@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -160,4 +161,20 @@ func runGit(cmd *exec.Cmd, task tasks.Task, report func(Event)) error {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
+}
+
+// repoFor opens the work tree for a run started with --commit; without the
+// flag it returns nil. When there is no repository it says so on w, so a run
+// that commits nothing is not mistaken for one that did.
+func repoFor(w io.Writer, tasksFile string, commit bool) (*Repo, error) {
+	if !commit {
+		return nil, nil
+	}
+
+	repo, err := OpenRepo(tasksFile)
+	if err == nil && repo == nil {
+		_, _ = fmt.Fprintln(w, "commit: not a git repository, nothing will be committed")
+	}
+
+	return repo, err
 }
