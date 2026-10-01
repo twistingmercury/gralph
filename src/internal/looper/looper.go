@@ -77,7 +77,8 @@ func DryRun(w io.Writer, tasksFile, gateTimeout, sandboxFile string, commit bool
 	}
 
 	if repo != nil {
-		_, _ = fmt.Fprintf(w, "commit: %s\n", repo.Root())
+		repoRoot := repo.Root()
+		_, _ = fmt.Fprintf(w, "commit: %s\n", repoRoot)
 	}
 
 	_, _ = fmt.Fprintf(w, "%s is valid\n", tasksFile)
@@ -91,7 +92,8 @@ func printGateLimits(w io.Writer, tl *tasks.TaskList, override string) {
 	for _, task := range tl.Tasks {
 		for _, gate := range task.Gates {
 			limit, source := gateLimit(gate, override)
-			_, _ = fmt.Fprintf(w, "task %d gate: %s: %s (%s)\n", task.ID, firstLine(gate.Cmd), limit, source)
+			gateName := firstLine(gate.Cmd)
+			_, _ = fmt.Fprintf(w, "task %d gate: %s: %s (%s)\n", task.ID, gateName, limit, source)
 		}
 	}
 }
@@ -105,12 +107,16 @@ func PrintTasks(w io.Writer, tl *tasks.TaskList) {
 
 	idWidth := len("ID")
 	for _, task := range tl.Tasks {
-		idWidth = max(idWidth, len(fmt.Sprint(task.ID)))
+		idText := fmt.Sprint(task.ID)
+		idWidth = max(idWidth, len(idText))
 	}
 	stateWidth := len(tasks.CompletedState)
 
 	_, _ = fmt.Fprintf(w, "   %*s  %-*s  NAME\n", idWidth, "ID", stateWidth, "STATE")
-	_, _ = fmt.Fprintf(w, "   %s  %s  %s\n", strings.Repeat("-", idWidth), strings.Repeat("-", stateWidth), strings.Repeat("-", 4))
+	idRule := strings.Repeat("-", idWidth)
+	stateRule := strings.Repeat("-", stateWidth)
+	nameRule := strings.Repeat("-", 4)
+	_, _ = fmt.Fprintf(w, "   %s  %s  %s\n", idRule, stateRule, nameRule)
 	for _, task := range tl.Tasks {
 		emoji, color, reset, note := "  ", "", "", ""
 		switch task.State {
@@ -120,14 +126,16 @@ func PrintTasks(w io.Writer, tl *tasks.TaskList) {
 		case tasks.CompletedState:
 			emoji, color, reset = "✅", colorGrn, colorRst
 		}
-		_, _ = fmt.Fprintf(w, "%s %*d  %s%-*s%s  %s%s\n", emoji, idWidth, task.ID, color, stateWidth, strings.ToUpper(task.State), reset, task.Name, note)
+		stateText := strings.ToUpper(task.State)
+		_, _ = fmt.Fprintf(w, "%s %*d  %s%-*s%s  %s%s\n", emoji, idWidth, task.ID, color, stateWidth, stateText, reset, task.Name, note)
 	}
 }
 
 // LoadTasks reads and parses the tasks file at path. When the file parses but
 // any task is failed, it returns the list and ErrFailedTasks.
 func LoadTasks(path string) (*tasks.TaskList, error) {
-	bytes, err := os.ReadFile(filepath.Clean(path))
+	cleanPath := filepath.Clean(path)
+	bytes, err := os.ReadFile(cleanPath)
 	if err != nil {
 		return nil, fmt.Errorf("tasks file %q is not accessible: %w", path, err)
 	}
@@ -161,7 +169,8 @@ func LoadTasksReport(w io.Writer, tasksFile string) (*tasks.TaskList, error) {
 // LoadPrompt reads the prompt file at path and returns it trimmed; an empty or
 // whitespace-only prompt is an error.
 func LoadPrompt(path string) (string, error) {
-	bytes, err := os.ReadFile(filepath.Clean(path))
+	cleanPath := filepath.Clean(path)
+	bytes, err := os.ReadFile(cleanPath)
 	if err != nil {
 		return "", fmt.Errorf("prompt file %q is not accessible: %w", path, err)
 	}
@@ -280,7 +289,10 @@ func runTaskPlain(ctx context.Context, p string, task tasks.Task, sessionArgs []
 	cmd.Stdout = io.MultiWriter(os.Stdout, &out)
 	cmd.Stderr = os.Stderr
 
-	return finishTask(ctx, task, cmd.Run(), out.String())
+	runErr := cmd.Run()
+	output := out.String()
+
+	return finishTask(ctx, task, runErr, output)
 }
 
 // claudeCmd builds the claude command for task, in its own process group
@@ -288,7 +300,8 @@ func runTaskPlain(ctx context.Context, p string, task tasks.Task, sessionArgs []
 // argv is --print, then the stream-json flags when stream is set, then
 // sessionArgs.
 func claudeCmd(ctx context.Context, p string, task tasks.Task, sessionArgs []string, stream bool) (*exec.Cmd, string) {
-	prompt := fmt.Sprintf("%s\n\n%s\n", p, task.String())
+	taskText := task.String()
+	prompt := fmt.Sprintf("%s\n\n%s\n", p, taskText)
 	cmd := exec.CommandContext(ctx, "claude", "--print")
 	if stream {
 		cmd.Args = append(cmd.Args, "--output-format", "stream-json", "--verbose")
@@ -309,6 +322,7 @@ func finishTask(ctx context.Context, task tasks.Task, runErr error, output strin
 		return "", "", fmt.Errorf("task %d: %s failed: %w", task.ID, task.Name, runErr)
 	}
 
-	state, errMsg = outcome(runErr, lastResultLine(output))
+	lastLine := lastResultLine(output)
+	state, errMsg = outcome(runErr, lastLine)
 	return state, errMsg, nil
 }

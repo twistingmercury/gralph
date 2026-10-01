@@ -26,7 +26,8 @@ func parseResult(line string) (state, errMsg string, ok bool) {
 		return "", "", false
 	}
 
-	state = strings.ToLower(strings.TrimSpace(r.State))
+	trimmedState := strings.TrimSpace(r.State)
+	state = strings.ToLower(trimmedState)
 	if state != tasks.CompletedState && state != tasks.FailedState {
 		return "", "", false
 	}
@@ -39,7 +40,8 @@ func parseResult(line string) (state, errMsg string, ok bool) {
 // session's trailing JSON result line even when that line is wrapped in a
 // Markdown code fence.
 func lastResultLine(output string) string {
-	for _, l := range slices.Backward(strings.Split(output, "\n")) {
+	lines := strings.Split(output, "\n")
+	for _, l := range slices.Backward(lines) {
 		line := strings.TrimSpace(l)
 		if line == "" || strings.HasPrefix(line, "```") {
 			continue

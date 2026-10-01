@@ -85,7 +85,8 @@ func stopProcessTree(process *os.Process, grace time.Duration) error {
 
 		// Signal 0 only probes. The group leader is reaped by Wait, which runs
 		// concurrently, so a zombie does not keep the probe succeeding.
-		if errors.Is(signalProcessTree(process, 0), os.ErrProcessDone) {
+		probeErr := signalProcessTree(process, 0)
+		if errors.Is(probeErr, os.ErrProcessDone) {
 			return nil
 		}
 	}
