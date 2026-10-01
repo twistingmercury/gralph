@@ -24,23 +24,23 @@ Each architectural decision is recorded as an ADR with the following structure:
 
 ## Decision Summary
 
-| ADR     | Title                                          | Status   | Date       |
-| ------- | ---------------------------------------------- | -------- | ---------- |
-| ADR-001 | Claude Code only, no agent abstraction         | Accepted | 2026-09-25 |
-| ADR-002 | YAML task file + shared prompt, strict parsing | Accepted | 2026-09-25 |
-| ADR-003 | One fresh session per task, no retry           | Accepted | 2026-09-25 |
-| ADR-004 | Gralph owns task state, atomic writes          | Accepted | 2026-09-25 |
-| ADR-005 | Outcome from JSON result line, not exit code   | Accepted | 2026-09-25 |
-| ADR-006 | Failed task blocks run until manual reset      | Accepted | 2026-09-25 |
-| ADR-007 | Unix only, process group lifecycle management  | Accepted | 2026-09-25 |
-| ADR-008 | Docker-first CI: build, test, e2e in container | Accepted | 2026-09-25 |
-| ADR-009 | Embed the skill, install with --install-skill  | Accepted | 2026-09-25 |
-| ADR-010 | Refuse to run with a stale installed skill     | Accepted | 2026-09-25 |
-| ADR-011 | Full-screen TUI by default, plain mode intact  | Accepted | 2026-09-25 |
-| ADR-012 | Bubble Tea v2 for the TUI, confined to its use | Accepted | 2026-09-25 |
-| ADR-013 | Gralph runs a task's gates after a completed session | Accepted | 2026-09-30 |
+| ADR     | Title                                                         | Status   | Date       |
+| ------- | ------------------------------------------------------------- | -------- | ---------- |
+| ADR-001 | Claude Code only, no agent abstraction                        | Accepted | 2026-09-25 |
+| ADR-002 | YAML task file + shared prompt, strict parsing                | Accepted | 2026-09-25 |
+| ADR-003 | One fresh session per task, no retry                          | Accepted | 2026-09-25 |
+| ADR-004 | Gralph owns task state, atomic writes                         | Accepted | 2026-09-25 |
+| ADR-005 | Outcome from JSON result line, not exit code                  | Accepted | 2026-09-25 |
+| ADR-006 | Failed task blocks run until manual reset                     | Accepted | 2026-09-25 |
+| ADR-007 | Unix only, process group lifecycle management                 | Accepted | 2026-09-25 |
+| ADR-008 | Docker-first CI: build, test, e2e in container                | Accepted | 2026-09-25 |
+| ADR-009 | Embed the skill, install with --install-skill                 | Accepted | 2026-09-25 |
+| ADR-010 | Refuse to run with a stale installed skill                    | Accepted | 2026-09-25 |
+| ADR-011 | Full-screen TUI by default, plain mode intact                 | Accepted | 2026-09-25 |
+| ADR-012 | Bubble Tea v2 for the TUI, confined to its use                | Accepted | 2026-09-25 |
+| ADR-013 | Gralph runs a task's gates after a completed session          | Accepted | 2026-09-30 |
 | ADR-014 | Sessions run in Claude Code's sandbox; bypass only on request | Accepted | 2026-09-30 |
-| ADR-015 | Gralph commits a completed task on request     | Accepted | 2026-09-30 |
+| ADR-015 | Gralph commits a completed task on request                    | Accepted | 2026-09-30 |
 
 ## Decisions
 
@@ -56,7 +56,7 @@ Early versions of gralph (tags v0.4.0–v0.5.2) attempted to build an agent-agno
 
 Gralph is Claude Code only. No agent abstraction layer, no provider profiles, no `--agent-*` flags. The CLI invokes `claude --print --dangerously-skip-permissions` directly, coupling the tool to Claude Code as a deliberate design choice.
 
-*Amended by ADR-014:* Sessions run with `--permission-mode acceptEdits --settings <merged JSON>` (sandboxed) or `--dangerously-skip-permissions` (not sandboxed), chosen by `--sandbox-settings` or `--skip-permissions`.
+_Amended by ADR-014:_ Sessions run with `--permission-mode acceptEdits --settings <merged JSON>` (sandboxed) or `--dangerously-skip-permissions` (not sandboxed), chosen by `--sandbox-settings` or `--skip-permissions`.
 
 **Consequences:**
 
@@ -123,7 +123,7 @@ Early versions (through v0.6.0) included an `--iterations` flag to retry failed 
 
 Each task runs in exactly one fresh `claude --print --dangerously-skip-permissions` session. There is no `--iterations` flag, no retry, no fallback logic. A failed task blocks the run. To resume, a person must inspect the failure, fix the cause (in the repo or the task prompt), then manually set the task's state to `pending` (or `completed`) before running again.
 
-*Amended by ADR-014:* The session flags are chosen by `--sandbox-settings` (sandboxed) or `--skip-permissions` (no sandbox).
+_Amended by ADR-014:_ The session flags are chosen by `--sandbox-settings` (sandboxed) or `--skip-permissions` (no sandbox).
 
 **Consequences:**
 
@@ -318,7 +318,7 @@ _Negative:_
 
 - Skill changes ship only with a new binary; a stale install is not detected during normal runs
 
-*Amended by ADR-010:* A stale install is now detected: a run or dry run exits 1 and tells the user to run `gralph --install-skill`.
+_Amended by ADR-010:_ A stale install is now detected: a run or dry run exits 1 and tells the user to run `gralph --install-skill`.
 
 ---
 
@@ -374,7 +374,7 @@ There is one loop. `looper.Run` → `runLoop` takes a `report func(Event)` hook:
 - `report == nil` (plain): `runTaskPlain` runs `claude --print --dangerously-skip-permissions`, echoes the combined prompt, tees claude's stdout, and inherits stderr, exactly as before.
 - `report != nil` (TUI): `runTaskStream` runs `claude --print --output-format stream-json --verbose --dangerously-skip-permissions`, writes nothing to gralph's stdout or stderr, and reports `TaskStarted`, `Activity` (assistant text and tool calls, and claude's stderr lines), and `TaskFinished` events, then a final `RunDone`. The outcome comes from the `result` event's text with the same rules as plain mode.
 
-*Amended by ADR-014:* The session flags are `--permission-mode acceptEdits --settings <merged JSON>` (sandboxed) or `--dangerously-skip-permissions` (not sandboxed), chosen by `--sandbox-settings` or `--skip-permissions`.
+_Amended by ADR-014:_ The session flags are `--permission-mode acceptEdits --settings <merged JSON>` (sandboxed) or `--dangerously-skip-permissions` (not sandboxed), chosen by `--sandbox-settings` or `--skip-permissions`.
 
 Both paths send the same combined prompt on stdin, and the loop rules (skip completed, save after every task, stop on first failure, cancel leaves the task untouched) live once in `runLoop`. Stream-json is used only on the TUI path. There are no runner, storage, or writer interfaces: `runLoop` still execs claude inline, and tests still drive a fake `claude` on `PATH`. `in progress` is display only and never written to `tasks.yaml`.
 
@@ -476,7 +476,7 @@ _Positive:_
 
 _Negative:_
 
-- Gate commands are shell text from the task file, run without a sandbox; the file was already code to be trusted (it drives `--dangerously-skip-permissions`), and now gralph executes part of it directly. *Amended by ADR-014:* sessions no longer always run with `--dangerously-skip-permissions`; gates still run without a sandbox either way
+- Gate commands are shell text from the task file, run without a sandbox; the file was already code to be trusted (it drives `--dangerously-skip-permissions`), and now gralph executes part of it directly. _Amended by ADR-014:_ sessions no longer always run with `--dangerously-skip-permissions`; gates still run without a sandbox either way
 - A failed gate leaves whatever the session did, including commits, in the repository for a person to sort out
 - Resetting a gate-failed task to `pending` runs the whole session again, not just the gates; setting it to `completed` by hand skips the gates
 - Common gates are repeated in every task
