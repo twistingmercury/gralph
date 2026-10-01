@@ -1,8 +1,8 @@
 # Gralph — System Architecture
 
-> **Version**: v12
+> **Version**: v13
 > **Date**: 2026-10-01
-> **Notes**: Added run logging (`--log-dir`, ADR-016): the `internal/runlog` component, the `SessionFinished`, `GateFinished`, and `Committed` events, the `observe` hook on `tui.Run`, and the log files in the diagrams, interactions, and boundary rules.
+> **Notes**: Run Log Writer brought in line with the code: `RunDir` and `Open(runDir, info)`, `os.Root`, nil-safe methods, how `run_finished` picks its result; the `forwarder` in the TUI; the view after a run that ended with an error; `Committed` skipped when the hash cannot be read.
 
 [Back to Overview](00_overview.md) | [Back to Project README](../../README.md)
 
@@ -85,10 +85,10 @@ graph TB
 
 **Responsibilities:**
 - `Setup`/`SetupModel`: the path-entry screen; one text field per missing `--tasks`/`--prompt` path, each validated on Enter with `looper.LoadTasks` or `looper.LoadPrompt`, errors shown under the field; Esc or ctrl+c cancels (exit 1)
-- `Run`: derives a cancellable context from `cmd/main`'s signal context, runs `looper.Run` in a goroutine with a `report` hook that calls `program.Send`, and returns the exit code and summary when the view closes. When given an `observe func(looper.Event) error` (nil without `--log-dir`), the hook calls it with each event first; on its first error `Run` cancels the run and puts that error in the final `RunDone`, so the status reads `Run stopped: log: <error>`
+- `Run`: derives a cancellable context from `cmd/main`'s signal context, runs `looper.Run` in a goroutine with a `report` hook that calls `program.Send`, and returns the exit code and summary when the view closes. When given an `observe func(looper.Event) error` (nil without `--log-dir`), the hook calls it with each event first; on its first error `Run` cancels the run and puts that error in the final `RunDone`, so the status reads `Run stopped: log: <error>`. The hook is a `forwarder` (`forward.go`); after `observe`'s first error it never calls it again, so the record ends there
 - `Model`: the run view (alt screen, relaid out on resize) with three titled panes (title bars rendered above the viewports so they stay put while scrolling): Current task (`<id>: <name>` and prompt), Task progress (`<icon> <id>: <name>: <state>` per task, colored by state, under a one-line outcome banner once the run ends), Claude activity (the current task's activity, cleared on each `TaskStarted`, following the newest line unless scrolled up), and a key legend that also carries the confirm prompt and final status
 - Keys: `tab` switches the focused pane, `↑/↓/PgUp/PgDn` scroll it; `q` or ctrl+c opens a `[y/N]` stop confirm during the run and quits after it
-- Shows `in progress` for the running task; it is display only and never saved
+- Shows `in progress` for the running task; it is display only and never saved. A run that ends with an error resets any task still in progress to pending on screen, which is what the file says
 
 **Key Characteristics:**
 
@@ -231,7 +231,7 @@ graph TB
 - Nothing staged means no commit and the task stays `completed`; a non-zero exit makes it `failed` with `commit failed: <exit error>` (in practice e.g. `commit failed: exit status 1`)
 - Git runs from the work tree root in its own process group with no stdin, like a gate; but on cancellation, the group is sent SIGTERM first (`stopProcessTree`), waits up to 2 seconds (`gitStopGrace`, checking if still alive with signal 0), then SIGKILL only if still alive, so git removes its `index.lock` on the graceful stop. The task and file stay untouched on cancellation
 - Plain path (`report == nil`): once something is staged, print `commit: <first line of name>` to stdout; git's output passes straight through
-- TUI path (`report != nil`): write nothing to gralph's stdout/stderr; report `Activity` `→ commit <first line of name>` once something is staged, and each git output line as `Activity`; after a successful commit, read the hash with `git rev-parse HEAD` and report `Committed`
+- TUI path (`report != nil`): write nothing to gralph's stdout/stderr; report `Activity` `→ commit <first line of name>` once something is staged, and each git output line as `Activity`; after a successful commit, read the hash with `git rev-parse HEAD` and report `Committed` (`reportCommitted`); if the hash cannot be read, no event is sent and the task's outcome does not change
 - Git commands are built by `(*Repo).git`, which appends arguments to a constant `git` command; keep it that way so gosec stays quiet without a suppression
 - Gralph never pushes, resets, stashes, or passes `--no-verify`
 
@@ -250,8 +250,11 @@ graph TB
 
 **Responsibilities:**
 - Exists only for `--log-dir` (ADR-016); without the flag it is never called and gralph writes nothing but the task file
-- `Open(dir, info)`: create `<dir>` if needed and the run folder `<dir>/<YYYYMMDDTHHMMSS>` (local start time; folders `0700`, files `0600`; an existing run folder is an error), create `run.jsonl`, and write the `run_started` line from `info` (version, task and prompt file paths, permission mode, sandbox settings path, gate timeout, commit)
+- `RunDir(logDir, start)`: name the run folder, `<logDir>/<YYYYMMDDTHHMMSS>` (local start time). It is separate from `Open` so `cmd/main` can have the repository check the path (`(*Repo).CheckLogDir`) before anything is created
+- `Open(runDir, info)`: create the log directory if needed and then the run folder (folders `0700`, files `0600`; an existing run folder is an error), open the folder as an `os.Root` so every file is confined to it, create `run.jsonl`, and write the `run_started` line from `info` (version, task and prompt file paths, permission mode, sandbox settings path, gate timeout, commit)
 - `Record(event) error`: turn one `looper.Event` into output. `TaskStarted`, `SessionFinished`, `GateFinished`, `Committed`, `TaskFinished`, and `RunDone` each append one line to the ledger (`task_started`, `session_finished`, `gate_finished`, `committed`, `task_finished`, `run_finished`); `Activity` appends `HH:MM:SS <line>` to that task's `task-<id>.log`, opened on its `TaskStarted`
+- `run_finished` carries `completed` when the run had no error; otherwise `failed` when the last `task_finished` was a failed task, and `stopped` for any other error
+- `Record` and `Close` do nothing on a nil `*Log`, which is what a run without the flag has
 - `Close`: close the open files
 - Safe for calls from more than one goroutine (a mutex), since `report` is
 

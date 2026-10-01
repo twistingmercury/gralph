@@ -10,6 +10,7 @@ graph TD
     main["cmd/main"]
     tui["internal/tui"]
     looper["internal/looper"]
+    runlog["internal/runlog"]
     tasks["internal/tasks"]
     skillinstall["internal/skillinstall"]
     version["internal/version"]
@@ -18,12 +19,15 @@ graph TD
 
     main --> tui
     main --> looper
+    main --> runlog
     main --> tasks
     main --> skillinstall
     main --> version
     tui --> looper
     tui --> tasks
     looper --> tasks
+    runlog --> looper
+    runlog --> tasks
     skillinstall --> version
     skillinstall --> skills
 
@@ -32,15 +36,18 @@ graph TD
 
 ## What each edge carries
 
-| Edge                     | What's used                                                                                                          |
-| ------------------------ | -------------------------------------------------------------------------------------------------------------------- |
-| `main → looper`          | `Start`, `DryRun`, `LoadPrompt`, `LoadTasksReport`, `ErrFailedTasks`, `OpenRepo`/`Repo`, `SandboxArgs`, `BypassArgs` |
-| `main → tui`             | `Setup`, `Run`                                                                                                       |
-| `main → tasks`           | `ParseTimeout`, `TaskList`                                                                                           |
-| `main → skillinstall`    | `Install`, `Check`                                                                                                   |
-| `main → version`         | `Print`                                                                                                              |
-| `tui → looper`           | `Run`, `Event` and its four kinds, `Repo`, `LoadTasks`, `LoadPrompt`                                                 |
-| `tui → tasks`            | `Task`, `TaskList`, the three state constants                                                                        |
-| `looper → tasks`         | `Task`, `TaskList`, `Gate`, `ParseTasks`, `SaveTasks`, `ParseTimeout`, state constants                               |
-| `skillinstall → version` | `Version`                                                                                                            |
-| `skillinstall → skills`  | `FS`                                                                                                                 |
+| Edge                     | What's used                                                                                                                                  |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `main → looper`          | `Start`, `DryRun`, `LoadPrompt`, `LoadTasksReport`, `ErrFailedTasks`, `OpenRepo`/`Repo` (and its `CheckLogDir`), `SandboxArgs`, `BypassArgs` |
+| `main → tui`             | `Setup`, `Run`                                                                                                                               |
+| `main → runlog`          | `Info`, `RunDir`, `Open`, `Log` (`Record`, `Close`)                                                                                          |
+| `main → tasks`           | `ParseTimeout`, `TaskList`                                                                                                                   |
+| `main → skillinstall`    | `Install`, `Check`                                                                                                                           |
+| `main → version`         | `Print`, `Version`                                                                                                                           |
+| `tui → looper`           | `Run`, `Event` and the kinds the view shows (`TaskStarted`, `Activity`, `TaskFinished`, `RunDone`), `Repo`, `LoadTasks`, `LoadPrompt`        |
+| `tui → tasks`            | `Task`, `TaskList`, the three state constants                                                                                                |
+| `looper → tasks`         | `Task`, `TaskList`, `Gate`, `ParseTasks`, `SaveTasks`, `ParseTimeout`, state constants                                                       |
+| `runlog → looper`        | `Event` and all seven of its kinds                                                                                                           |
+| `runlog → tasks`         | `FailedState`                                                                                                                                |
+| `skillinstall → version` | `Version`                                                                                                                                    |
+| `skillinstall → skills`  | `FS`                                                                                                                                         |
