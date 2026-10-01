@@ -453,6 +453,72 @@ func TestSaveTasks_TargetDirNotWritable(t *testing.T) {
 	assert.True(t, os.IsNotExist(statErr), "no .tmp file should remain after a failed save")
 }
 
+// The file itself stays writable; only its directory is read-only. A save that
+// wrote to the target directly would therefore succeed and replace the
+// contents, so this passes only when the write goes to a sibling file first.
+func TestSaveTasks_FailedSaveLeavesExistingFileUntouched(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: directory permissions are not enforced")
+	}
+
+	dir := t.TempDir()
+	roDir := filepath.Join(dir, "ro")
+	require.NoError(t, os.Mkdir(roDir, 0o700))
+
+	path := filepath.Join(roDir, "tasks.yaml")
+	original := TaskList{Tasks: []Task{{ID: 1, Name: "Original", Prompt: "p", State: PendingState}}}
+	require.NoError(t, SaveTasks(path, original))
+
+	before, err := os.ReadFile(path)
+	require.NoError(t, err)
+
+	require.NoError(t, os.Chmod(roDir, 0o500))
+	t.Cleanup(func() { _ = os.Chmod(roDir, 0o700) })
+
+	changed := TaskList{Tasks: []Task{{ID: 1, Name: "Changed", Prompt: "p", State: FailedState, Error: "boom"}}}
+	err = SaveTasks(path, changed)
+	require.Error(t, err)
+
+	after, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.Equal(t, string(before), string(after), "a failed save must leave the existing task file byte for byte as it was")
+}
+
+// People edit the task file by hand between runs, so its layout is part of
+// what a save promises; a round-trip through ParseTasks cannot see indentation.
+func TestSaveTasks_WritesTwoSpaceIndent(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "tasks.yaml")
+
+	tl := TaskList{Tasks: []Task{
+		{ID: 1, Name: "First", Prompt: "p", State: PendingState, Gates: []Gate{
+			{Cmd: "go test ./...", Timeout: "90s"},
+			{Cmd: "echo one"},
+		}},
+		{ID: 2, Name: "Second", Prompt: "q", State: FailedState, Error: "boom"},
+	}}
+	require.NoError(t, SaveTasks(path, tl))
+
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+
+	want := `tasks:
+  - id: 1
+    name: First
+    prompt: p
+    state: pending
+    gates:
+      - cmd: go test ./...
+        timeout: 90s
+      - cmd: echo one
+  - id: 2
+    name: Second
+    prompt: q
+    state: failed
+    error: boom
+`
+	assert.Equal(t, want, string(data), "the saved file must use a 2-space indent at every level")
+}
+
 func TestParseTasks_ReadsGates(t *testing.T) {
 	yml := []byte(`tasks:
   - id: 1
