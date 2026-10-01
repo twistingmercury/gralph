@@ -8,10 +8,10 @@ import (
 	"time"
 )
 
-// configureProcessTree puts the claude child in its own process group and
-// arranges for context cancellation to kill that entire group. Without this,
-// exec.CommandContext only signals the direct child, leaving any descendants
-// the agent spawns still running after gralph exits.
+// configureProcessTree puts a claude session or a gate in its own process
+// group and arranges for context cancellation to kill that entire group.
+// Without this, exec.CommandContext only signals the direct child, leaving
+// any descendants the agent spawns still running after gralph exits.
 //
 // One consequence: because the child leaves gralph's foreground process
 // group, a terminal Ctrl-C is delivered only to gralph, not to the child
@@ -21,11 +21,11 @@ import (
 func configureProcessTree(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error {
-		return terminateProcessTree(cmd.Process)
+		return killProcessTree(cmd.Process)
 	}
 }
 
-func terminateProcessTree(process *os.Process) error {
+func killProcessTree(process *os.Process) error {
 	return signalProcessTree(process, syscall.SIGKILL)
 }
 
@@ -91,5 +91,5 @@ func stopProcessTree(process *os.Process, grace time.Duration) error {
 		}
 	}
 
-	return terminateProcessTree(process)
+	return killProcessTree(process)
 }
