@@ -97,7 +97,8 @@ func checkDuplicate(ids map[int16]int, names map[string]int, i int, task Task, w
 	}
 
 	ids[task.ID] = i
-	name := strings.TrimSpace(strings.ToLower(task.Name))
+	lowered := strings.ToLower(task.Name)
+	name := strings.TrimSpace(lowered)
 	if j, dup := names[name]; dup {
 		return fmt.Errorf("%s: name: duplicates the name of tasks[%d]", where, j)
 	}
@@ -253,7 +254,8 @@ func checkGates(where string, node *yaml.Node) error {
 	}
 
 	for j, el := range node.Content {
-		if err := checkGate(fmt.Sprintf("%s: gates[%d]", where, j), el); err != nil {
+		gateWhere := fmt.Sprintf("%s: gates[%d]", where, j)
+		if err := checkGate(gateWhere, el); err != nil {
 			return err
 		}
 	}
@@ -375,7 +377,8 @@ func SaveTasks(path string, tl TaskList) error {
 
 	cleanPath := filepath.Clean(path)
 	tmpPath := cleanPath + ".tmp"
-	if err := os.WriteFile(tmpPath, buf.Bytes(), 0o600); err != nil {
+	encoded := buf.Bytes()
+	if err := os.WriteFile(tmpPath, encoded, 0o600); err != nil {
 		_ = os.Remove(tmpPath)
 		return fmt.Errorf("failed to save tasks to %q: %w", cleanPath, err)
 	}

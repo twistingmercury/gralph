@@ -18,7 +18,8 @@ func BypassArgs() []string {
 // claude flags for a sandboxed session. The settings travel inline, so there
 // is no temporary file to clean up, and the file at path is never written.
 func SandboxArgs(path string) ([]string, error) {
-	data, err := os.ReadFile(filepath.Clean(path))
+	cleanPath := filepath.Clean(path)
+	data, err := os.ReadFile(cleanPath)
 	if err != nil {
 		return nil, fmt.Errorf("--sandbox-settings: file %q is not accessible: %w", path, err)
 	}

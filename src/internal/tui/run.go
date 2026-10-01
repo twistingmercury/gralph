@@ -17,20 +17,16 @@ func Run(ctx context.Context, prompt string, tl *tasks.TaskList, tasksFile, gate
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	p := tea.NewProgram(New(tl, cancel), append([]tea.ProgramOption{tea.WithoutSignalHandler()}, opts...)...)
+	model := New(tl, cancel)
+	programOpts := append([]tea.ProgramOption{tea.WithoutSignalHandler()}, opts...)
+	p := tea.NewProgram(model, programOpts...)
 
 	loopDone, progDone := make(chan struct{}), make(chan struct{})
 	go func() {
 		defer close(loopDone)
 		_ = looper.Run(runCtx, prompt, tl, tasksFile, gateTimeout, sessionArgs, repo, func(e looper.Event) { p.Send(e) })
 	}()
-	go func() {
-		select {
-		case <-ctx.Done():
-			p.Send(interruptedMsg{})
-		case <-progDone:
-		}
-	}()
+	go forwardSignal(ctx, p, progDone)
 
 	final, err := p.Run()
 	close(progDone)
@@ -43,4 +39,16 @@ func Run(ctx context.Context, prompt string, tl *tasks.TaskList, tasksFile, gate
 	<-loopDone
 	m := final.(Model)
 	return m.ExitCode(), m.Summary(), nil
+}
+
+// forwardSignal exists because the program runs without Bubble Tea's own
+// signal handler: an outside stop cancels ctx and nothing else would tell the
+// view, so it has to be sent to the program. progDone ends the goroutine when
+// the program finishes first.
+func forwardSignal(ctx context.Context, p *tea.Program, progDone <-chan struct{}) {
+	select {
+	case <-ctx.Done():
+		p.Send(interruptedMsg{})
+	case <-progDone:
+	}
 }

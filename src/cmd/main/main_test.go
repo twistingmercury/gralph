@@ -3,11 +3,15 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/twistingmercury/gralph/internal/looper"
 )
+
+const validTasksYAML = "tasks:\n  - id: 1\n    name: first\n    prompt: do it\n"
 
 func TestSessionArgs(t *testing.T) {
 	settings := filepath.Join(t.TempDir(), "sandbox.json")
@@ -44,6 +48,66 @@ func TestSessionArgs(t *testing.T) {
 			assert.Equal(t, tt.want, got)
 		})
 	}
+}
+
+func TestLoadGiven_BothEmpty(t *testing.T) {
+	prompt, tasklist, err := loadGiven("", "")
+
+	require.NoError(t, err)
+	assert.Empty(t, prompt)
+	assert.Nil(t, tasklist)
+}
+
+func TestLoadGiven_MissingPrompt(t *testing.T) {
+	dir := t.TempDir()
+	tasksPath := filepath.Join(dir, "tasks.yaml")
+	require.NoError(t, os.WriteFile(tasksPath, []byte(validTasksYAML), 0o600))
+	promptPath := filepath.Join(dir, "missing.md")
+
+	prompt, tasklist, err := loadGiven(tasksPath, promptPath)
+
+	require.Error(t, err)
+	assert.True(t, strings.HasPrefix(err.Error(), "failed to start loop runner: "), err.Error())
+	assert.Empty(t, prompt)
+	assert.Nil(t, tasklist)
+}
+
+func TestLoadGiven_BadTasks(t *testing.T) {
+	tasksPath := filepath.Join(t.TempDir(), "missing.yaml")
+
+	_, tasklist, err := loadGiven(tasksPath, "")
+
+	require.Error(t, err)
+	assert.True(t, strings.HasPrefix(err.Error(), "failed to start loop runner: "), err.Error())
+	assert.NotErrorIs(t, err, looper.ErrFailedTasks)
+	assert.Nil(t, tasklist)
+}
+
+func TestLoadGiven_FailedTask(t *testing.T) {
+	tasksPath := filepath.Join(t.TempDir(), "tasks.yaml")
+	failedYAML := "tasks:\n  - id: 1\n    name: first\n    prompt: do it\n    state: failed\n"
+	require.NoError(t, os.WriteFile(tasksPath, []byte(failedYAML), 0o600))
+
+	_, _, err := loadGiven(tasksPath, "")
+
+	require.ErrorIs(t, err, looper.ErrFailedTasks)
+	assert.False(t, strings.HasPrefix(err.Error(), "failed to start loop runner"), err.Error())
+}
+
+func TestLoadGiven_Valid(t *testing.T) {
+	dir := t.TempDir()
+	tasksPath := filepath.Join(dir, "tasks.yaml")
+	require.NoError(t, os.WriteFile(tasksPath, []byte(validTasksYAML), 0o600))
+	promptPath := filepath.Join(dir, "prompt.md")
+	require.NoError(t, os.WriteFile(promptPath, []byte("  shared prompt\n"), 0o600))
+
+	prompt, tasklist, err := loadGiven(tasksPath, promptPath)
+
+	require.NoError(t, err)
+	assert.Equal(t, "shared prompt", prompt)
+	require.NotNil(t, tasklist)
+	require.Len(t, tasklist.Tasks, 1)
+	assert.Equal(t, "first", tasklist.Tasks[0].Name)
 }
 
 func TestIsPlain(t *testing.T) {

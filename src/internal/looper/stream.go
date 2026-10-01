@@ -49,9 +49,11 @@ func parseStreamLine(line []byte) (activity []string, result string, isResult bo
 		for _, block := range ev.Message.Content {
 			switch block.Type {
 			case "text":
-				activity = append(activity, textActivity(block.Text)...)
+				textLines := textActivity(block.Text)
+				activity = append(activity, textLines...)
 			case "tool_use":
-				activity = append(activity, toolActivity(block.Name, block.Input))
+				toolLine := toolActivity(block.Name, block.Input)
+				activity = append(activity, toolLine)
 			}
 		}
 	}
@@ -82,7 +84,7 @@ func toolActivity(name string, input toolInput) string {
 	case "Grep", "Glob":
 		target = input.Pattern
 	}
-	target, _, _ = strings.Cut(target, "\n")
+	target = firstLine(target)
 	if target == "" {
 		return "→ " + name
 	}
@@ -118,7 +120,9 @@ func runTaskStream(ctx context.Context, p string, task tasks.Task, sessionArgs [
 	readLines(stdout, st.stdoutLine)
 	<-stderrDone
 
-	return finishTask(ctx, task, cmd.Wait(), st.resultText)
+	waitErr := cmd.Wait()
+
+	return finishTask(ctx, task, waitErr, st.resultText)
 }
 
 // streamTask carries what runTaskStream's line callbacks share, so they can

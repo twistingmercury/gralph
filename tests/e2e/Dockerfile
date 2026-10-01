@@ -16,4 +16,4 @@ RUN go mod download
 
 ENV GRALPH_BINARY=/usr/local/bin/gralph
 
-CMD ["go", "test", "-v", "./..."]
+CMD ["go", "test", "./..."]

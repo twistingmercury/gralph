@@ -1,8 +1,8 @@
 # Gralph — Deployment Architecture
 
-> **Version**: v06
-> **Date**: 2026-09-30
-> **Notes**: Go module moved to `src/`; updated testing and build instructions to reflect module location.
+> **Version**: v07
+> **Date**: 2026-10-01
+> **Notes**: `make test` and the e2e container run tests without `-v`, so passing runs print one line per package.
 
 [Back to Overview](00_overview.md) | [Back to Project README](../../README.md)
 
@@ -130,7 +130,7 @@ GitHub Actions runs on `develop` and `main` branches for both push and pull requ
 
 ### Unit Tests
 
-- Run via `make test` → `go test -v ./cmd/... ./internal/...` (from `src/`)
+- Run via `make test` → `go test ./cmd/... ./internal/...` (from `src/`)
 - Covers task parsing, state transitions, result parsing, process management
 - Uses testify (require for preconditions, assert for checks)
 - Test suites: `cmd/main` (mode selection), `internal/tasks`, `internal/looper`, `internal/tui`, `internal/skillinstall`

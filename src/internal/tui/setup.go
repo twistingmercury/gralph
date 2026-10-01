@@ -32,11 +32,13 @@ type SetupModel struct {
 func NewSetup(tasksPath, promptPath string) SetupModel {
 	s := SetupModel{tasksPath: tasksPath, promptPath: promptPath}
 	if tasksPath == "" {
-		s.fields = append(s.fields, newSetupField("tasks file: ", true))
+		tasksField := newSetupField("tasks file: ", true)
+		s.fields = append(s.fields, tasksField)
 	}
 
 	if promptPath == "" {
-		s.fields = append(s.fields, newSetupField("prompt file: ", false))
+		promptField := newSetupField("prompt file: ", false)
+		s.fields = append(s.fields, promptField)
 	}
 
 	if len(s.fields) > 0 {
@@ -49,7 +51,8 @@ func NewSetup(tasksPath, promptPath string) SetupModel {
 // Setup runs the setup screen for the empty paths and returns its final
 // state. opts are extra program options, for tests.
 func Setup(tasksPath, promptPath string, opts ...tea.ProgramOption) (SetupModel, error) {
-	final, err := tea.NewProgram(NewSetup(tasksPath, promptPath), opts...).Run()
+	model := NewSetup(tasksPath, promptPath)
+	final, err := tea.NewProgram(model, opts...).Run()
 	if err != nil {
 		return SetupModel{}, err
 	}
@@ -90,20 +93,7 @@ func (s SetupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (s SetupModel) submit() (tea.Model, tea.Cmd) {
 	f := &s.fields[s.focus]
 	path := f.input.Value()
-	var err error
-	if f.isTasks {
-		var tl *tasks.TaskList
-		if tl, err = looper.LoadTasks(path); err == nil {
-			s.tasksPath, s.taskList = path, tl
-		}
-	} else {
-		var prompt string
-		if prompt, err = looper.LoadPrompt(path); err == nil {
-			s.promptPath, s.prompt = path, prompt
-		}
-	}
-
-	if err != nil {
+	if err := s.load(f.isTasks, path); err != nil {
 		f.err = err.Error()
 		return s, nil
 	}
@@ -118,10 +108,33 @@ func (s SetupModel) submit() (tea.Model, tea.Cmd) {
 	return s, s.fields[s.focus].input.Focus()
 }
 
+// load stores the path and what it loaded only on success, so a rejected
+// entry (a file with failed tasks included) leaves the model as it was.
+func (s *SetupModel) load(isTasks bool, path string) error {
+	if !isTasks {
+		prompt, err := looper.LoadPrompt(path)
+		if err != nil {
+			return err
+		}
+
+		s.promptPath, s.prompt = path, prompt
+		return nil
+	}
+
+	tl, err := looper.LoadTasks(path)
+	if err != nil {
+		return err
+	}
+
+	s.tasksPath, s.taskList = path, tl
+	return nil
+}
+
 func (s SetupModel) View() tea.View {
 	var b strings.Builder
 	for _, f := range s.fields {
-		b.WriteString(f.input.View())
+		inputLine := f.input.View()
+		b.WriteString(inputLine)
 		b.WriteByte('\n')
 		if f.err != "" {
 			b.WriteString("  ")
@@ -130,7 +143,8 @@ func (s SetupModel) View() tea.View {
 		}
 	}
 	b.WriteString("\nenter confirm · esc quit")
-	v := tea.NewView(b.String())
+	screen := b.String()
+	v := tea.NewView(screen)
 	v.AltScreen = true
 	return v
 }

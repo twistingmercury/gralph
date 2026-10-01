@@ -30,7 +30,7 @@ uninstall: ## Uninstall gralph to $GOBIN
 	rm ${GOBIN}/gralph
 
 test: ## Runs unit tests only (cmd and internal packages). The e2e suite runs in a container via `make build`.
-	go -C src test -v ./cmd/... ./internal/...
+	go -C src test ./cmd/... ./internal/...
 
 analyze: ## Run linters, formatters, security scanners on production code (no tests/ or *_test.go)
 	goimports -w src/cmd src/internal

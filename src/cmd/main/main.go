@@ -36,7 +36,11 @@ func main() {
 	checkVersion()
 	checkInstallSkill()
 	validateGateTimeout()
-	plain := isPlain(*dryRunFlag, *noTUIFlag, term.IsTerminal(os.Stdin.Fd()), term.IsTerminal(os.Stdout.Fd()))
+	stdinFd := os.Stdin.Fd()
+	stdinTTY := term.IsTerminal(stdinFd)
+	stdoutFd := os.Stdout.Fd()
+	stdoutTTY := term.IsTerminal(stdoutFd)
+	plain := isPlain(*dryRunFlag, *noTUIFlag, stdinTTY, stdoutTTY)
 	if plain {
 		validateRequiredFlags()
 	}
@@ -44,14 +48,12 @@ func main() {
 	session := validateSessionFlags()
 
 	if err := skillinstall.Check(); err != nil {
-		_, _ = fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		os.Exit(1)
+		fatal(err)
 	}
 
 	if *dryRunFlag {
 		if err := looper.DryRun(os.Stdout, *tasksFlag, *gateTimeoutFlag, *sandboxFlag, *commitFlag); err != nil {
-			_, _ = fmt.Fprintf(os.Stderr, "error: %v\n", err)
-			os.Exit(1)
+			fatal(err)
 		}
 
 		return
@@ -61,13 +63,20 @@ func main() {
 	defer stop()
 
 	if !plain {
-		os.Exit(runTUI(ctx, session))
+		exitCode := runTUI(ctx, session)
+		os.Exit(exitCode)
 	}
 
 	if err := looper.Start(ctx, *promptFlag, *tasksFlag, *gateTimeoutFlag, session, *commitFlag); err != nil {
-		_, _ = fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		os.Exit(1)
+		fatal(err)
 	}
+}
+
+// fatal is the one way to fail at startup, so every startup error has the
+// same "error: " prefix and exit code 1.
+func fatal(err error) {
+	_, _ = fmt.Fprintf(os.Stderr, "error: %v\n", err)
+	os.Exit(1)
 }
 
 // isPlain reports whether gralph runs in plain mode: on --dry-run or
@@ -83,28 +92,10 @@ func isPlain(dryRun, noTUI, stdinTTY, stdoutTTY bool) bool {
 func runTUI(ctx context.Context, session []string) int {
 	tasksPath, promptPath := *tasksFlag, *promptFlag
 
-	var prompt string
-	if promptPath != "" {
-		var err error
-		if prompt, err = looper.LoadPrompt(promptPath); err != nil {
-			_, _ = fmt.Fprintf(os.Stderr, "error: failed to start loop runner: %v\n", err)
-			return 1
-		}
-	}
-
-	var tasklist *tasks.TaskList
-	if tasksPath != "" {
-		var err error
-		tasklist, err = looper.LoadTasksReport(os.Stdout, tasksPath)
-		if errors.Is(err, looper.ErrFailedTasks) {
-			_, _ = fmt.Fprintf(os.Stderr, "error: %v\n", err)
-			return 1
-		}
-
-		if err != nil {
-			_, _ = fmt.Fprintf(os.Stderr, "error: failed to start loop runner: %v\n", err)
-			return 1
-		}
+	prompt, tasklist, err := loadGiven(tasksPath, promptPath)
+	if err != nil {
+		_, _ = fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		return 1
 	}
 
 	if promptPath == "" || tasksPath == "" {
@@ -144,6 +135,37 @@ func runTUI(ctx context.Context, session []string) int {
 	return code
 }
 
+// loadGiven loads the prompt and tasks whose paths were passed by flag; an
+// empty path is left for the setup screen. The prompt loads first so a bad
+// prompt fails before any failed-tasks table is printed. ErrFailedTasks is
+// returned bare because its table is the explanation; any other error is
+// wrapped like looper.Start's.
+func loadGiven(tasksPath, promptPath string) (string, *tasks.TaskList, error) {
+	var prompt string
+	if promptPath != "" {
+		var err error
+		prompt, err = looper.LoadPrompt(promptPath)
+		if err != nil {
+			return "", nil, fmt.Errorf("failed to start loop runner: %w", err)
+		}
+	}
+
+	if tasksPath == "" {
+		return prompt, nil, nil
+	}
+
+	tasklist, err := looper.LoadTasksReport(os.Stdout, tasksPath)
+	if errors.Is(err, looper.ErrFailedTasks) {
+		return "", nil, err
+	}
+
+	if err != nil {
+		return "", nil, fmt.Errorf("failed to start loop runner: %w", err)
+	}
+
+	return prompt, tasklist, nil
+}
+
 // openRepo opens the work tree for --commit; without the flag git is never
 // called. The view has nowhere to print plain mode's "not a git repository"
 // notice, so it is opened without it.
@@ -171,8 +193,7 @@ func checkInstallSkill() {
 
 	path, err := skillinstall.Install()
 	if err != nil {
-		_, _ = fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		os.Exit(1)
+		fatal(err)
 	}
 
 	fmt.Println(path)
@@ -187,8 +208,7 @@ func validateGateTimeout() {
 	}
 
 	if err := checkGateTimeout(*gateTimeoutFlag); err != nil {
-		_, _ = fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		os.Exit(1)
+		fatal(err)
 	}
 }
 
@@ -206,8 +226,7 @@ func checkGateTimeout(v string) error {
 func validateSessionFlags() []string {
 	args, err := sessionArgs(*sandboxFlag, *skipPermsFlag, *dryRunFlag)
 	if err != nil {
-		_, _ = fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		os.Exit(1)
+		fatal(err)
 	}
 
 	return args

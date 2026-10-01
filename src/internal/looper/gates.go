@@ -24,7 +24,8 @@ func runGates(ctx context.Context, task tasks.Task, override string, report func
 		}
 
 		if ctx.Err() != nil {
-			return "", "", fmt.Errorf("task %d: %s failed: gate %q: %w", task.ID, task.Name, firstLine(gate.Cmd), runErr)
+			gateName := firstLine(gate.Cmd)
+			return "", "", fmt.Errorf("task %d: %s failed: gate %q: %w", task.ID, task.Name, gateName, runErr)
 		}
 
 		return tasks.FailedState, gateFailure(gate, limit, runErr), nil
@@ -33,10 +34,10 @@ func runGates(ctx context.Context, task tasks.Task, override string, report func
 	return tasks.CompletedState, "", nil
 }
 
-// firstLine is the part of a multi-line command that messages quote, so one
-// long gate cannot bury the reason in a wrapped, truncated banner.
-func firstLine(cmd string) string {
-	first, _, _ := strings.Cut(cmd, "\n")
+// firstLine is the part of a multi-line value that messages and activity
+// lines quote, so the value cannot push the rest off a one-line display.
+func firstLine(s string) string {
+	first, _, _ := strings.Cut(s, "\n")
 	return first
 }
 
@@ -68,11 +69,12 @@ func gateLimit(gate tasks.Gate, override string) (limit, source string) {
 // gateFailure words a gate's failure. A timeout reads differently from a
 // non-zero exit because "signal: killed" would hide that the gate was cut off.
 func gateFailure(gate tasks.Gate, limit string, runErr error) string {
+	gateName := firstLine(gate.Cmd)
 	if errors.Is(runErr, context.DeadlineExceeded) {
-		return fmt.Sprintf("gate %q timed out after %s", firstLine(gate.Cmd), limit)
+		return fmt.Sprintf("gate %q timed out after %s", gateName, limit)
 	}
 
-	return fmt.Sprintf("gate %q failed: %s", firstLine(gate.Cmd), runErr)
+	return fmt.Sprintf("gate %q failed: %s", gateName, runErr)
 }
 
 // runGate runs one gate through `sh -c` so the command can use shell syntax
@@ -91,7 +93,12 @@ func runGate(ctx context.Context, task tasks.Task, gate tasks.Gate, limit string
 	defer cancel()
 
 	err = runGateCmd(gateCtx, task, gate, report)
-	if err != nil && ctx.Err() == nil && errors.Is(gateCtx.Err(), context.DeadlineExceeded) {
+	if err == nil || ctx.Err() != nil {
+		return err
+	}
+
+	gateCtxErr := gateCtx.Err()
+	if errors.Is(gateCtxErr, context.DeadlineExceeded) {
 		return context.DeadlineExceeded
 	}
 

@@ -530,7 +530,7 @@ container. If it passes locally, CI should pass too.
 ### Testing
 
 ```bash
-make test      # unit tests: go test -v ./cmd/... ./internal/... (run from src/)
+make test      # unit tests: go test ./cmd/... ./internal/... (run from src/)
 make analyze   # goimports, golangci-lint, govulncheck, gosec (tools must be on PATH)
 ```
 
