@@ -1,8 +1,8 @@
 # Gralph — Architectural Decisions
 
-> **Version**: v06
+> **Version**: v07
 > **Date**: 2026-09-30
-> **Notes**: ADR-013 adds per-task `gates` with per-gate `timeout` and `--gate-timeout` flag: each gate runs under a timeout (flag > gate value > 10m default) and is killed if exceeded. Gates run as `sh -c <cmd>` under one owner-approved `#nosec G204`.
+> **Notes**: Go module moved to `src/` directory; ADR-009's paths to the embedded skill updated to match.
 
 [Back to Overview](00_overview.md) | [Back to Project README](../../README.md)
 
@@ -278,7 +278,7 @@ The `gralph-docs-writer` skill generates task files that must satisfy the parser
 
 **Decision:**
 
-`skills/embed.go` embeds the whole `skills/gralph-docs-writer` folder (SKILL.md and templates/) in the binary with `//go:embed`. The `--install-skill` flag runs before the `--prompt`/`--tasks` checks: `internal/skillinstall` resolves the home directory with `os.UserHomeDir`, removes `~/.claude/skills/gralph-docs-writer`, writes every embedded file under it preserving the layout, prints the path, and exits 0 (1 on error). There is no override flag or env var. `scripts/install_skill.sh` stays for development, installing the working-tree copy.
+`src/skills/embed.go` embeds the whole `src/skills/gralph-docs-writer` folder (SKILL.md and templates/) in the binary with `//go:embed`. The `--install-skill` flag runs before the `--prompt`/`--tasks` checks: `internal/skillinstall` resolves the home directory with `os.UserHomeDir`, removes `~/.claude/skills/gralph-docs-writer`, writes every embedded file under it preserving the layout, prints the path, and exits 0 (1 on error). There is no override flag or env var. `scripts/install_skill.sh` stays for development, installing the working-tree copy.
 
 **Consequences:**
 

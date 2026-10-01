@@ -1,8 +1,8 @@
 # Gralph — Deployment Architecture
 
-> **Version**: v05
+> **Version**: v06
 > **Date**: 2026-09-30
-> **Notes**: Testing strategy covers gates and per-gate timeouts (ADR-013).
+> **Notes**: Go module moved to `src/`; updated testing and build instructions to reflect module location.
 
 [Back to Overview](00_overview.md) | [Back to Project README](../../README.md)
 
@@ -75,7 +75,7 @@ one for your platform onto your PATH, or build from source with
 
 ### Release Build (`make build` / `build/build.sh`)
 
-1. **Docker image build**: Uses `build/Dockerfile` with base image `ghcr.io/twistingmercury/golang-tooling:go1.27.1`
+1. **Docker image build**: Uses `build/Dockerfile` with base image `ghcr.io/twistingmercury/golang-tooling:go1.27.1`; only `src/` (the Go module) is copied into the image
 2. **In-container lint**: goimports, golangci-lint, govulncheck, gosec
 3. **In-container unit tests**: `go test ./...`
 4. **Cross-compilation**: Builds binaries for linux and darwin on amd64 and arm64
@@ -130,17 +130,17 @@ GitHub Actions runs on `develop` and `main` branches for both push and pull requ
 
 ### Unit Tests
 
-- Run via `make test` → `go test -v ./cmd/... ./internal/...`
+- Run via `make test` → `go test -v ./cmd/... ./internal/...` (from `src/`)
 - Covers task parsing, state transitions, result parsing, process management
 - Uses testify (require for preconditions, assert for checks)
 - Test suites: `cmd/main` (mode selection), `internal/tasks`, `internal/looper`, `internal/tui`, `internal/skillinstall`
 - The unit fake `claude` speaks stream-json only when its argv has `--output-format stream-json`, so the looper's TUI path is tested against it
 - `internal/tui` tests drive the Bubble Tea models directly, or `tui.Run`/`tui.Setup` with test program options; no terminal needed
-- Run natively or in Docker; Docker is authoritative
+- Run natively (from `src/`) or in Docker; Docker is authoritative
 
 ### E2E Tests
 
-- Separate Go module at `tests/e2e/`; `go test ./...` from root never includes them
+- Separate Go module at `tests/e2e/` (still at repository root); `go test ./...` from `src/` never includes them
 - Black-box: no internal imports, tests the gralph binary as a subprocess
 - Uses a fake `claude` executable (built in test setup) on PATH
 - Driven by env vars: `FAKE_CLAUDE_OUTPUT` to customize Claude's behavior
