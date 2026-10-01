@@ -250,7 +250,7 @@ graph TB
 
 **Responsibilities:**
 - Exists only for `--log-dir` (ADR-016); without the flag it is never called and gralph writes nothing but the task file
-- `Open(dir, info)`: create `<dir>` if needed and the run folder `<dir>/<YYYYMMDDTHHMMSSZ>` (UTC start time; folders `0700`, files `0600`; an existing run folder is an error), create `run.jsonl`, and write the `run_started` line from `info` (version, task and prompt file paths, permission mode, sandbox settings path, gate timeout, commit)
+- `Open(dir, info)`: create `<dir>` if needed and the run folder `<dir>/<YYYYMMDDTHHMMSS>` (local start time; folders `0700`, files `0600`; an existing run folder is an error), create `run.jsonl`, and write the `run_started` line from `info` (version, task and prompt file paths, permission mode, sandbox settings path, gate timeout, commit)
 - `Record(event) error`: turn one `looper.Event` into output. `TaskStarted`, `SessionFinished`, `GateFinished`, `Committed`, `TaskFinished`, and `RunDone` each append one line to the ledger (`task_started`, `session_finished`, `gate_finished`, `committed`, `task_finished`, `run_finished`); `Activity` appends `HH:MM:SS <line>` to that task's `task-<id>.log`, opened on its `TaskStarted`
 - `Close`: close the open files
 - Safe for calls from more than one goroutine (a mutex), since `report` is
