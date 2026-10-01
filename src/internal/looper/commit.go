@@ -3,10 +3,14 @@ package looper
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/twistingmercury/gralph/internal/tasks"
 )
 
 // Repo is the git work tree a --commit run commits into (ADR-015). A nil
@@ -85,4 +89,75 @@ func (r *Repo) git(ctx context.Context, args ...string) *exec.Cmd {
 	cmd.Dir = r.root
 	configureProcessTree(cmd)
 	return cmd
+}
+
+// commit commits what task's session and gates left in the work tree, with
+// the task's name as the message, and returns the task's final outcome. err
+// is non-nil only when ctx was cancelled, which must leave the task's state
+// and the tasks file untouched.
+func (r *Repo) commit(ctx context.Context, task tasks.Task, report func(Event)) (state, errMsg string, err error) {
+	runErr := r.commitChanges(ctx, task, report)
+	if runErr == nil {
+		return tasks.CompletedState, "", nil
+	}
+
+	if ctx.Err() != nil {
+		return "", "", fmt.Errorf("task %d: %s failed: commit: %w", task.ID, task.Name, runErr)
+	}
+
+	return tasks.FailedState, fmt.Sprintf("commit failed: %s", runErr), nil
+}
+
+// commitChanges stages everything and commits it. A task that changed
+// nothing is not an error and gets no empty commit; that also covers a
+// session that committed by itself.
+func (r *Repo) commitChanges(ctx context.Context, task tasks.Task, report func(Event)) error {
+	if err := runGit(r.git(ctx, "add", "-A"), task, report); err != nil {
+		return err
+	}
+
+	staged, err := r.staged(ctx)
+	if err != nil || !staged {
+		return err
+	}
+
+	announceCommit(task, report)
+	return runGit(r.git(ctx, "commit", "-m", task.Name), task, report)
+}
+
+// staged reports whether the index holds anything to commit. git diff
+// --quiet exits 1 to say "yes", which is an answer and not a failure.
+func (r *Repo) staged(ctx context.Context) (bool, error) {
+	err := r.git(ctx, "diff", "--cached", "--quiet").Run()
+
+	var exit *exec.ExitError
+	if errors.As(err, &exit) && exit.ExitCode() == 1 {
+		return true, nil
+	}
+
+	return false, err
+}
+
+// announceCommit names the commit where the mode shows progress. Only the
+// name's first line, so a multi-line name stays one line.
+func announceCommit(task tasks.Task, report func(Event)) {
+	name := firstLine(task.Name)
+	if report != nil {
+		report(Event{Kind: Activity, Task: task, Line: "→ commit " + name})
+		return
+	}
+
+	fmt.Printf("commit: %s\n", name)
+}
+
+// runGit runs cmd with its output where the mode puts a gate's: straight
+// through in plain mode, as Activity lines on the stream path.
+func runGit(cmd *exec.Cmd, task tasks.Task, report func(Event)) error {
+	if report != nil {
+		return runCmdStream(cmd, task, report)
+	}
+
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
 }

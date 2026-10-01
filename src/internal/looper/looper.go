@@ -36,7 +36,7 @@ func Start(ctx context.Context, promptFile, tasksFile, gateTimeout string, sessi
 		return fmt.Errorf("failed to start loop runner: %w", err)
 	}
 
-	if err := Run(ctx, prompt, tasklist, tasksFile, gateTimeout, sessionArgs, nil); err != nil {
+	if err := Run(ctx, prompt, tasklist, tasksFile, gateTimeout, sessionArgs, nil, nil); err != nil {
 		return fmt.Errorf("loop error: %w", err)
 	}
 
@@ -167,9 +167,10 @@ func LoadPrompt(path string) (string, error) {
 // claude then runs with stream-json output and its activity is reported
 // live. report may be called from more than one goroutine. gateTimeout, when
 // not empty, replaces every gate's timeout for this run; it is never saved.
-// sessionArgs is as for Start.
-func Run(ctx context.Context, prompt string, tl *tasks.TaskList, tasksFile, gateTimeout string, sessionArgs []string, report func(Event)) error {
-	err := runLoop(ctx, prompt, tl, tasksFile, gateTimeout, sessionArgs, report)
+// sessionArgs is as for Start. repo, when not nil, is where each completed
+// task is committed.
+func Run(ctx context.Context, prompt string, tl *tasks.TaskList, tasksFile, gateTimeout string, sessionArgs []string, repo *Repo, report func(Event)) error {
+	err := runLoop(ctx, prompt, tl, tasksFile, gateTimeout, sessionArgs, repo, report)
 	if report != nil {
 		report(Event{Kind: RunDone, Err: err})
 	}
@@ -177,7 +178,7 @@ func Run(ctx context.Context, prompt string, tl *tasks.TaskList, tasksFile, gate
 	return err
 }
 
-func runLoop(ctx context.Context, p string, tl *tasks.TaskList, tasksFile, gateTimeout string, sessionArgs []string, report func(Event)) error {
+func runLoop(ctx context.Context, p string, tl *tasks.TaskList, tasksFile, gateTimeout string, sessionArgs []string, repo *Repo, report func(Event)) error {
 	for i := range tl.Tasks {
 		task := &tl.Tasks[i]
 
@@ -193,7 +194,7 @@ func runLoop(ctx context.Context, p string, tl *tasks.TaskList, tasksFile, gateT
 			report(Event{Kind: TaskStarted, Task: *task})
 		}
 
-		state, errMsg, err := runTask(ctx, p, *task, gateTimeout, sessionArgs, report)
+		state, errMsg, err := runTask(ctx, p, *task, gateTimeout, sessionArgs, repo, report)
 		if err != nil {
 			return err
 		}
@@ -228,10 +229,10 @@ func runLoop(ctx context.Context, p string, tl *tasks.TaskList, tasksFile, gateT
 	return nil
 }
 
-// runTask runs one task's session on the path report selects and, only when
-// the session completed, the task's gates. It returns the task's outcome, or
-// an error when ctx was cancelled.
-func runTask(ctx context.Context, p string, task tasks.Task, gateTimeout string, sessionArgs []string, report func(Event)) (state, errMsg string, err error) {
+// runTask runs one task's session on the path report selects, then, only
+// while the task is still completed, its gates and the commit into repo. It
+// returns the task's outcome, or an error when ctx was cancelled.
+func runTask(ctx context.Context, p string, task tasks.Task, gateTimeout string, sessionArgs []string, repo *Repo, report func(Event)) (state, errMsg string, err error) {
 	if report == nil {
 		state, errMsg, err = runTaskPlain(ctx, p, task, sessionArgs)
 	} else {
@@ -242,7 +243,12 @@ func runTask(ctx context.Context, p string, task tasks.Task, gateTimeout string,
 		return state, errMsg, err
 	}
 
-	return runGates(ctx, task, gateTimeout, report)
+	state, errMsg, err = runGates(ctx, task, gateTimeout, report)
+	if err != nil || state != tasks.CompletedState || repo == nil {
+		return state, errMsg, err
+	}
+
+	return repo.commit(ctx, task, report)
 }
 
 // runTaskPlain runs one task as plain mode always has: the combined prompt

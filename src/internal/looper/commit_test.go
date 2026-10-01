@@ -1,13 +1,19 @@
 package looper
 
 import (
+	"bytes"
+	"context"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/twistingmercury/gralph/internal/tasks"
 )
 
 // isolateGit keeps a developer's own git setup (hooks, signing, identity)
@@ -208,4 +214,313 @@ func TestOpenRepo_FromSubdirectoryCoversWholeTree(t *testing.T) {
 	repo, err := OpenRepo(filepath.Join(dir, "tasks.yaml"))
 	assert.Nil(t, repo)
 	require.ErrorContains(t, err, "?? stray.txt")
+}
+
+// workGate stands in for a session's work: the fake claude changes no files,
+// so a gate writes the file the commit should pick up.
+func workGate(name string) tasks.Gate {
+	return tasks.Gate{Cmd: "echo work > " + name}
+}
+
+// openRepo opens the test's repository the way a --commit run does.
+func openRepo(t *testing.T, tasksPath string) *Repo {
+	t.Helper()
+	repo, err := OpenRepo(tasksPath)
+	require.NoError(t, err)
+	require.NotNil(t, repo)
+	return repo
+}
+
+// subjects lists the commit subjects, newest first.
+func subjects(t *testing.T, dir string) []string {
+	t.Helper()
+	return strings.Split(strings.TrimSpace(gitRun(t, dir, "log", "--format=%s")), "\n")
+}
+
+// headFiles lists the files the newest commit changed.
+func headFiles(t *testing.T, dir string) []string {
+	t.Helper()
+	return strings.Fields(gitRun(t, dir, "show", "--name-only", "--format=", "HEAD"))
+}
+
+// installHook writes an executable pre-commit hook.
+func installHook(t *testing.T, dir, script string) {
+	t.Helper()
+	path := filepath.Join(dir, ".git", "hooks", "pre-commit")
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o750))
+	require.NoError(t, os.WriteFile(path, []byte("#!/bin/sh\n"+script+"\n"), 0o700))
+}
+
+func TestRun_CommitsOneCommitPerCompletedTask(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		name := "plain"
+		if stream {
+			name = "stream"
+		}
+
+		t.Run(name, func(t *testing.T) {
+			useFakeClaude(t)
+			dir := initRepo(t)
+			tasksPath := filepath.Join(dir, "tasks.yaml")
+			tl := &tasks.TaskList{Tasks: []tasks.Task{
+				{ID: 1, Name: "First", Prompt: "p1", Gates: []tasks.Gate{workGate("one.txt")}},
+				{ID: 2, Name: "Second", Prompt: "p2", Gates: []tasks.Gate{workGate("two.txt")}},
+			}}
+
+			var rec recorder
+			var report func(Event)
+			if stream {
+				report = rec.report
+			}
+
+			require.NoError(t, Run(context.Background(), "prompt", tl, tasksPath, "", bypass, openRepo(t, tasksPath), report))
+
+			assert.Equal(t, []string{"Second", "First", "init"}, subjects(t, dir))
+			assert.Equal(t, []string{"two.txt"}, headFiles(t, dir))
+			assert.Equal(t, "?? tasks.yaml\n", gitRun(t, dir, "status", "--porcelain"), "only the task file may be left uncommitted")
+
+			saved := readSavedTasks(t, tasksPath)
+			assert.Equal(t, tasks.CompletedState, saved.Tasks[0].State)
+			assert.Equal(t, tasks.CompletedState, saved.Tasks[1].State)
+		})
+	}
+}
+
+func TestRun_NilRepoNeverCommits(t *testing.T) {
+	useFakeClaude(t)
+	dir := initRepo(t)
+	tasksPath := filepath.Join(dir, "tasks.yaml")
+	tl := gatedTask(workGate("one.txt"))
+
+	require.NoError(t, Run(context.Background(), "prompt", tl, tasksPath, "", bypass, nil, nil))
+
+	assert.Equal(t, []string{"init"}, subjects(t, dir))
+	assert.FileExists(t, filepath.Join(dir, "one.txt"))
+}
+
+func TestRun_NothingToCommitStillCompletes(t *testing.T) {
+	useFakeClaude(t)
+	dir := initRepo(t)
+	tasksPath := filepath.Join(dir, "tasks.yaml")
+	tl := gatedTask()
+
+	require.NoError(t, Run(context.Background(), "prompt", tl, tasksPath, "", bypass, openRepo(t, tasksPath), nil))
+
+	assert.Equal(t, []string{"init"}, subjects(t, dir), "no empty commit")
+	assert.Equal(t, tasks.CompletedState, readSavedTasks(t, tasksPath).Tasks[0].State)
+}
+
+func TestRun_FailedGateLeavesChangesUncommitted(t *testing.T) {
+	useFakeClaude(t)
+	dir := initRepo(t)
+	tasksPath := filepath.Join(dir, "tasks.yaml")
+	tl := gatedTask(tasks.Gate{Cmd: "echo work > one.txt; exit 1"})
+
+	err := Run(context.Background(), "prompt", tl, tasksPath, "", bypass, openRepo(t, tasksPath), nil)
+	require.ErrorContains(t, err, `gate "echo work > one.txt; exit 1" failed`)
+
+	assert.Equal(t, []string{"init"}, subjects(t, dir))
+	assert.FileExists(t, filepath.Join(dir, "one.txt"), "a failed task's changes stay in the work tree")
+}
+
+func TestRun_SessionFailureSkipsCommit(t *testing.T) {
+	useFakeClaude(t)
+	t.Setenv("FAKE_CLAUDE_OUTPUT", `{"state":"failed","error":"nope"}`)
+	dir := initRepo(t)
+	tasksPath := filepath.Join(dir, "tasks.yaml")
+	repo := openRepo(t, tasksPath)
+	writeFile(t, filepath.Join(dir, "left.txt"), "left by the session\n")
+
+	err := Run(context.Background(), "prompt", gatedTask(), tasksPath, "", bypass, repo, nil)
+	require.ErrorContains(t, err, "nope")
+	assert.Equal(t, []string{"init"}, subjects(t, dir))
+}
+
+func TestRun_CommitFailureFailsTaskAndStopsRun(t *testing.T) {
+	useFakeClaude(t)
+	dir := initRepo(t)
+	installHook(t, dir, "echo hook-says-no >&2\nexit 1")
+	recordPath := filepath.Join(tempDir(t), "record.log")
+	t.Setenv("FAKE_CLAUDE_RECORD", recordPath)
+	tasksPath := filepath.Join(dir, "tasks.yaml")
+	tl := &tasks.TaskList{Tasks: []tasks.Task{
+		{ID: 1, Name: "First", Prompt: "p1", Gates: []tasks.Gate{workGate("one.txt")}},
+		{ID: 2, Name: "Second", Prompt: "p2"},
+	}}
+
+	const wantErr = "commit failed: exit status 1"
+	err := Run(context.Background(), "prompt", tl, tasksPath, "", bypass, openRepo(t, tasksPath), nil)
+	require.EqualError(t, err, "task 1: First failed: "+wantErr)
+
+	assert.Equal(t, []string{"init"}, subjects(t, dir))
+	assert.Len(t, readFakeClaudeRecords(t, recordPath), 1, "the second task must never run")
+
+	saved := readSavedTasks(t, tasksPath)
+	assert.Equal(t, tasks.FailedState, saved.Tasks[0].State)
+	assert.Equal(t, wantErr, saved.Tasks[0].Error)
+	assert.Equal(t, tasks.PendingState, saved.Tasks[1].State)
+}
+
+func TestRun_CommitLeavesStagedTaskFileOut(t *testing.T) {
+	useFakeClaude(t)
+	dir := initRepo(t)
+	tasksPath := filepath.Join(dir, "tasks.yaml")
+	writeFile(t, tasksPath, "tasks: []\n")
+	gitRun(t, dir, "add", "tasks.yaml")
+
+	require.NoError(t, Run(context.Background(), "prompt", gatedTask(workGate("one.txt")), tasksPath, "", bypass, openRepo(t, tasksPath), nil))
+
+	assert.Equal(t, []string{"one.txt"}, headFiles(t, dir), "the task file must stay out of the commit even when staged")
+}
+
+func TestRun_CommitWithTaskFileOutsideTheTree(t *testing.T) {
+	useFakeClaude(t)
+	dir := initRepo(t)
+	tasksPath := filepath.Join(tempDir(t), "tasks.yaml")
+
+	require.NoError(t, Run(context.Background(), "prompt", gatedTask(workGate("one.txt")), tasksPath, "", bypass, openRepo(t, tasksPath), nil))
+
+	assert.Equal(t, []string{"First", "init"}, subjects(t, dir))
+	assert.Empty(t, gitRun(t, dir, "status", "--porcelain"))
+}
+
+func TestRun_CommitFromSubdirectoryCommitsWholeTree(t *testing.T) {
+	useFakeClaude(t)
+	dir := initRepo(t)
+	sub := filepath.Join(dir, "sub")
+	require.NoError(t, os.Mkdir(sub, 0o750))
+	writeFile(t, filepath.Join(sub, "keep.txt"), "keep\n")
+	gitRun(t, dir, "add", "sub/keep.txt")
+	gitRun(t, dir, "commit", "-q", "-m", "add sub")
+	t.Chdir(sub)
+	tasksPath := filepath.Join(dir, "tasks.yaml")
+
+	// The gate runs in sub and writes one file there and one in the root.
+	tl := gatedTask(tasks.Gate{Cmd: "echo a > here.txt; echo b > ../top.txt"})
+	require.NoError(t, Run(context.Background(), "prompt", tl, tasksPath, "", bypass, openRepo(t, tasksPath), nil))
+
+	assert.ElementsMatch(t, []string{"sub/here.txt", "top.txt"}, headFiles(t, dir))
+}
+
+func TestRun_CommitOddTaskNames(t *testing.T) {
+	tests := []struct {
+		name        string
+		taskName    string
+		wantSubject string
+		wantLine    string
+	}{
+		{name: "multi-line", taskName: "Subject line\n\nBody text", wantSubject: "Subject line", wantLine: "→ commit Subject line"},
+		{name: "leading dash", taskName: "--amend the widget", wantSubject: "--amend the widget", wantLine: "→ commit --amend the widget"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			useFakeClaude(t)
+			dir := initRepo(t)
+			tasksPath := filepath.Join(dir, "tasks.yaml")
+			tl := &tasks.TaskList{Tasks: []tasks.Task{{ID: 1, Name: tt.taskName, Prompt: "p", Gates: []tasks.Gate{workGate("one.txt")}}}}
+
+			var rec recorder
+			require.NoError(t, Run(context.Background(), "prompt", tl, tasksPath, "", bypass, openRepo(t, tasksPath), rec.report))
+
+			assert.Equal(t, []string{tt.wantSubject, "init"}, subjects(t, dir))
+			assert.Contains(t, activityLines(rec.snapshot()), tt.wantLine)
+		})
+	}
+}
+
+func TestRun_PlainPrintsCommitLineAndGitOutput(t *testing.T) {
+	useFakeClaude(t)
+	dir := initRepo(t)
+	tasksPath := filepath.Join(dir, "tasks.yaml")
+	repo := openRepo(t, tasksPath)
+
+	origStdout := os.Stdout
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	os.Stdout = w
+
+	runErr := Run(context.Background(), "prompt", gatedTask(workGate("one.txt")), tasksPath, "", bypass, repo, nil)
+
+	require.NoError(t, w.Close())
+	os.Stdout = origStdout
+	require.NoError(t, runErr)
+
+	var buf bytes.Buffer
+	_, err = buf.ReadFrom(r)
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "commit: First\n")
+	assert.Contains(t, buf.String(), "1 file changed", "git's own output passes through")
+}
+
+func TestRun_StreamReportsCommitAsActivity(t *testing.T) {
+	useFakeClaude(t)
+	dir := initRepo(t)
+	tasksPath := filepath.Join(dir, "tasks.yaml")
+	repo := openRepo(t, tasksPath)
+
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	orig := os.Stdout
+	os.Stdout = w
+	t.Cleanup(func() { os.Stdout = orig })
+
+	outCh := make(chan string, 1)
+	go func() {
+		out, _ := io.ReadAll(r)
+		outCh <- string(out)
+	}()
+
+	var rec recorder
+	runErr := Run(context.Background(), "prompt", gatedTask(workGate("one.txt")), tasksPath, "", bypass, repo, rec.report)
+	os.Stdout = orig
+	require.NoError(t, w.Close())
+	require.NoError(t, runErr)
+	assert.Empty(t, <-outCh, "the stream path must write nothing to gralph's stdout, the commit included")
+
+	events := rec.snapshot()
+	assert.Contains(t, activityLines(events), "→ commit First")
+	assert.Contains(t, strings.Join(activityLines(events), "\n"), "1 file changed")
+
+	kinds := eventKinds(events)
+	require.GreaterOrEqual(t, len(kinds), 2)
+	assert.Equal(t, []EventKind{TaskFinished, RunDone}, kinds[len(kinds)-2:], "TaskFinished must follow the commit's activity")
+}
+
+func TestRun_CancelDuringCommitLeavesFileUntouched(t *testing.T) {
+	useFakeClaude(t)
+	dir := initRepo(t)
+	readyPath := filepath.Join(tempDir(t), "ready")
+	installHook(t, dir, "touch '"+readyPath+"'\nsleep 60")
+	tasksPath := filepath.Join(dir, "tasks.yaml")
+	tasksYAML := "tasks:\n  - {id: 1, name: First, prompt: p1, state: pending}\n"
+	writeFile(t, tasksPath, tasksYAML)
+	repo := openRepo(t, tasksPath)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- Run(ctx, "prompt", gatedTask(workGate("one.txt")), tasksPath, "", bypass, repo, nil)
+	}()
+
+	require.Eventually(t, func() bool {
+		_, err := os.Stat(readyPath)
+		return err == nil
+	}, 5*time.Second, 10*time.Millisecond, "the commit hook never started")
+
+	cancel()
+
+	select {
+	case err := <-errCh:
+		require.ErrorContains(t, err, "task 1: First failed: commit")
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run did not return after a cancel during the commit; git's process group was not killed")
+	}
+
+	got, err := os.ReadFile(tasksPath)
+	require.NoError(t, err)
+	assert.Equal(t, tasksYAML, string(got), "the tasks file must be byte-for-byte unchanged after a cancel during the commit")
+	assert.Equal(t, []string{"init"}, subjects(t, dir))
 }

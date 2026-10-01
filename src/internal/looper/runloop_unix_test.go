@@ -40,7 +40,7 @@ func TestRunLoop_CancelMidTaskStopsQuickly(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- runLoop(ctx, "prompt", tl, tasksPath, "", bypass, nil)
+		errCh <- runLoop(ctx, "prompt", tl, tasksPath, "", bypass, nil, nil)
 	}()
 
 	require.Eventually(t, func() bool {
@@ -88,7 +88,7 @@ func TestRunLoop_SavesAfterEachCompletedTask(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- runLoop(ctx, "prompt", &tl, tasksPath, "", bypass, nil)
+		errCh <- runLoop(ctx, "prompt", &tl, tasksPath, "", bypass, nil, nil)
 	}()
 
 	require.Eventually(t, func() bool {

@@ -365,7 +365,7 @@ func TestRunLoop_HappyPathInvokesInOrderWithExactStdin(t *testing.T) {
 		{ID: 3, Name: "Third", Prompt: "Do the third thing."},
 	}}
 
-	err := runLoop(context.Background(), p, tl, tasksPath, "", bypass, nil)
+	err := runLoop(context.Background(), p, tl, tasksPath, "", bypass, nil, nil)
 	require.NoError(t, err)
 
 	records := readFakeClaudeRecords(t, recordPath)
@@ -395,7 +395,7 @@ func TestRunLoop_NonZeroExitStopsAtFirstTask(t *testing.T) {
 		{ID: 2, Name: "Second", Prompt: "p2"},
 	}}
 
-	err := runLoop(context.Background(), "prompt", tl, tasksPath, "", bypass, nil)
+	err := runLoop(context.Background(), "prompt", tl, tasksPath, "", bypass, nil, nil)
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "task 1: First failed")
 	assert.ErrorContains(t, err, "exit status 1")
@@ -416,7 +416,7 @@ func TestRunLoop_ClaudeMissingFromPath(t *testing.T) {
 
 	tl := &tasks.TaskList{Tasks: []tasks.Task{{ID: 1, Name: "Only", Prompt: "p"}}}
 
-	err := runLoop(context.Background(), "prompt", tl, tasksPath, "", bypass, nil)
+	err := runLoop(context.Background(), "prompt", tl, tasksPath, "", bypass, nil, nil)
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "task")
 	assert.ErrorContains(t, err, "failed")
@@ -439,7 +439,7 @@ func TestRunLoop_ContextAlreadyCancelled(t *testing.T) {
 
 	tl := &tasks.TaskList{Tasks: []tasks.Task{{ID: 1, Name: "Only", Prompt: "p"}}}
 
-	err := runLoop(ctx, "prompt", tl, tasksPath, "", bypass, nil)
+	err := runLoop(ctx, "prompt", tl, tasksPath, "", bypass, nil, nil)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, context.Canceled)
 
@@ -466,7 +466,7 @@ func TestRunLoop_PrintsPromptToStdout(t *testing.T) {
 	require.NoError(t, err)
 	os.Stdout = w
 
-	runErr := runLoop(context.Background(), "Follow the runbook.", tl, tasksPath, "", bypass, nil)
+	runErr := runLoop(context.Background(), "Follow the runbook.", tl, tasksPath, "", bypass, nil, nil)
 
 	require.NoError(t, w.Close())
 	os.Stdout = origStdout
@@ -489,7 +489,7 @@ func TestRunLoop_EmptyTaskList(t *testing.T) {
 	tasksPath := filepath.Join(dir, "tasks.yaml")
 	t.Setenv("FAKE_CLAUDE_RECORD", recordPath)
 
-	err := runLoop(context.Background(), "prompt", &tasks.TaskList{}, tasksPath, "", bypass, nil)
+	err := runLoop(context.Background(), "prompt", &tasks.TaskList{}, tasksPath, "", bypass, nil, nil)
 	require.NoError(t, err)
 
 	records := readFakeClaudeRecords(t, recordPath)
@@ -515,7 +515,7 @@ func TestRunLoop_SkipsCompletedTasks(t *testing.T) {
 	require.NoError(t, err)
 	os.Stdout = w
 
-	runErr := runLoop(context.Background(), "prompt", tl, tasksPath, "", bypass, nil)
+	runErr := runLoop(context.Background(), "prompt", tl, tasksPath, "", bypass, nil, nil)
 
 	require.NoError(t, w.Close())
 	os.Stdout = origStdout
@@ -728,7 +728,7 @@ func TestRunTaskPlain_ArgvIsPrintThenSessionArgs(t *testing.T) {
 
 	sessionArgs := []string{"--permission-mode", "acceptEdits", "--settings", `{"sandbox":{"enabled":true}}`}
 	tl := &tasks.TaskList{Tasks: []tasks.Task{{ID: 1, Name: "First", Prompt: "Do the first thing."}}}
-	require.NoError(t, runLoop(context.Background(), "prompt", tl, filepath.Join(dir, "tasks.yaml"), "", sessionArgs, nil))
+	require.NoError(t, runLoop(context.Background(), "prompt", tl, filepath.Join(dir, "tasks.yaml"), "", sessionArgs, nil, nil))
 
 	args, err := os.ReadFile(argsPath)
 	require.NoError(t, err)
