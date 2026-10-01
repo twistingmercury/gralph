@@ -36,6 +36,7 @@ gralph --prompt path/to/prompt.md --tasks path/to/tasks.yaml --sandbox-settings 
 | `--skip-permissions` | One of these two for any real run; not both                             | Run sessions with no sandbox and no permission checks. You're on your own (see below) |
 | `--gate-timeout`     | No                                                                      | Time limit for every gate, like `90s`; overrides the task file's                      |
 | `--commit`           | No                                                                      | Commit each completed task with git, after its gates pass                             |
+| `--log-dir`          | No                                                                      | Directory to keep a record of the run in; full-screen view only                       |
 | `--dry-run`          | No                                                                      | Validate the task file and report on it without running anything                      |
 | `--no-tui`           | No                                                                      | Use plain output instead of the full-screen view                                      |
 | `--install-skill`    | No                                                                      | Install the bundled `gralph-docs-writer` skill for Claude Code and exit               |
@@ -68,6 +69,7 @@ the timeout it would run under and where that came from (`flag`, `gate`, or
 pass `--sandbox-settings` too, gralph checks that file the same way a real run
 would and prints `sandbox settings: <path>`. With `--commit`, it also checks
 the work tree the way a real run would and prints `commit: <work tree root>`.
+`--log-dir` is ignored: a dry run records nothing.
 Last comes `<tasks path> is valid`, and exit zero.
 
 If any task is `failed` (a real run would refuse to start), the table comes
@@ -395,7 +397,9 @@ prompt.md
 ```
 
 or ignore the directory you keep them in. A sandbox settings file kept in the
-project needs the same treatment.
+project needs the same treatment. So does a `--log-dir` folder inside the
+repository; gralph checks that one for you (see
+[Logging a run](#logging-a-run)).
 
 After a failed task, the tree is dirty with that task's leftovers, so the next
 `--commit` run is refused too. If it was the commit itself that failed, the
@@ -429,6 +433,82 @@ A few things to know:
 Tell Claude not to commit in your shared prompt when you use `--commit`. The
 `gralph-docs-writer` skill does that for you when you say the run will use it.
 
+### Logging a run
+
+Once you close the full-screen view, the Claude activity pane is gone. Pass
+`--log-dir <path>` and gralph keeps a record of the run instead:
+
+```bash
+gralph -p prompt.md -t tasks.yaml --sandbox-settings sandbox.json --log-dir logs
+```
+
+Each run gets its own folder under that path, named after the local time it
+started:
+
+```text
+logs/
+  20261001T140211/
+    run.jsonl      what ran and when
+    task-1.log     everything task 1's activity pane showed
+    task-2.log
+```
+
+Gralph writes these itself. Claude is told nothing about them.
+
+**`run.jsonl`** is the ledger: one JSON object per line, written as things
+happen. Every line has a `time` and an `event`, and every line about a task
+has that task's id as `task`:
+
+| `event`            | What else it holds                                                                                                                                                                   |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `run_started`      | Gralph's `version`, the `tasks_file` and `prompt_file` paths, `permissions` (`sandbox` or `skip`), `sandbox_settings` and `gate_timeout` if passed, and `commit` (`true` or `false`)     |
+| `task_started`     | The task's `name`                                                                                                                                                                    |
+| `session_finished` | What the session reported (`state`, and `error` if there is one) and how long it took (`duration`)                                                                                   |
+| `gate_finished`    | The gate's command (`cmd`, first line only), its `result` (`passed`, `failed`, or `timed_out`), the `timeout` it ran under, and its `duration`                                       |
+| `committed`        | The new commit's `hash`                                                                                                                                                              |
+| `task_finished`    | The task's final `state`, its `error` if it failed, and the `duration` of the whole task                                                                                             |
+| `run_finished`     | The `result` (`completed`, `failed`, or `stopped`), the `error` if any, and the `duration` of the run                                                                                |
+
+So this lists every gate in a run with its result and duration:
+
+```bash
+jq -r 'select(.event == "gate_finished") | [.task, .result, .duration, .cmd] | @tsv' logs/20261001T140211/run.jsonl
+```
+
+**`task-<id>.log`** is the detail: every line the Claude activity pane showed
+for that task, each with the time it arrived. That's Claude's text, a
+`→ <tool> <target>` line per tool call, anything on stderr, each gate and its
+output, and the commit and git's output.
+
+A few things to know:
+
+- **Full-screen view only.** With `--no-tui`, or when gralph isn't on a
+  terminal, a run with `--log-dir` exits 1 with
+  `error: --log-dir only works with the full-screen view`. Plain mode already
+  prints everything, so redirect it: `gralph ... --no-tui > run.log 2>&1`.
+  `--dry-run` ignores the flag.
+- **The files are private to you.** The folder is created with mode `0700` and
+  the files with `0600`, because the record holds whatever Claude, a gate, or
+  a git hook printed. That can include secrets. Look before you share one.
+- **Nothing is cleaned up.** Every run adds a folder. Delete the old ones when
+  you're done with them.
+- **A skipped task leaves no trace.** Tasks already `completed` when the run
+  starts aren't in the ledger and get no detail file.
+- **A stopped run says `stopped`.** The task that was running has no
+  `task_finished` line, which matches the task file: it's still pending. The
+  ledger doesn't say whether you stopped it or a signal did.
+- **If gralph can't write the record, it stops the run.** The view shows
+  `Run stopped: log: <error>` and gralph exits 1. The ledger then just ends,
+  with no `run_finished` line. If the folder can't be created in the first
+  place, gralph exits 1 with an error starting `--log-dir:` before the view
+  opens. That covers two runs started in the same second: the second one's
+  folder already exists, so it refuses to start.
+- **With `--commit`, keep the logs out of git.** A log folder inside the
+  repository must be ignored, or gralph exits 1 with
+  `error: --commit needs the log directory ignored by git or outside the repository: <path>`.
+  Add it to `.gitignore` (for example `logs/`), or point `--log-dir` somewhere
+  outside the repository.
+
 ### The full-screen view
 
 The view has three panes, each with a title bar, over a one-line legend:
@@ -459,6 +539,9 @@ the top of Task progress (and the legend) tells you how it went, like
 it. Gralph then prints one summary line to stdout: `All tasks completed`,
 `Task <id> failed: <error>`, `Run stopped: <error>`, or `Run stopped by user` /
 `Run stopped by signal`. It exits zero only when every task completed.
+
+To keep what the view showed after it closes, pass `--log-dir` (see
+[Logging a run](#logging-a-run)).
 
 Forgot `--tasks` or `--prompt`? A setup screen asks for each missing path,
 tasks file first. `enter` checks the path with the same rules a run uses and

@@ -1,8 +1,8 @@
 # Gralph — Deployment Architecture
 
-> **Version**: v08
+> **Version**: v09
 > **Date**: 2026-10-01
-> **Notes**: Updated test coverage list to include sandbox flags, commits, and skill check; clarified e2e fake uses FAKECLAUDE_* env vars; fixed make install description (depends on local, so always rebuilds).
+> **Notes**: Added run logging (--log-dir, ADR-016) to the test coverage list.
 
 [Back to Overview](00_overview.md) | [Back to Project README](../../README.md)
 
@@ -133,7 +133,8 @@ GitHub Actions runs on `develop` and `main` branches for both push and pull requ
 - Run via `make test` → `go test ./cmd/... ./internal/...` (from `src/`)
 - Covers task parsing, state transitions, result parsing, process management
 - Uses testify (require for preconditions, assert for checks)
-- Test suites: `cmd/main` (mode selection), `internal/tasks`, `internal/looper`, `internal/tui`, `internal/skillinstall`
+- Test suites: `cmd/main` (mode selection), `internal/tasks`, `internal/looper`, `internal/runlog`, `internal/tui`, `internal/skillinstall`
+- Run log (`--log-dir`): the ledger's exact lines and the detail files from a sequence of events, gate results, a failed and a stopped run, a write error, concurrent writers (`internal/runlog`); the looper's new events with real gates and git (`internal/looper`); the `observe` hook stopping the run (`internal/tui`); the flag's rules and the log directory checks (`cmd/main`)
 - The unit fake `claude` speaks stream-json only when its argv has `--output-format stream-json`, so the looper's TUI path is tested against it
 - `internal/tui` tests drive the Bubble Tea models directly, or `tui.Run`/`tui.Setup` with test program options; no terminal needed
 - Run natively (from `src/`) or in Docker; Docker is authoritative
@@ -153,6 +154,7 @@ GitHub Actions runs on `develop` and `main` branches for both push and pull requ
   - Prompt formatting (task + shared prompt combined correctly)
   - Permission flags: `--sandbox-settings` and `--skip-permissions`, error cases (neither or both), settings file validation
   - Gates: parsing, passing gates, a failing gate blocks the run, gates skipped after a failed session, dry-run gate validation, gate timeouts
+  - Run log (`--log-dir`): plain mode refuses the flag (with `--no-tui` and with no terminal), an empty value counts as not passed, and a dry run ignores it. The record itself needs the full-screen view, so the unit tests cover it
   - Commits: one commit per task after its gates pass, no commit for a failed task, the clean work tree and ignored task file checks, a rejecting hook, `--dry-run --commit`
   - Skill check: a missing or outdated skill stops the run; `--install-skill`
 - Run via `make build` → docker-compose in container (authoritative)
