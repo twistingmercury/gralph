@@ -123,7 +123,6 @@ func TestRunLoop_GateShellBehavior(t *testing.T) {
 	}{
 		{name: "pipes and substitution", cmd: `test "$(printf ab | tr a-z A-Z)" = AB`},
 		{name: "multi-line command", cmd: "x=1\ntest \"$x\" = 1"},
-		{name: "stdin is empty, not inherited", cmd: `test -z "$(cat)"`},
 		{name: "exit code is reported", cmd: "exit 3", wantErr: `gate "exit 3" failed: exit status 3`},
 		{name: "command not found", cmd: "gralph-no-such-command", wantErr: `gate "gralph-no-such-command" failed: exit status 127`},
 		{name: "shell syntax error", cmd: `echo "unterminated`, wantErr: `gate "echo \"unterminated" failed: exit status`},
@@ -170,6 +169,66 @@ func TestRunLoop_PlainPrintsGateLineAndOutput(t *testing.T) {
 	_, err = buf.ReadFrom(r)
 	require.NoError(t, err)
 	assert.Contains(t, buf.String(), "gate: echo gate-says-hi\ngate-says-hi\n")
+}
+
+func TestRunLoop_PlainPassesGateStderrThrough(t *testing.T) {
+	useFakeClaude(t)
+	tasksPath := filepath.Join(t.TempDir(), "tasks.yaml")
+
+	origStderr := os.Stderr
+	t.Cleanup(func() { os.Stderr = origStderr })
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	os.Stderr = w
+
+	runErr := runLoop(context.Background(), "prompt", gatedTask(tasks.Gate{Cmd: "echo gate-stderr-marker >&2"}), tasksPath, "", bypass, nil, nil)
+
+	require.NoError(t, w.Close())
+	os.Stderr = origStderr
+	require.NoError(t, runErr)
+
+	var buf bytes.Buffer
+	_, err = buf.ReadFrom(r)
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "gate-stderr-marker\n", "a gate's stderr is where a failing check explains itself")
+}
+
+// Under go test stdin is already empty, so a gate that inherited it would
+// still read nothing. Stdin is pointed at a file with content for the length
+// of the test, which is why this test must never call t.Parallel.
+func TestRunLoop_GateStdinIsEmptyNotInherited(t *testing.T) {
+	useFakeClaude(t)
+	dir := t.TempDir()
+	tasksPath := filepath.Join(dir, "tasks.yaml")
+	stdinPath := filepath.Join(dir, "stdin")
+	require.NoError(t, os.WriteFile(stdinPath, []byte("gralph-stdin-marker\n"), 0o600))
+
+	stdin, err := os.Open(stdinPath)
+	require.NoError(t, err)
+	origStdin, origStdout := os.Stdin, os.Stdout
+	t.Cleanup(func() {
+		os.Stdin, os.Stdout = origStdin, origStdout
+		_ = stdin.Close()
+	})
+	os.Stdin = stdin
+
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	os.Stdout = w
+
+	// The brackets show everything the gate read before end-of-file.
+	gate := tasks.Gate{Cmd: `printf 'gate-read=[%s]\n' "$(cat)"`}
+	runErr := runLoop(context.Background(), "prompt", gatedTask(gate), tasksPath, "", bypass, nil, nil)
+
+	require.NoError(t, w.Close())
+	os.Stdout = origStdout
+	require.NoError(t, runErr)
+
+	var buf bytes.Buffer
+	_, err = buf.ReadFrom(r)
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "gate-read=[]\n", "the gate must see end-of-file before any input")
+	assert.NotContains(t, buf.String(), "gralph-stdin-marker", "gralph's stdin must not reach a gate")
 }
 
 func TestRun_GateOutputArrivesAsActivity(t *testing.T) {
