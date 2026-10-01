@@ -1,8 +1,8 @@
 # Gralph — Architecture Overview
 
-> **Version**: v08
+> **Version**: v09
 > **Date**: 2026-10-01
-> **Notes**: Removed production-ready claim to match README's Emerging maturity label; clarified prompt is Markdown, task list is YAML.
+> **Notes**: Added run logging on request (`--log-dir`, ADR-016): the Run Log Writer component and a note on the full-screen view.
 
 [Back to Project README](../../README.md)
 
@@ -32,7 +32,7 @@ The Ralph loop is a command sequence driven by a shared prompt and an ordered ta
 6. Writing state back atomically
 7. Blocking on the first failure until a person intervenes
 
-In a terminal, gralph shows the run in a full-screen view: the current task's prompt, the task list and statuses, and the current session's live activity. With `--no-tui`, `--dry-run`, or no terminal, it runs in plain mode and prints to stdout as it always has.
+In a terminal, gralph shows the run in a full-screen view: the current task's prompt, the task list and statuses, and the current session's live activity. With `--no-tui`, `--dry-run`, or no terminal, it runs in plain mode and prints to stdout as it always has. With `--log-dir`, a full-screen run also leaves a record on disk: a ledger of what ran and when, and each task's activity.
 
 ```mermaid
 graph TB
@@ -59,6 +59,7 @@ graph TB
 | Result Interpreter | Parses JSON result line from claude output; missing/invalid line = failed          |
 | Gate Runner        | After a `completed` session, runs the task's `gates` commands with `sh -c`; any non-zero exit = failed |
 | Committer          | With `--commit`, commits a completed task's changes after its gates; requires a clean work tree at startup |
+| Run Log Writer     | With `--log-dir` (TUI only), writes a JSON-lines ledger and a detail file per task from the looper's events (`internal/runlog`) |
 
 ## Key Principles
 

@@ -1,8 +1,8 @@
 # Gralph — Architectural Decisions
 
-> **Version**: v11
+> **Version**: v12
 > **Date**: 2026-10-01
-> **Notes**: Added amendment notes to ADR-001, ADR-003, ADR-011 and ADR-013 (amended by ADR-014 about session flags), and ADR-009 (amended by ADR-010 about stale skill detection); aligned ADR-013 and ADR-014 titles in summary table with headings.
+> **Notes**: Added ADR-016 (`--log-dir`: gralph logs a run on request) and an amendment note on ADR-015 (new `Committed` event).
 
 [Back to Overview](00_overview.md) | [Back to Project README](../../README.md)
 
@@ -41,6 +41,7 @@ Each architectural decision is recorded as an ADR with the following structure:
 | ADR-013 | Gralph runs a task's gates after a completed session          | Accepted | 2026-09-30 |
 | ADR-014 | Sessions run in Claude Code's sandbox; bypass only on request | Accepted | 2026-09-30 |
 | ADR-015 | Gralph commits a completed task on request                    | Accepted | 2026-09-30 |
+| ADR-016 | Gralph logs a run on request                                  | Accepted | 2026-10-01 |
 
 ## Decisions
 
@@ -611,6 +612,69 @@ _Negative:_
 - The commit step has no time limit, unlike a gate; a hook that never exits hangs the run until it is stopped
 - A session can still commit by itself if its prompt does not forbid it; gralph does not detect that
 - Passing `--commit` outside a repository is easy to miss in the full-screen view, which prints no notice
+
+> Amended by ADR-016: the looper now also reports a `Committed` event after a commit is made, so "No new event kinds" above no longer holds. The `Activity` lines are unchanged.
+
+---
+
+### ADR-016: Gralph logs a run on request
+
+**Status:** Accepted
+
+**Context:**
+
+Once a run in the full-screen view ends and the view closes, nothing is left of it but each task's `state` and `error` in the task file. The Claude activity pane, the gates' output, and git's output are gone. Two things cannot be done afterwards: read what a failed (or odd) task did, and see what a run did and when: which tasks ran, how long each gate took, which commit a task produced.
+
+Plain mode does not have the problem: everything it shows goes to stdout and stderr, and a shell redirect keeps it.
+
+The looper already tells the view what happens through `Event`s (`TaskStarted`, `Activity`, `TaskFinished`, `RunDone`), but a gate or a commit is only a display line there (`→ gate <cmd>`). Its result, its duration, and the commit's hash are known to the looper and never reported.
+
+**Decision:**
+
+A new `--log-dir <path>` flag makes gralph write a record of the run. Without the flag gralph writes nothing but the task file, as before this ADR. Gralph writes the record itself from what it observes; the session is told nothing and the stdin contract is unchanged.
+
+- **Opt-in per run.** `--log-dir` takes the directory to write under. There is no default location and no task-file key. An empty `--log-dir=` counts as not passed.
+- **Full-screen view only.** With `--no-tui`, or when stdin or stdout is not a terminal, a run given `--log-dir` exits 1 with `error: --log-dir only works with the full-screen view` before anything loads or runs. `--dry-run` ignores the flag completely, as it ignores `--prompt`: no check, no output line, nothing created.
+- **One folder per run.** At startup gralph creates `<log-dir>` if needed and, inside it, a folder named after the run's start time in UTC, `YYYYMMDDTHHMMSSZ` (for example `20261001T140211Z`). Folders are created with mode `0700` and files with `0600`: the record holds Claude's text and whatever a gate or git printed. If the run folder already exists, or anything cannot be created, gralph exits 1 with an error starting `--log-dir: ` after the setup screen and before the view opens or any session starts. Gralph never rotates or deletes old run folders.
+- **With `--commit`, git must not see the logs.** When a repository is open (ADR-015) and the run folder is inside its work tree, the folder must be ignored by git; otherwise gralph exits 1 with `error: --commit needs the log directory ignored by git or outside the repository: <path>`. The check is made on the run folder's path before it is created, after the task-file and clean-tree checks. `git add -A` takes no exclusions, so an ignore rule is the only thing keeping a log out of a task's commit. Without `--commit`, or outside a repository, there is no check.
+- **The ledger, `run.jsonl`.** One JSON object per line, written as each thing happens. Every line has `time` (RFC 3339, UTC) and `event`:
+
+  | `event`            | Other fields                                                                                                                                  |
+  | ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------- |
+  | `run_started`      | `version`, `tasks_file`, `prompt_file`, `permissions` (`sandbox` or `skip`), `sandbox_settings` (the path, when given), `gate_timeout` (when passed), `commit` (bool) |
+  | `task_started`     | `task` (the id), `name`                                                                                                                       |
+  | `session_finished` | `task`, `state`, `error` (when not empty), `duration`                                                                                         |
+  | `gate_finished`    | `task`, `cmd` (first line), `result` (`passed`, `failed`, or `timed_out`), `timeout`, `duration`                                              |
+  | `committed`        | `task`, `hash`                                                                                                                                |
+  | `task_finished`    | `task`, `state`, `error` (when not empty), `duration`                                                                                         |
+  | `run_finished`     | `result` (`completed`, `failed`, or `stopped`), `error` (when not empty), `duration`                                                          |
+
+  Durations are strings as Go prints them (`41.2s`). A task skipped because it is already `completed` writes no line. `committed` is written only when a commit was made; nothing staged writes nothing. A stopped run writes `run_finished` with `stopped` and no `task_finished` for the task that was running, which matches the task file: that task stays as it was. The ledger does not tell a stop by the user from a stop by signal. The sandbox settings file's path is recorded, never its contents.
+- **The detail files, `task-<id>.log`.** One plain-text file per task that ran, holding every `Activity` line reported for that task, in order, each prefixed with its UTC time as `HH:MM:SS`: Claude's text, the `→ <tool> <target>` lines, stderr, each `→ gate` line and the gate's output, the `→ commit` line and git's output. It is what the Claude activity pane showed. The raw stream-json is not kept.
+- **New looper events.** On the stream path only, the looper reports three more event kinds: `SessionFinished` (the session's outcome and duration), `GateFinished` (the gate, its timeout, its error, where nil means passed, and its duration), and `Committed` (the new commit's hash, read with one `git rev-parse HEAD` after a successful commit). `TaskFinished` and `RunDone` gain a duration. The looper measures the durations, being the only part that knows when a step began. The view ignores the new kinds, so the screen is unchanged, and the plain path reports nothing, as before.
+- **A separate package writes the files.** `internal/runlog` turns events into the ledger and detail lines: `Open` creates the run folder and writes `run_started`, `Record` handles one event, `Close` closes the files. It imports `looper` for the event type; `looper` and `tui` do not import it. `cmd/main` opens the log and hands `Record` to `tui.Run` as an optional `observe func(looper.Event) error`, called for every event before the view gets it. The ledger is written with `encoding/json`; there is no new dependency.
+- **A write error stops the run.** The first time `observe` returns an error, `tui.Run` cancels the run, and the final status and summary read `Run stopped: log: <error>`, exit 1. The running task stays as it was, as for any stop. There is no other handling: the case is rare, and a full disk usually stops the run through the task-file save anyway.
+
+Alternatives not taken: the looper writing the log itself (a ninth parameter on `Run` and a second job for the loop; every later consumer of the same facts would need threading through it again, where another listener on the events costs the looper nothing); a logger that parses the `→ gate` and `→ commit` activity lines (guesses structure from display text, cannot tell a gate's result or duration, and a line of Claude's text can imitate one); logging in plain mode (a redirect already keeps what plain mode prints, and a full record would mean running claude with stream-json there, which changes plain mode's output contract, ADR-011); keeping the raw stream-json (very large, and it holds everything a tool read); a single log file for ledger and detail (the compact trail gets buried); a plain-text ledger (anything reading it later has to guess the format); `log/slog` for the ledger (its handlers insist on `level` and `msg` keys that would need stripping); a fixed log location next to the task file (gralph choosing where to write inside a project); having `--dry-run` check the folder (nothing is logged in a dry run); carrying on after a failed write (a run with a hole in its record is what the flag exists to prevent).
+
+**Consequences:**
+
+_Positive:_
+
+- A failed task's full activity, gate output, and git output can be read after the view closes
+- A run leaves a compact, machine-readable trail: what ran, with which flags, how long each step took, and which commit each task produced
+- Gate and commit results become structured events that any later listener (or the view) can use without changes to the loop
+- Runs without `--log-dir`, plain mode, the stdin contract, and task files are unchanged
+
+_Negative:_
+
+- Logging is not available in plain mode; a command line with `--log-dir` fails when reused in a pipe or in CI
+- The logs can hold anything a session, gate, or hook printed, secrets included; the file modes keep them private to the user, nothing more
+- Run folders pile up until a person deletes them
+- With `--commit`, a log folder inside the repository needs an ignore rule first
+- A stop by the user and a stop by signal read the same in the ledger
+- A write error cancels the running task; its work so far stays in the work tree, uncommitted
+- The e2e suite has no terminal, so it can pin only the two plain-mode rules; the logging path itself is covered by unit tests
 
 ---
 
