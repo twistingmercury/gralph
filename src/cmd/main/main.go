@@ -26,6 +26,8 @@ var (
 	installFlag     = pflag.Bool("install-skill", false, "Install the gralph-docs-writer skill bundled with this binary into ~/.claude/skills")
 	gateTimeoutFlag = pflag.String("gate-timeout", "", "Limit for every gate, such as 90s or 10m; overrides each gate's own timeout (default: the gate's timeout, else 10m)")
 	noTUIFlag       = pflag.Bool("no-tui", false, "Use plain output instead of the full-screen view")
+	sandboxFlag     = pflag.String("sandbox-settings", "", "Path to a Claude Code settings JSON file; sessions run in Claude's sandbox with it. A run needs this or --skip-permissions")
+	skipPermsFlag   = pflag.Bool("skip-permissions", false, "Run sessions with no sandbox and no permission checks (claude --dangerously-skip-permissions); what they do is on you")
 )
 
 func main() {
@@ -38,13 +40,15 @@ func main() {
 		validateRequiredFlags()
 	}
 
+	session := validateSessionFlags()
+
 	if err := skillinstall.Check(); err != nil {
 		_, _ = fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
 
 	if *dryRunFlag {
-		if err := looper.DryRun(os.Stdout, *tasksFlag, *gateTimeoutFlag, ""); err != nil {
+		if err := looper.DryRun(os.Stdout, *tasksFlag, *gateTimeoutFlag, *sandboxFlag); err != nil {
 			_, _ = fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			os.Exit(1)
 		}
@@ -56,10 +60,10 @@ func main() {
 	defer stop()
 
 	if !plain {
-		os.Exit(runTUI(ctx))
+		os.Exit(runTUI(ctx, session))
 	}
 
-	if err := looper.Start(ctx, *promptFlag, *tasksFlag, *gateTimeoutFlag, looper.BypassArgs()); err != nil {
+	if err := looper.Start(ctx, *promptFlag, *tasksFlag, *gateTimeoutFlag, session); err != nil {
 		_, _ = fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
@@ -73,8 +77,9 @@ func isPlain(dryRun, noTUI, stdinTTY, stdoutTTY bool) bool {
 
 // runTUI loads the given prompt and tasks like looper.Start, asks for any
 // missing path on the setup screen, runs the loop in the full-screen view,
-// prints its summary, and returns the exit code.
-func runTUI(ctx context.Context) int {
+// prints its summary, and returns the exit code. session is the claude flags
+// from validateSessionFlags.
+func runTUI(ctx context.Context, session []string) int {
 	tasksPath, promptPath := *tasksFlag, *promptFlag
 
 	var prompt string
@@ -122,7 +127,7 @@ func runTUI(ctx context.Context) int {
 		}
 	}
 
-	code, summary, err := tui.Run(ctx, prompt, tasklist, tasksPath, *gateTimeoutFlag, looper.BypassArgs())
+	code, summary, err := tui.Run(ctx, prompt, tasklist, tasksPath, *gateTimeoutFlag, session)
 	if err != nil {
 		_, _ = fmt.Fprintf(os.Stderr, "error: %v\nrun with --no-tui to use plain output\n", err)
 		return 1
@@ -176,6 +181,42 @@ func checkGateTimeout(v string) error {
 	}
 
 	return nil
+}
+
+// validateSessionFlags exits unless the run was told how far to trust its
+// sessions; see sessionArgs.
+func validateSessionFlags() []string {
+	args, err := sessionArgs(*sandboxFlag, *skipPermsFlag, *dryRunFlag)
+	if err != nil {
+		_, _ = fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+
+	return args
+}
+
+// sessionArgs returns the claude flags that set what a session may do. A run
+// must choose a sandbox or ask by name to go without one (ADR-014): there is
+// no default, so nobody runs unsandboxed by accident. A dry run starts no
+// session and needs neither, but its sandbox file is still checked.
+func sessionArgs(sandboxFile string, skip, dryRun bool) ([]string, error) {
+	if sandboxFile != "" && skip {
+		return nil, errors.New("--sandbox-settings and --skip-permissions cannot be used together")
+	}
+
+	if sandboxFile != "" {
+		return looper.SandboxArgs(sandboxFile)
+	}
+
+	if skip {
+		return looper.BypassArgs(), nil
+	}
+
+	if dryRun {
+		return nil, nil
+	}
+
+	return nil, errors.New("pass --sandbox-settings <path>, or --skip-permissions to run without a sandbox")
 }
 
 func validateRequiredFlags() {

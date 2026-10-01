@@ -30,7 +30,7 @@ func TestNonTerminal_DefaultsToPlain(t *testing.T) {
 
 	run := func(extra ...string) (gralphResult, string) {
 		tasksPath := writeTasksYAML(t, t.TempDir(), tasksYAML)
-		args := append([]string{"-p", promptPath, "-t", tasksPath}, extra...)
+		args := append([]string{"--skip-permissions", "-p", promptPath, "-t", tasksPath}, extra...)
 		res := runGralph(t, 15*time.Second, args, env)
 		saved, err := os.ReadFile(tasksPath)
 		require.NoError(t, err)

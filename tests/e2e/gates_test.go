@@ -35,7 +35,7 @@ func TestGates_PassingGatesCompleteTheTask(t *testing.T) {
 	recordFile := filepath.Join(dir, "record.ndjson")
 	env := gralphEnv(fakeClaudeDir, map[string]string{"FAKECLAUDE_RECORD_FILE": recordFile})
 
-	res := runGralph(t, 15*time.Second, []string{"--prompt=" + promptPath, "--tasks=" + tasksPath}, env)
+	res := runGralph(t, 15*time.Second, []string{"--skip-permissions", "--prompt=" + promptPath, "--tasks=" + tasksPath}, env)
 
 	require.Equal(t, 0, res.exitCode, "stdout:\n%s\nstderr:\n%s", res.stdout, res.stderr)
 	assert.Contains(t, res.stdout, "gate: echo gate-output\ngate-output\n")
@@ -75,7 +75,7 @@ func TestGates_FailingGateFailsTheTaskAndBlocksTheNextRun(t *testing.T) {
 
 	recordFile := filepath.Join(dir, "record.ndjson")
 	env := gralphEnv(fakeClaudeDir, map[string]string{"FAKECLAUDE_RECORD_FILE": recordFile})
-	args := []string{"--prompt=" + promptPath, "--tasks=" + tasksPath}
+	args := []string{"--skip-permissions", "--prompt=" + promptPath, "--tasks=" + tasksPath}
 
 	res := runGralph(t, 15*time.Second, args, env)
 
@@ -118,7 +118,7 @@ func TestGates_SkippedWhenTheSessionFails(t *testing.T) {
 		"FAKE_CLAUDE_OUTPUT": `{"state":"failed","error":"something broke"}` + "\n",
 	})
 
-	res := runGralph(t, 15*time.Second, []string{"--prompt=" + promptPath, "--tasks=" + tasksPath}, env)
+	res := runGralph(t, 15*time.Second, []string{"--skip-permissions", "--prompt=" + promptPath, "--tasks=" + tasksPath}, env)
 
 	require.NotEqual(t, 0, res.exitCode, "stdout:\n%s\nstderr:\n%s", res.stdout, res.stderr)
 	assert.Contains(t, res.stderr, "task 1: First task failed: something broke")
@@ -146,7 +146,7 @@ func TestGates_TimedOutGateFailsTheTask(t *testing.T) {
 	env := gralphEnv(fakeClaudeDir, nil)
 
 	start := time.Now()
-	res := runGralph(t, 20*time.Second, []string{"--prompt=" + promptPath, "--tasks=" + tasksPath}, env)
+	res := runGralph(t, 20*time.Second, []string{"--skip-permissions", "--prompt=" + promptPath, "--tasks=" + tasksPath}, env)
 
 	const gateErr = `gate "sleep 30" timed out after 200ms`
 	require.NotEqual(t, 0, res.exitCode, "stdout:\n%s\nstderr:\n%s", res.stdout, res.stderr)
@@ -178,7 +178,7 @@ func TestGates_GateTimeoutFlagOverridesTheGateTimeout(t *testing.T) {
 	env := gralphEnv(fakeClaudeDir, nil)
 
 	start := time.Now()
-	res := runGralph(t, 20*time.Second, []string{"--prompt=" + promptPath, "--tasks=" + tasksPath, "--gate-timeout", "200ms"}, env)
+	res := runGralph(t, 20*time.Second, []string{"--skip-permissions", "--prompt=" + promptPath, "--tasks=" + tasksPath, "--gate-timeout", "200ms"}, env)
 
 	const gateErr = `gate "sleep 30" timed out after 200ms`
 	require.NotEqual(t, 0, res.exitCode, "stdout:\n%s\nstderr:\n%s", res.stdout, res.stderr)
@@ -248,7 +248,7 @@ func TestGates_BadGateTimeoutFlagRunsNothing(t *testing.T) {
 			recordFile := filepath.Join(dir, "record.ndjson")
 			env := gralphEnv(fakeClaudeDir, map[string]string{"FAKECLAUDE_RECORD_FILE": recordFile})
 
-			args := []string{"--prompt=" + promptPath, "--tasks=" + tasksPath, "--gate-timeout=" + tt.value}
+			args := []string{"--skip-permissions", "--prompt=" + promptPath, "--tasks=" + tasksPath, "--gate-timeout=" + tt.value}
 			if tt.dryRun {
 				args = append(args, "--dry-run")
 			}
@@ -283,7 +283,7 @@ func TestGates_MultiLineGateErrorNamesOnlyTheFirstLine(t *testing.T) {
 `)
 	env := gralphEnv(fakeClaudeDir, nil)
 
-	res := runGralph(t, 15*time.Second, []string{"--prompt=" + promptPath, "--tasks=" + tasksPath}, env)
+	res := runGralph(t, 15*time.Second, []string{"--skip-permissions", "--prompt=" + promptPath, "--tasks=" + tasksPath}, env)
 
 	const gateErr = `gate "echo first-line" failed: exit status 3`
 	require.NotEqual(t, 0, res.exitCode, "stdout:\n%s\nstderr:\n%s", res.stdout, res.stderr)
