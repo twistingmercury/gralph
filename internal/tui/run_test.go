@@ -62,7 +62,7 @@ func startRun(t *testing.T, ctx context.Context, tasksPath string) (*io.PipeWrit
 	t.Cleanup(func() { _ = w.Close() })
 	done := make(chan runResult, 1)
 	go func() {
-		code, summary, err := Run(ctx, "prompt", &tl, tasksPath,
+		code, summary, err := Run(ctx, "prompt", &tl, tasksPath, "",
 			tea.WithInput(in), tea.WithOutput(io.Discard), tea.WithWindowSize(120, 30))
 		done <- runResult{code, summary, err}
 	}()

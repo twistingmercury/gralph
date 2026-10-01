@@ -1,8 +1,8 @@
 # Gralph — Architectural Decisions
 
-> **Version**: v05
+> **Version**: v06
 > **Date**: 2026-09-30
-> **Notes**: ADR-013 adds per-task `gates`: commands gralph runs itself after a session reports `completed`; the task is completed only when every gate exits zero. Gates run as `sh -c <cmd>` under one owner-approved `#nosec G204`.
+> **Notes**: ADR-013 adds per-task `gates` with per-gate `timeout` and `--gate-timeout` flag: each gate runs under a timeout (flag > gate value > 10m default) and is killed if exceeded. Gates run as `sh -c <cmd>` under one owner-approved `#nosec G204`.
 
 [Back to Overview](00_overview.md) | [Back to Project README](../../README.md)
 
@@ -398,7 +398,7 @@ Under ADR-005 the only evidence that a task worked is the session's own result l
 
 **Decision:**
 
-A task may carry an optional `gates` list. Each entry is a mapping with exactly one key, `cmd`, a nonblank string:
+A task may carry an optional `gates` list. Each entry is a mapping with keys `cmd` (required, nonblank string) and `timeout` (optional, a duration string):
 
 ```yaml
 tasks:
@@ -408,23 +408,26 @@ tasks:
       ...
     gates:
       - cmd: golangci-lint run ./...
+        timeout: 5m
       - cmd: go test ./internal/widget/...
+        timeout: 20m
 ```
 
-When a session exits zero and ends with the `completed` result line (ADR-005), gralph runs that task's gates in file order, one at a time, each through `sh` in gralph's working directory. The task is `completed` only when every gate exits zero. The first gate that exits non-zero, or cannot be started, makes the task `failed` with `error` set to `gate "<cmd>" failed: <exit error>`; later gates do not run, the file is saved, and the run stops as it does for any failed task (ADR-003, ADR-006). The rest of the rules:
+When a session exits zero and ends with the `completed` result line (ADR-005), gralph runs that task's gates in file order, one at a time, each through `sh` in gralph's working directory under a timeout. Each gate's timeout is determined by (in order): the `--gate-timeout` CLI flag if set, the gate's `timeout` field if present, or the built-in default 10m. The task is `completed` only when every gate exits zero before its timeout. The first gate that exits non-zero or times out makes the task `failed` with `error` set to `gate "<cmd>" failed: <exit error>` or `gate "<cmd>" timed out after <timeout>` (`<cmd>` is the command's first line only, so a multi-line gate keeps the reason readable on one line); later gates do not run, the file is saved, and the run stops as it does for any failed task (ADR-003, ADR-006). The rest of the rules:
 
 - **Gates belong to gralph, not to Claude.** Gralph reads them from `tasks.yaml`. They are never sent to the session: the combined prompt on stdin is unchanged, and `Task.String()` does not include them. The shared prompt and task prompts may still tell Claude to verify its own work; that is Claude's self-check and a separate layer.
 - **Gates run only after a `completed` session.** If the session failed (non-zero exit, `failed` result, or no valid result line), no gate runs and the task fails with the session's error, as today.
 - **A task with no `gates`, or an empty list, behaves exactly as before.**
 - **A gate is any command, judged only by its exit code.** Gralph does not restrict what a gate does or look at its output. The skill suggests commands that exit non-zero when the check fails.
-- **Per-task only.** There is no file-level gate list, no timeout, and no retry.
-- **Validation happens at parse time**, in `internal/tasks`, with the existing error style (`tasks[<i>] (id <id>): gates[<j>]: cmd: <problem>`), so `--dry-run` and the setup screen catch a bad `gates` value. `gates` must be a sequence; each element must be a mapping whose only key is `cmd`; `cmd` must be a nonblank string. The stored `cmd` is never altered. `SaveTasks` writes `gates` back unchanged (omitted when empty).
+- **Per-task only.** There is no file-level gate list and no retry.
+- **Every gate has a time limit.** The `--gate-timeout` flag, when passed, overrides every gate, including those with their own `timeout`; otherwise the gate's `timeout` applies; otherwise the built-in 10m. There is no file-level timeout key and no way to run a gate without a limit. The limit is a defence for unattended runs: a gate that never exits would otherwise hang the run. When the limit is hit, gralph kills the gate's process group and the error names the limit that applied, as written where it came from. `--dry-run` lists each gate's effective timeout and its source (`task <id> gate: <first line of cmd>: <timeout> (flag|gate|default)`) after the task table.
+- **Validation happens at parse time**, in `internal/tasks`, with the existing error style (`tasks[<i>] (id <id>): gates[<j>]: cmd: <problem>`), so `--dry-run` and the setup screen catch a bad `gates` value. `gates` must be a sequence; each element must be a mapping with keys `cmd` (required, nonblank string) and `timeout` (optional); any other key is an error (`...: <key>: unknown key; a gate has only cmd and timeout`). `timeout`, when present, must be a duration string with a unit (e.g., `90s`, `10m`, as Go's `time.ParseDuration` accepts) and greater than zero; errors are `...: timeout: must be a duration string such as 90s or 10m` and `...: timeout: must be greater than zero`. The stored `cmd` and `timeout` are never altered and never written back from runtime decisions (the `--gate-timeout` flag value is never saved to the file). `SaveTasks` writes `gates` back unchanged (omitted when empty). The `--gate-timeout` flag is validated before any file load or run; a bad value prints an error and exits 1.
 - **How the command reaches the shell.** Each gate runs as `sh -c <cmd>`, with the `cmd` text from the file as the script, so pipes, substitutions, and multi-line commands work. gosec flags this call (G204: a subprocess whose argv comes from a variable). The finding is accurate and accepted: running commands from the task file is what a gate is. The call carries a single `// #nosec G204` with its reason, approved by the project owner as an explicit exception to the "never add `#nosec`" rule. It is not a precedent; any other suppression needs the owner's explicit approval too.
 - **Process handling matches claude's** (ADR-007): each gate runs in its own process group with no stdin. Cancelling the context while a gate runs kills the group and leaves the task's state and the file untouched, so the next run starts that task again.
 - **Output.** Plain mode prints `gate: <cmd>` to stdout before each gate, and the gate's stdout and stderr pass straight through. On the TUI path gralph writes nothing itself: it reports an `Activity` event `→ gate <cmd>` (only the command's first line, so a multi-line command stays one activity line) and then one `Activity` event per line of the gate's stdout and stderr. The task stays `in progress` until its gates finish; `TaskFinished` is reported after them. No new event kinds.
 - **The skill** (`gralph-docs-writer`) gains `gates` in its template and field rules, and proposes each task's gates from the project's agreed quality gates plus the task's own checks. It keeps writing the prompt-side verification for Claude.
 
-Alternatives not taken: letting the gates replace the result line (Claude can know the task was not finished when every gate would still pass); sending the gate list to Claude (gralph's check should not depend on what the session was told); a file-level list shared by all tasks (not needed to start; can be added without changing per-task gates).
+Alternatives not taken: opt-in only with no default (leaves hand-written files unprotected), file-level default key in the task file (a second place to configure; the `--gate-timeout` flag covers it), the flag acting only as a default or as a cap rather than an override (the override level lets one run adjust without editing the file); letting the gates replace the result line (Claude can know the task was not finished when every gate would still pass); sending the gate list to Claude (gralph's check should not depend on what the session was told); a file-level list shared by all tasks (not needed to start; can be added without changing per-task gates).
 
 **Consequences:**
 
@@ -440,7 +443,7 @@ Alternatives not taken: letting the gates replace the result line (Claude can kn
 - Resetting a gate-failed task to `pending` runs the whole session again, not just the gates; setting it to `completed` by hand skips the gates
 - Common gates are repeated in every task
 - The gate call carries the project's one approved inline gosec suppression (`#nosec G204`), which a later scanner upgrade or code move has to keep intact
-- A gate that never exits hangs the run until it is cancelled (no timeout)
+- A gate that never exits is killed by its timeout (the gate's value, `--gate-timeout`, or the 10m default); existing files without explicit timeouts now get the 10m limit instead of running indefinitely
 - A gate that changes files leaves those changes uncommitted for the next session
 - Claude is not told the gates, so a session can report `completed` and still fail one; the skill keeps the prompt-side verification and the gates in step
 

@@ -1,8 +1,8 @@
 # Gralph — System Architecture
 
-> **Version**: v06
+> **Version**: v07
 > **Date**: 2026-09-30
-> **Notes**: Added the gate runner (ADR-013): per-task `gates` commands run by gralph after a `completed` session, on both task paths.
+> **Notes**: Added per-gate `timeout` to ADR-013: each gate runs under a timeout (flag > gate value > 10m default); `--gate-timeout` flag overrides all gates at run time.
 
 [Back to Overview](00_overview.md) | [Back to Project README](../../README.md)
 
@@ -49,9 +49,10 @@ graph TB
 ### CLI Entrypoint (cmd/main)
 
 **Responsibilities:**
-- Parse command-line flags (--prompt, --tasks, --dry-run, --no-tui, --install-skill, --version)
+- Parse command-line flags (--prompt, --tasks, --dry-run, --no-tui, --gate-timeout, --install-skill, --version)
+- Validate `--gate-timeout` (if set) before any load or run; bad value exits 1
 - Choose the mode: plain when `--dry-run`, `--no-tui`, or stdin or stdout is not a terminal (`github.com/charmbracelet/x/term`); otherwise the TUI
-- Plain mode: validate required flags, then route to `looper.Start` (normal run) or `looper.DryRun` (validation only)
+- Plain mode: validate required flags and `--gate-timeout`, then route to `looper.Start` (normal run) or `looper.DryRun` (validation only)
 - TUI mode: load the given paths with `looper.LoadPrompt`/`looper.LoadTasksReport` (a failed task prints the `PrintTasks` table and exits 1, as in plain mode), run `tui.Setup` for any missing path, then `tui.Run`, and print the one-line summary after the view closes
 - Set up context with signal handling (SIGINT, SIGTERM)
 - Exit with appropriate code (0 on success, 1 on error); a Bubble Tea error exits 1 with a hint to rerun with `--no-tui`
@@ -186,7 +187,7 @@ graph TB
 **Responsibilities:**
 - `runGates` runs after `finishTask` returns `completed`, on both task paths, before the state is saved (ADR-013); it is skipped when the task has no gates or the session failed
 - Run the task's gates in file order, one at a time, each as `sh -c <cmd>` in gralph's working directory, with no stdin, in its own process group (`configureProcessTree`). The call carries the one owner-approved `// #nosec G204` (ADR-013)
-- Stop at the first gate that exits non-zero or cannot be started: the task becomes `failed` with error `gate "<cmd>" failed: <exit error>`, and later gates do not run
+- Stop at the first gate that exits non-zero or cannot be started: the task becomes `failed` with error `gate "<cmd>" failed: <exit error>` (or `gate "<cmd>" timed out after <timeout>` when it hit its limit; `<cmd>` is the command's first line), and later gates do not run
 - Plain path (`report == nil`): print `gate: <cmd>` to stdout, then let the gate's stdout and stderr pass straight through
 - TUI path (`report != nil`): write nothing to gralph's stdout/stderr; report `Activity` `→ gate <first line of cmd>`, then one `Activity` per line of the gate's stdout and stderr
 - On context cancellation, return the error without a state, like a cancelled session: the task and the file stay untouched
@@ -195,11 +196,11 @@ graph TB
 
 | Characteristic      | Value                                   |
 | ------------------- | --------------------------------------- |
-| Input               | The task's `Gates` (`[]tasks.Gate`, each a `Cmd` string) |
+| Input               | The task's `Gates` (`[]tasks.Gate`, each with `Cmd` string and optional `Timeout` duration) |
 | Output              | Nothing on success; the failed gate's error message; or a cancellation error |
 | Judged by           | Exit code only; output is shown, never parsed |
 | Seen by Claude      | Never; gates are not part of the stdin prompt |
-| Timeout / retry     | None                                    |
+| Timeout / retry     | Always a timeout: `--gate-timeout` if passed, else the gate's `timeout`, else 10m. No retry |
 
 ## Data Flow
 

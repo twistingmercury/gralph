@@ -19,18 +19,20 @@ import (
 )
 
 var (
-	versionFlag = pflag.BoolP("version", "v", false, "Show the current version of gralph")
-	tasksFlag   = pflag.StringP("tasks", "t", "", "Path to the tasks.yaml task list that drives the loop; required, but asked for when missing in the full-screen view")
-	promptFlag  = pflag.StringP("prompt", "p", "", "Path to the prompt.md shared prompt passed to Claude with every task; required unless --dry-run, but asked for when missing in the full-screen view")
-	dryRunFlag  = pflag.Bool("dry-run", false, "Validate the tasks file and report failed tasks without running anything")
-	installFlag = pflag.Bool("install-skill", false, "Install the gralph-docs-writer skill bundled with this binary into ~/.claude/skills")
-	noTUIFlag   = pflag.Bool("no-tui", false, "Use plain output instead of the full-screen view")
+	versionFlag     = pflag.BoolP("version", "v", false, "Show the current version of gralph")
+	tasksFlag       = pflag.StringP("tasks", "t", "", "Path to the tasks.yaml task list that drives the loop; required, but asked for when missing in the full-screen view")
+	promptFlag      = pflag.StringP("prompt", "p", "", "Path to the prompt.md shared prompt passed to Claude with every task; required unless --dry-run, but asked for when missing in the full-screen view")
+	dryRunFlag      = pflag.Bool("dry-run", false, "Validate the tasks file and report failed tasks without running anything")
+	installFlag     = pflag.Bool("install-skill", false, "Install the gralph-docs-writer skill bundled with this binary into ~/.claude/skills")
+	gateTimeoutFlag = pflag.String("gate-timeout", "", "Limit for every gate, such as 90s or 10m; overrides each gate's own timeout (default: the gate's timeout, else 10m)")
+	noTUIFlag       = pflag.Bool("no-tui", false, "Use plain output instead of the full-screen view")
 )
 
 func main() {
 	pflag.Parse()
 	checkVersion()
 	checkInstallSkill()
+	validateGateTimeout()
 	plain := isPlain(*dryRunFlag, *noTUIFlag, term.IsTerminal(os.Stdin.Fd()), term.IsTerminal(os.Stdout.Fd()))
 	if plain {
 		validateRequiredFlags()
@@ -42,7 +44,7 @@ func main() {
 	}
 
 	if *dryRunFlag {
-		if err := looper.DryRun(os.Stdout, *tasksFlag); err != nil {
+		if err := looper.DryRun(os.Stdout, *tasksFlag, *gateTimeoutFlag); err != nil {
 			_, _ = fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			os.Exit(1)
 		}
@@ -57,7 +59,7 @@ func main() {
 		os.Exit(runTUI(ctx))
 	}
 
-	if err := looper.Start(ctx, *promptFlag, *tasksFlag); err != nil {
+	if err := looper.Start(ctx, *promptFlag, *tasksFlag, *gateTimeoutFlag); err != nil {
 		_, _ = fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
@@ -120,7 +122,7 @@ func runTUI(ctx context.Context) int {
 		}
 	}
 
-	code, summary, err := tui.Run(ctx, prompt, tasklist, tasksPath)
+	code, summary, err := tui.Run(ctx, prompt, tasklist, tasksPath, *gateTimeoutFlag)
 	if err != nil {
 		_, _ = fmt.Fprintf(os.Stderr, "error: %v\nrun with --no-tui to use plain output\n", err)
 		return 1
@@ -152,6 +154,28 @@ func checkInstallSkill() {
 
 	fmt.Println(path)
 	os.Exit(0)
+}
+
+// validateGateTimeout rejects a bad --gate-timeout before anything loads or
+// runs. An explicitly empty value counts as passed, and is bad.
+func validateGateTimeout() {
+	if !pflag.CommandLine.Changed("gate-timeout") {
+		return
+	}
+
+	if err := checkGateTimeout(*gateTimeoutFlag); err != nil {
+		_, _ = fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+// checkGateTimeout applies the same rules as a gate's timeout in the file.
+func checkGateTimeout(v string) error {
+	if _, err := tasks.ParseTimeout(v); err != nil {
+		return fmt.Errorf("--gate-timeout: %w", err)
+	}
+
+	return nil
 }
 
 func validateRequiredFlags() {

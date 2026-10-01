@@ -24,3 +24,28 @@ func TestIsPlain(t *testing.T) {
 		})
 	}
 }
+
+func TestCheckGateTimeout(t *testing.T) {
+	tests := []struct {
+		name    string
+		in      string
+		wantErr string
+	}{
+		{name: "valid", in: "2m"},
+		{name: "unitless", in: "30", wantErr: "--gate-timeout: must be a duration string such as 90s or 10m"},
+		{name: "empty", in: "", wantErr: "--gate-timeout: must be a duration string such as 90s or 10m"},
+		{name: "zero", in: "0s", wantErr: "--gate-timeout: must be greater than zero"},
+		{name: "negative", in: "-5m", wantErr: "--gate-timeout: must be greater than zero"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := checkGateTimeout(tt.in)
+			if tt.wantErr == "" {
+				assert.NoError(t, err)
+				return
+			}
+
+			assert.EqualError(t, err, tt.wantErr)
+		})
+	}
+}

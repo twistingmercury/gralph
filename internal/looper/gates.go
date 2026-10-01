@@ -2,6 +2,7 @@ package looper
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -14,36 +15,96 @@ import (
 // returns the task's final outcome: completed when every gate exits zero,
 // failed at the first gate that does not. err is non-nil only when ctx was
 // cancelled, which must leave the task's state and the tasks file untouched.
-func runGates(ctx context.Context, task tasks.Task, report func(Event)) (state, errMsg string, err error) {
+func runGates(ctx context.Context, task tasks.Task, override string, report func(Event)) (state, errMsg string, err error) {
 	for _, gate := range task.Gates {
-		runErr := runGate(ctx, task, gate, report)
+		limit, _ := gateLimit(gate, override)
+		runErr := runGate(ctx, task, gate, limit, report)
 		if runErr == nil {
 			continue
 		}
 
 		if ctx.Err() != nil {
-			return "", "", fmt.Errorf("task %d: %s failed: gate %q: %w", task.ID, task.Name, gate.Cmd, runErr)
+			return "", "", fmt.Errorf("task %d: %s failed: gate %q: %w", task.ID, task.Name, firstLine(gate.Cmd), runErr)
 		}
 
-		return tasks.FailedState, fmt.Sprintf("gate %q failed: %s", gate.Cmd, runErr), nil
+		return tasks.FailedState, gateFailure(gate, limit, runErr), nil
 	}
 
 	return tasks.CompletedState, "", nil
+}
+
+// firstLine is the part of a multi-line command that messages quote, so one
+// long gate cannot bury the reason in a wrapped, truncated banner.
+func firstLine(cmd string) string {
+	first, _, _ := strings.Cut(cmd, "\n")
+	return first
+}
+
+// defaultGateTimeout limits every gate that neither the flag nor the file
+// gives a timeout; there is deliberately no way to run a gate without a limit.
+const defaultGateTimeout = "10m"
+
+// Where a gate's effective timeout came from.
+const (
+	limitFromFlag    = "flag"
+	limitFromGate    = "gate"
+	limitFromDefault = "default"
+)
+
+// gateLimit picks the timeout that applies to gate, as written where it came
+// from: the --gate-timeout override beats the gate's own timeout, which beats
+// the default. The text stays as written so a failure message can repeat it.
+func gateLimit(gate tasks.Gate, override string) (limit, source string) {
+	switch {
+	case override != "":
+		return override, limitFromFlag
+	case gate.Timeout != "":
+		return gate.Timeout, limitFromGate
+	}
+
+	return defaultGateTimeout, limitFromDefault
+}
+
+// gateFailure words a gate's failure. A timeout reads differently from a
+// non-zero exit because "signal: killed" would hide that the gate was cut off.
+func gateFailure(gate tasks.Gate, limit string, runErr error) string {
+	if errors.Is(runErr, context.DeadlineExceeded) {
+		return fmt.Sprintf("gate %q timed out after %s", firstLine(gate.Cmd), limit)
+	}
+
+	return fmt.Sprintf("gate %q failed: %s", firstLine(gate.Cmd), runErr)
 }
 
 // runGate runs one gate through `sh -c` so the command can use shell syntax
 // (pipes, &&, redirects). gosec's G204 finding is accepted on purpose: running
 // a command from the task file is the feature (ADR-013). The gate gets no
 // stdin and its own process group, like claude, so a cancel kills everything
-// it started.
-func runGate(ctx context.Context, task tasks.Task, gate tasks.Gate, report func(Event)) error {
+// it started. Every gate runs under its limit; when that deadline, not the
+// run's ctx, ended the gate, the error is context.DeadlineExceeded.
+func runGate(ctx context.Context, task tasks.Task, gate tasks.Gate, limit string, report func(Event)) error {
+	d, err := tasks.ParseTimeout(limit)
+	if err != nil {
+		return err
+	}
+
+	gateCtx, cancel := context.WithTimeout(ctx, d)
+	defer cancel()
+
+	err = runGateCmd(gateCtx, task, gate, report)
+	if err != nil && ctx.Err() == nil && errors.Is(gateCtx.Err(), context.DeadlineExceeded) {
+		return context.DeadlineExceeded
+	}
+
+	return err
+}
+
+func runGateCmd(ctx context.Context, task tasks.Task, gate tasks.Gate, report func(Event)) error {
 	cmd := exec.CommandContext(ctx, "sh", "-c", gate.Cmd) // #nosec G204 -- a gate is a command from the task file, run by design (ADR-013); suppression approved by the owner
 	configureProcessTree(cmd)
 
 	if report != nil {
 		// Only the first line, so a multi-line command stays one activity line.
-		first, _, _ := strings.Cut(gate.Cmd, "\n")
-		report(Event{Kind: Activity, Task: task, Line: "→ gate " + first})
+		report(Event{Kind: Activity, Task: task, Line: "→ gate " + firstLine(gate.Cmd)})
 		return runGateStream(cmd, task, report)
 	}
 

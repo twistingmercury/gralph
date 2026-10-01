@@ -32,10 +32,12 @@ while any task is `failed`; a person fixes the cause (often by editing the
 task's `prompt`) and resets its `state` to `pending` by hand.
 
 A task may also list `gates`: commands Gralph runs itself, in order, after a
-session that reported `completed`. The task is `completed` only when every gate
-exits zero; the first gate that fails marks the task `failed` and stops the
-run. Gates are never sent to the session, so the prompt must still tell Claude
-what to verify.
+session that reported `completed`. Each gate runs under a timeout (the `--gate-timeout`
+flag if the user passes it, else the gate's `timeout` field, else the built-in
+default 10m). The task is `completed` only when every gate exits zero before
+its timeout; the first gate that fails or times out marks the task `failed` and
+stops the run. Gates are never sent to the session, so the prompt must still
+tell Claude what to verify.
 
 A `tasks.yaml` that does not match the rules below is invalid and Gralph
 refuses to run it. There is no migration from other formats or older states.
@@ -75,14 +77,21 @@ in place when authorized.
    `pending`, `completed`, or `failed`; leave it empty for new work, which
    Gralph reads as `pending`. The optional `error` field is gralph-only: never
    write it; preserve it if present when updating an existing file. The
-   optional `gates` field is a sequence of mappings, each with exactly one
-   key, `cmd`, a nonblank string holding one shell command; any other key in
-   a gate makes the file invalid. Gralph runs each `cmd` through `sh` from the
-   directory it was started in and judges it only by its exit code. Write
-   commands that exit non-zero when the check fails
-   (`test -z "$(gofmt -l .)"`, not `gofmt -w .`), that need no input, and that
-   finish on their own: there is no timeout. Give every task the agreed
-   quality gates plus any task-specific check that is a plain command; leave
+   optional `gates` field is a sequence of mappings, each with keys `cmd`
+   (required, a nonblank string holding one shell command) and `timeout`
+   (optional, a duration string with a unit like `90s` or `10m`); any other
+   key in a gate makes the file invalid. Gralph runs each `cmd` through `sh`
+   from the directory it was started in and judges it only by its exit code.
+   Each gate has a timeout determined by (in order): the `--gate-timeout` flag
+   if the user sets it (overrides all), the gate's `timeout` field if present,
+   or the built-in default 10m. When a gate exceeds its timeout, it is killed
+   and the task fails with `gate "..." timed out after <timeout>`. Write
+   commands that exit non-zero when the check fails (`test -z "$(gofmt -l .)"`,
+   not `gofmt -w .`), that need no input, and that finish on their own.
+   Give every task the agreed quality gates plus any task-specific check that
+   is a plain command; always include a `timeout` on every gate you generate
+   (choose a generous value per gate: a format or lint check gets a few minutes;
+   a test suite or build gets more room; when unsure, be generous). Leave
    `gates` out when a task has nothing to check by command. Write no other
    task keys: Gralph ignores them when reading and drops them the first time
    it saves the file.

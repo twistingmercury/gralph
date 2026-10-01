@@ -1,8 +1,8 @@
 # Gralph — Deployment Architecture
 
-> **Version**: v04
+> **Version**: v05
 > **Date**: 2026-09-30
-> **Notes**: Testing strategy now covers gates (ADR-013).
+> **Notes**: Testing strategy covers gates and per-gate timeouts (ADR-013).
 
 [Back to Overview](00_overview.md) | [Back to Project README](../../README.md)
 

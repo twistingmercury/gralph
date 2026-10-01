@@ -1,8 +1,8 @@
 # Gralph — Requirements
 
-> **Version**: v04
+> **Version**: v05
 > **Date**: 2026-09-30
-> **Notes**: Added gralph-run gates as a goal: a completed task is confirmed by commands from the task file, not only by the session's own report.
+> **Notes**: Gate timeouts are now in scope: a per-gate `timeout`, the `--gate-timeout` flag, and a built-in 10m default. File-level gates and a file-level timeout key remain out of scope.
 
 [Back to Overview](00_overview.md) | [Back to Project README](../../README.md)
 
@@ -56,7 +56,7 @@ Claude Code users need a way to:
 - A TUI for `--dry-run`; it always prints plain text
 - Writing the TUI's `in progress` state to tasks.yaml
 - Sending a task's gates to Claude; they are gralph's check, and the stdin prompt does not include them
-- Gate timeouts, file-level gates shared by all tasks, or sandboxing what a gate command does
+- File-level gates shared by all tasks, a file-level timeout key, running a gate with no time limit, or sandboxing what a gate command does
 - Re-running only the gates of a task; a task reset to `pending` runs its session again
 
 ## Success Criteria

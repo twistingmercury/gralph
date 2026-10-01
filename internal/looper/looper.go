@@ -19,7 +19,9 @@ import (
 // any task in the file is failed.
 var ErrFailedTasks = errors.New("fix the failed tasks and set their state to pending before running")
 
-func Start(ctx context.Context, promptFile, tasksFile string) error {
+// Start runs the loop in plain mode. gateTimeout is the --gate-timeout value as
+// given, or "" when the flag was not passed.
+func Start(ctx context.Context, promptFile, tasksFile, gateTimeout string) error {
 	prompt, err := LoadPrompt(promptFile)
 	if err != nil {
 		return fmt.Errorf("failed to start loop runner: %w", err)
@@ -34,7 +36,7 @@ func Start(ctx context.Context, promptFile, tasksFile string) error {
 		return fmt.Errorf("failed to start loop runner: %w", err)
 	}
 
-	if err := Run(ctx, prompt, tasklist, tasksFile, nil); err != nil {
+	if err := Run(ctx, prompt, tasklist, tasksFile, gateTimeout, nil); err != nil {
 		return fmt.Errorf("loop error: %w", err)
 	}
 
@@ -42,8 +44,9 @@ func Start(ctx context.Context, promptFile, tasksFile string) error {
 }
 
 // DryRun validates tasksFile with the same checks Start uses and reports on
-// it to w without launching claude or writing any file.
-func DryRun(w io.Writer, tasksFile string) error {
+// it to w without launching claude or writing any file. It also lists the
+// timeout each gate would run under, given gateTimeout as for Start.
+func DryRun(w io.Writer, tasksFile, gateTimeout string) error {
 	tasklist, err := LoadTasksReport(w, tasksFile)
 	if errors.Is(err, ErrFailedTasks) {
 		return nil
@@ -54,8 +57,21 @@ func DryRun(w io.Writer, tasksFile string) error {
 	}
 
 	PrintTasks(w, tasklist)
+	printGateLimits(w, tasklist, gateTimeout)
 	_, _ = fmt.Fprintf(w, "%s is valid\n", tasksFile)
 	return nil
+}
+
+// printGateLimits writes one line per gate with the timeout it would run
+// under and where that timeout came from. It writes nothing for a list with
+// no gates.
+func printGateLimits(w io.Writer, tl *tasks.TaskList, override string) {
+	for _, task := range tl.Tasks {
+		for _, gate := range task.Gates {
+			limit, source := gateLimit(gate, override)
+			_, _ = fmt.Fprintf(w, "task %d gate: %s: %s (%s)\n", task.ID, firstLine(gate.Cmd), limit, source)
+		}
+	}
 }
 
 // PrintTasks writes a summary table of tl's tasks to w: id, state (green when
@@ -144,9 +160,10 @@ func LoadPrompt(path string) (string, error) {
 // Run runs the loop over tl. When report is non-nil it receives a copy of
 // each task's progress and, last, a RunDone event carrying Run's error;
 // claude then runs with stream-json output and its activity is reported
-// live. report may be called from more than one goroutine.
-func Run(ctx context.Context, prompt string, tl *tasks.TaskList, tasksFile string, report func(Event)) error {
-	err := runLoop(ctx, prompt, tl, tasksFile, report)
+// live. report may be called from more than one goroutine. gateTimeout, when
+// not empty, replaces every gate's timeout for this run; it is never saved.
+func Run(ctx context.Context, prompt string, tl *tasks.TaskList, tasksFile, gateTimeout string, report func(Event)) error {
+	err := runLoop(ctx, prompt, tl, tasksFile, gateTimeout, report)
 	if report != nil {
 		report(Event{Kind: RunDone, Err: err})
 	}
@@ -154,7 +171,7 @@ func Run(ctx context.Context, prompt string, tl *tasks.TaskList, tasksFile strin
 	return err
 }
 
-func runLoop(ctx context.Context, p string, tl *tasks.TaskList, tasksFile string, report func(Event)) error {
+func runLoop(ctx context.Context, p string, tl *tasks.TaskList, tasksFile, gateTimeout string, report func(Event)) error {
 	for i := range tl.Tasks {
 		task := &tl.Tasks[i]
 
@@ -170,7 +187,7 @@ func runLoop(ctx context.Context, p string, tl *tasks.TaskList, tasksFile string
 			report(Event{Kind: TaskStarted, Task: *task})
 		}
 
-		state, errMsg, err := runTask(ctx, p, *task, report)
+		state, errMsg, err := runTask(ctx, p, *task, gateTimeout, report)
 		if err != nil {
 			return err
 		}
@@ -208,7 +225,7 @@ func runLoop(ctx context.Context, p string, tl *tasks.TaskList, tasksFile string
 // runTask runs one task's session on the path report selects and, only when
 // the session completed, the task's gates. It returns the task's outcome, or
 // an error when ctx was cancelled.
-func runTask(ctx context.Context, p string, task tasks.Task, report func(Event)) (state, errMsg string, err error) {
+func runTask(ctx context.Context, p string, task tasks.Task, gateTimeout string, report func(Event)) (state, errMsg string, err error) {
 	if report == nil {
 		state, errMsg, err = runTaskPlain(ctx, p, task)
 	} else {
@@ -219,7 +236,7 @@ func runTask(ctx context.Context, p string, task tasks.Task, report func(Event))
 		return state, errMsg, err
 	}
 
-	return runGates(ctx, task, report)
+	return runGates(ctx, task, gateTimeout, report)
 }
 
 // runTaskPlain runs one task as plain mode always has: the combined prompt

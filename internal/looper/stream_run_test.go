@@ -43,7 +43,7 @@ func runStream(t *testing.T) ([]Event, error) {
 	tl := &tasks.TaskList{Tasks: []tasks.Task{{ID: 1, Name: "First", Prompt: "p1"}}}
 
 	var rec recorder
-	err := Run(context.Background(), "prompt", tl, filepath.Join(dir, "tasks.yaml"), rec.report)
+	err := Run(context.Background(), "prompt", tl, filepath.Join(dir, "tasks.yaml"), "", rec.report)
 	return rec.snapshot(), err
 }
 
@@ -68,7 +68,7 @@ func TestRunTaskStream_ArgvAndStdin(t *testing.T) {
 	task := tasks.Task{ID: 1, Name: "First", Prompt: "Do the first thing."}
 	tl := &tasks.TaskList{Tasks: []tasks.Task{task}}
 	var rec recorder
-	require.NoError(t, Run(context.Background(), "Follow the runbook.", tl, filepath.Join(dir, "tasks.yaml"), rec.report))
+	require.NoError(t, Run(context.Background(), "Follow the runbook.", tl, filepath.Join(dir, "tasks.yaml"), "", rec.report))
 
 	args, err := os.ReadFile(argsPath)
 	require.NoError(t, err)
@@ -145,7 +145,7 @@ func TestRunTaskStream_CancelLeavesTasksFileUntouched(t *testing.T) {
 	var rec recorder
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- Run(ctx, "prompt", tl, tasksPath, rec.report)
+		errCh <- Run(ctx, "prompt", tl, tasksPath, "", rec.report)
 	}()
 
 	require.Eventually(t, func() bool {

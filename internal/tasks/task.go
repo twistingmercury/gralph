@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -17,10 +18,13 @@ const (
 	CompletedState = "completed"
 )
 
+const durationHint = "must be a duration string such as 90s or 10m"
+
 // Gate is one command gralph runs itself after a task's session reports
 // completed. It is never sent to the session.
 type Gate struct {
-	Cmd string `yaml:"cmd"`
+	Cmd     string `yaml:"cmd"`
+	Timeout string `yaml:"timeout,omitempty"`
 }
 
 type Task struct {
@@ -257,8 +261,9 @@ func checkGates(where string, node *yaml.Node) error {
 	return nil
 }
 
-// checkGate allows only the cmd key so a misspelled or invented option is an
-// error instead of a gate that quietly does less than its author meant.
+// checkGate allows only the cmd and timeout keys so a misspelled or invented
+// option is an error instead of a gate that quietly does less than its author
+// meant.
 func checkGate(where string, el *yaml.Node) error {
 	if el.Kind == yaml.AliasNode {
 		el = el.Alias
@@ -274,8 +279,8 @@ func checkGate(where string, el *yaml.Node) error {
 	}
 
 	for j := 0; j+1 < len(el.Content); j += 2 {
-		if key := el.Content[j].Value; key != "cmd" {
-			return fmt.Errorf("%s: %s: unknown key; a gate has only cmd", where, key)
+		if key := el.Content[j].Value; key != "cmd" && key != "timeout" {
+			return fmt.Errorf("%s: %s: unknown key; a gate has only cmd and timeout", where, key)
 		}
 	}
 
@@ -289,7 +294,42 @@ func checkGate(where string, el *yaml.Node) error {
 		return fmt.Errorf("%s: cmd: must not be empty or whitespace", where)
 	}
 
+	return checkGateTimeout(where, fields["timeout"])
+}
+
+// checkGateTimeout checks the tag as well as the text because `timeout: 30`
+// is a YAML integer, and a bare number has no unit for ParseDuration to read.
+// The text is stored as written; the looper parses it again when the gate runs.
+func checkGateTimeout(where string, node *yaml.Node) error {
+	if node == nil {
+		return nil
+	}
+
+	if node.Kind != yaml.ScalarNode || node.Tag != "!!str" {
+		return fmt.Errorf("%s: timeout: %s", where, durationHint)
+	}
+
+	if _, err := ParseTimeout(node.Value); err != nil {
+		return fmt.Errorf("%s: timeout: %w", where, err)
+	}
+
 	return nil
+}
+
+// ParseTimeout parses a gate timeout as written in the tasks file or on the
+// --gate-timeout flag, so both places apply one set of rules. The error text
+// is the bare problem; callers prefix where the value came from.
+func ParseTimeout(s string) (time.Duration, error) {
+	d, err := time.ParseDuration(s)
+	if err != nil {
+		return 0, errors.New(durationHint)
+	}
+
+	if d <= 0 {
+		return 0, errors.New("must be greater than zero")
+	}
+
+	return d, nil
 }
 
 func decodeTask(where string, el *yaml.Node) (Task, error) {
