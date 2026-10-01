@@ -86,7 +86,8 @@ five architecture docs that changed had their Version, Date, and Notes bumped.
 
 ### Sandbox dotfiles
 
-No decision yet. The loop's shared prompt told sessions to leave the
+Deferred on 2026-10-01: nothing changes until it causes a real problem. The
+loop's shared prompt told sessions to leave the
 placeholder files alone and not report them (option 2, for that run only).
 
 ## 1. Do the tests assert things that matter?
