@@ -93,20 +93,7 @@ func (s SetupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (s SetupModel) submit() (tea.Model, tea.Cmd) {
 	f := &s.fields[s.focus]
 	path := f.input.Value()
-	var err error
-	if f.isTasks {
-		var tl *tasks.TaskList
-		if tl, err = looper.LoadTasks(path); err == nil {
-			s.tasksPath, s.taskList = path, tl
-		}
-	} else {
-		var prompt string
-		if prompt, err = looper.LoadPrompt(path); err == nil {
-			s.promptPath, s.prompt = path, prompt
-		}
-	}
-
-	if err != nil {
+	if err := s.load(f.isTasks, path); err != nil {
 		f.err = err.Error()
 		return s, nil
 	}
@@ -119,6 +106,28 @@ func (s SetupModel) submit() (tea.Model, tea.Cmd) {
 	}
 
 	return s, s.fields[s.focus].input.Focus()
+}
+
+// load stores the path and what it loaded only on success, so a rejected
+// entry (a file with failed tasks included) leaves the model as it was.
+func (s *SetupModel) load(isTasks bool, path string) error {
+	if !isTasks {
+		prompt, err := looper.LoadPrompt(path)
+		if err != nil {
+			return err
+		}
+
+		s.promptPath, s.prompt = path, prompt
+		return nil
+	}
+
+	tl, err := looper.LoadTasks(path)
+	if err != nil {
+		return err
+	}
+
+	s.tasksPath, s.taskList = path, tl
+	return nil
 }
 
 func (s SetupModel) View() tea.View {
