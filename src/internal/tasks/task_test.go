@@ -453,27 +453,20 @@ func TestSaveTasks_TargetDirNotWritable(t *testing.T) {
 	assert.True(t, os.IsNotExist(statErr), "no .tmp file should remain after a failed save")
 }
 
-// The file itself stays writable; only its directory is read-only. A save that
-// wrote to the target directly would therefore succeed and replace the
-// contents, so this passes only when the write goes to a sibling file first.
+// The file itself stays writable; only the temporary file's name is taken, by
+// a directory. A save that wrote to the target directly would therefore
+// succeed and replace the contents, so this passes only when the write goes to
+// a sibling file first. A read-only directory would not do: the release build
+// runs the tests as root, which ignores directory permissions.
 func TestSaveTasks_FailedSaveLeavesExistingFileUntouched(t *testing.T) {
-	if os.Geteuid() == 0 {
-		t.Skip("running as root: directory permissions are not enforced")
-	}
-
-	dir := t.TempDir()
-	roDir := filepath.Join(dir, "ro")
-	require.NoError(t, os.Mkdir(roDir, 0o700))
-
-	path := filepath.Join(roDir, "tasks.yaml")
+	path := filepath.Join(t.TempDir(), "tasks.yaml")
 	original := TaskList{Tasks: []Task{{ID: 1, Name: "Original", Prompt: "p", State: PendingState}}}
 	require.NoError(t, SaveTasks(path, original))
 
 	before, err := os.ReadFile(path)
 	require.NoError(t, err)
 
-	require.NoError(t, os.Chmod(roDir, 0o500))
-	t.Cleanup(func() { _ = os.Chmod(roDir, 0o700) })
+	require.NoError(t, os.Mkdir(path+".tmp", 0o700))
 
 	changed := TaskList{Tasks: []Task{{ID: 1, Name: "Changed", Prompt: "p", State: FailedState, Error: "boom"}}}
 	err = SaveTasks(path, changed)
