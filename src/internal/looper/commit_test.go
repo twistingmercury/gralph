@@ -287,6 +287,21 @@ func TestOpenRepo_FromSubdirectoryCoversWholeTree(t *testing.T) {
 	require.ErrorContains(t, err, "?? stray.txt")
 }
 
+func TestOpenRepo_FromSubdirectoryChecksTheTaskFileFromTheRoot(t *testing.T) {
+	dir := initRepo(t)
+	// Anchored to the root: initRepo's bare "run/" also matches sub/run/, which
+	// is where a git started in sub would look for the root-relative path.
+	ignoreAndCommit(t, dir, "/run/")
+	sub := filepath.Join(dir, "sub")
+	require.NoError(t, os.Mkdir(sub, 0o750))
+	t.Chdir(sub)
+
+	repo, err := OpenRepo(taskFile(dir))
+	require.NoError(t, err)
+	require.NotNil(t, repo)
+	assert.Equal(t, dir, repo.Root())
+}
+
 func TestOpenRepo_BrokenRepositoryIsAnError(t *testing.T) {
 	dir := initRepo(t)
 	config, err := os.OpenFile(filepath.Join(dir, ".git", "config"), os.O_APPEND|os.O_WRONLY, 0o600)
