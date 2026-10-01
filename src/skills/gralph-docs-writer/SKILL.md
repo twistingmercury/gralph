@@ -40,12 +40,13 @@ stops the run. Gates are never sent to the session, so the prompt must still
 tell Claude what to verify.
 
 With the `--commit` flag, Gralph also commits each task itself: once the
-session reported `completed` and every gate passed, it commits everything the
-task changed except `tasks.yaml`, with the task's `name` as the commit message.
-A failed task is not committed; its changes stay in the work tree for a person
-to sort out. Such a run needs a clean Git work tree to start, so the pair must
-be ignored by Git or kept outside the repository. Without the flag, Gralph
-never touches Git.
+session reported `completed` and every gate passed, it commits what a plain
+`git add -A` would stage, with the task's `name` as the commit message. A failed
+task is not committed; its changes stay in the work tree for a person to sort
+out. For a `--commit` run the task file must be ignored by Git or kept outside
+the repository; Gralph refuses to start otherwise. The shared prompt file and
+any sandbox settings file should also be ignored or kept outside, so they do
+not show up as uncommitted changes. Without the flag, Gralph never touches Git.
 
 A `tasks.yaml` that does not match the rules below is invalid and Gralph
 refuses to run it. There is no migration from other formats or older states.
@@ -130,9 +131,10 @@ in place when authorized.
 9. Report both output paths and the checks performed. Do not launch the loop
    merely to validate generated files.
    For a `--commit` run, also tell the user the `.gitignore` line that keeps
-   the pair out of Git (the output directory, or `tasks.yaml` and `prompt.md`),
-   unless the files are outside the repository or already ignored. Do not edit
-   `.gitignore` yourself unless asked.
+   the files out of Git (the output directory, or `tasks.yaml` and `prompt.md`).
+   For a `--commit` run this is required for `tasks.yaml`, not just advice; the
+   same for `prompt.md` and any sandbox settings file, so they do not show up
+   as uncommitted changes. Do not edit `.gitignore` yourself unless asked.
 
 ## Task scope
 

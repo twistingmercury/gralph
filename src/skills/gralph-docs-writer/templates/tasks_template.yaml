@@ -3,7 +3,7 @@
 #
 # - Copy the task entry once per task and replace every GENERATE_* token.
 # - Put only task-specific content in `prompt`; the shared prompt.md already
-#   covers scope, verification, cleanup, commit, and task-file rules.
+#   covers scope, cleanup, task-file rules, and the result line contract.
 # - Leave `state` empty; Gralph reads an empty state as pending.
 # - `gates` are run by Gralph itself after the session: one command per `cmd`.
 #   Include a `timeout` on every gate you generate (a duration string like 90s or 10m).

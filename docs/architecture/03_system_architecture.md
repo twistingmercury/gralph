@@ -1,8 +1,8 @@
 # Gralph — System Architecture
 
-> **Version**: v09
+> **Version**: v10
 > **Date**: 2026-09-30
-> **Notes**: With `--commit`, gralph commits each task after its gates pass (ADR-015); added `commit.go` and the Committer component.
+> **Notes**: With `--commit`, the task file must be git-ignored or outside the repo; gralph checks this at startup; plain `git add -A` stages everything; git stops gracefully on cancel (ADR-015).
 
 [Back to Overview](00_overview.md) | [Back to Project README](../../README.md)
 
@@ -216,12 +216,13 @@ graph TB
 ### Committer (internal/looper/commit.go)
 
 **Responsibilities:**
-- `OpenRepo(tasksFile)` finds the git work tree around the working directory (or returns nil if outside one or git cannot be run); inside one, the tree must be clean apart from tasksFile, so that each commit holds exactly one task's work
-- `repo.commit` runs only after the session and every gate returned `completed` (ADR-015): `git add -A` to stage everything, then `git commit -m <task name>` when anything is staged, both over the whole work tree minus the task file
-- The task file is left out with a `:(exclude,literal)` pathspec only when it lies inside the work tree and git does not ignore it: `git add` refuses a pathspec that names an ignored path, and such a file is never staged anyway
-- `repoFor` gives `Start` and `DryRun` their `*Repo`: nil without `--commit`, and outside a work tree it prints `commit: not a git repository, nothing will be committed`. `cmd/main` calls `OpenRepo` directly for the TUI, which prints no notice. A dirty tree is the error `--commit needs a clean work tree; commit, stash, or remove:` plus the `git status --porcelain` lines, before any session
+- `findRoot` finds the git work tree root via `git rev-parse --show-toplevel`, or returns `""` and no error if outside one or git is not installed; any other git failure is an error, so a broken repository is caught before any session
+- `checkTaskFile` refuses a task file unless it is git-ignored or outside the repository (checked with `git check-ignore -q`); gralph exits 1 with `error: --commit needs the task file ignored by git or outside the repository: <path>` at startup
+- `checkClean` refuses a work tree with any uncommitted changes (via `git status --porcelain`); gralph exits 1 with `error: --commit needs a clean work tree; commit, stash, or remove:` and the files at startup, before the view opens or the first session
+- `OpenRepo(tasksFile)` runs the above checks in order; `repoFor` gives `Start` and `DryRun` their `*Repo`: nil without `--commit`, and outside a work tree it prints `commit: not a git repository, nothing will be committed` (plain mode and `--dry-run` only). `cmd/main` calls `OpenRepo` directly for the TUI, which prints no notice outside a repository
+- `repo.commit` runs only after the session and every gate returned `completed` (ADR-015): `git add -A` to stage everything (with no path list or exclusions), then `git commit -m <task name>` when anything is staged
 - Nothing staged means no commit and the task stays `completed`; a non-zero exit makes it `failed` with `commit failed: <exit error>` (in practice e.g. `commit failed: exit status 1`)
-- Git runs from the work tree root in its own process group with no stdin, like a gate; on cancellation, the task and file stay untouched
+- Git runs from the work tree root in its own process group with no stdin, like a gate; but on cancellation, the group is sent SIGTERM first (`stopProcessTree`), waits up to 2 seconds (`gitStopGrace`, checking if still alive with signal 0), then SIGKILL only if still alive, so git removes its `index.lock` on the graceful stop. The task and file stay untouched on cancellation
 - Plain path (`report == nil`): once something is staged, print `commit: <first line of name>` to stdout; git's output passes straight through
 - TUI path (`report != nil`): write nothing to gralph's stdout/stderr; report `Activity` `→ commit <first line of name>` once something is staged, and each git output line as `Activity`
 - Git commands are built by `(*Repo).git`, which appends arguments to a constant `git` command; keep it that way so gosec stays quiet without a suppression
@@ -236,6 +237,7 @@ graph TB
 | Judged by           | Exit code only; git output is shown    |
 | Seen by Claude      | Never                                   |
 | Sandbox Coverage    | None; git runs unsandboxed with hooks |
+| Cancellation        | SIGTERM first, SIGKILL after 2 seconds |
 
 ## Data Flow
 
@@ -428,6 +430,7 @@ graph TB
 - On signal, gralph's context cancels and kills the entire claude process group with kill(-pgid, signal)
 - Shell does not send signal directly to claude; only gralph receives it
 - Each gate command gets the same treatment: its own process group, killed as a group when the context cancels
+- Git commits are the exception: the group is sent SIGTERM first, checked and waited up to 2 seconds, then SIGKILL only if still alive, so git can remove its `index.lock` lock file gracefully
 - In the TUI the terminal is raw, so a keyboard Ctrl-C is a key, not a signal: `q` or ctrl+c opens a `[y/N]` confirm, and only `y` cancels the run ("Run stopped by user"). An outside SIGINT/SIGTERM cancels at once with no confirm ("Run stopped by signal"). Either stop kills the process group, shows the running task as `pending`, leaves the file untouched, and exits 1
 - This ensures no orphaned claude processes if gralph is killed unexpectedly
 

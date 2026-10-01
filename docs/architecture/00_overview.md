@@ -1,8 +1,8 @@
 # Gralph — Architecture Overview
 
-> **Version**: v06
+> **Version**: v07
 > **Date**: 2026-09-30
-> **Notes**: With `--commit`, gralph commits each task after its gates pass; sessions no longer need a commit rule (ADR-015).
+> **Notes**: With `--commit`, the task file must be git-ignored or outside the repo; gralph uses plain `git add -A` without pathspec exclusions; git stops gracefully on cancel (ADR-015).
 
 [Back to Project README](../../README.md)
 

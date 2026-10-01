@@ -1,8 +1,8 @@
 # Gralph — Requirements
 
-> **Version**: v07
+> **Version**: v08
 > **Date**: 2026-09-30
-> **Notes**: With `--commit`, gralph commits each completed task after its gates pass, on request (ADR-015). Pushing and commit message bodies remain out of scope.
+> **Notes**: With `--commit`, the task file must be git-ignored or outside the repo; gralph refuses to start otherwise; plain `git add -A` stages everything; git stops gracefully on cancel (ADR-015).
 
 [Back to Overview](00_overview.md) | [Back to Project README](../../README.md)
 
