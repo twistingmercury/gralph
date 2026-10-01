@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/twistingmercury/gralph/internal/looper"
+	"github.com/twistingmercury/gralph/internal/runlog"
 )
 
 const validTasksYAML = "tasks:\n  - id: 1\n    name: first\n    prompt: do it\n"
@@ -151,5 +152,68 @@ func TestCheckGateTimeout(t *testing.T) {
 
 			assert.EqualError(t, err, tt.wantErr)
 		})
+	}
+}
+
+func TestCheckLogDir(t *testing.T) {
+	tests := []struct {
+		name          string
+		logDir        string
+		plain, dryRun bool
+		wantErr       string
+	}{
+		{name: "not passed, plain", plain: true},
+		{name: "not passed, full-screen"},
+		{name: "full-screen", logDir: "logs"},
+		{name: "plain", logDir: "logs", plain: true, wantErr: "--log-dir only works with the full-screen view"},
+		{name: "dry run ignores it", logDir: "logs", plain: true, dryRun: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := checkLogDir(tt.logDir, tt.plain, tt.dryRun)
+			if tt.wantErr != "" {
+				require.EqualError(t, err, tt.wantErr)
+				return
+			}
+
+			require.NoError(t, err)
+		})
+	}
+}
+
+func TestOpenLog_NotPassedOpensNothing(t *testing.T) {
+	runLog, err := openLog("", nil, runlog.Info{})
+
+	require.NoError(t, err)
+	assert.Nil(t, runLog)
+}
+
+func TestOpenLog_CreatesOneRunFolderWithALedger(t *testing.T) {
+	logDir := filepath.Join(t.TempDir(), "logs")
+
+	runLog, err := openLog(logDir, nil, runlog.Info{Version: "dev", Permissions: "skip"})
+	require.NoError(t, err)
+	require.NotNil(t, runLog)
+	require.NoError(t, runLog.Close())
+
+	entries, err := os.ReadDir(logDir)
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	assert.Regexp(t, `^\d{8}T\d{6}$`, entries[0].Name())
+	assert.FileExists(t, filepath.Join(logDir, entries[0].Name(), "run.jsonl"))
+}
+
+// --log-dir naming a file, or a path under one, must fail at startup with
+// the flag's name in the error.
+func TestOpenLog_PathThatCannotBeADirectory(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "file")
+	require.NoError(t, os.WriteFile(file, nil, 0o600))
+
+	for _, logDir := range []string{file, filepath.Join(file, "logs")} {
+		runLog, err := openLog(logDir, nil, runlog.Info{})
+
+		require.Error(t, err, logDir)
+		assert.True(t, strings.HasPrefix(err.Error(), "--log-dir: "), err.Error())
+		assert.Nil(t, runLog)
 	}
 }
