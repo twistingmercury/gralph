@@ -23,6 +23,8 @@ _draft-skills/
 code-reviews/
 /docs/architecture/reviews/
 /docs/scripts/
+/docs/superpowers/
+/docs/tui_mock_up.txt
 scratch.md
 *.backup
 *.pdf
