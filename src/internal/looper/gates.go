@@ -34,10 +34,10 @@ func runGates(ctx context.Context, task tasks.Task, override string, report func
 	return tasks.CompletedState, "", nil
 }
 
-// firstLine is the part of a multi-line command that messages quote, so one
-// long gate cannot bury the reason in a wrapped, truncated banner.
-func firstLine(cmd string) string {
-	first, _, _ := strings.Cut(cmd, "\n")
+// firstLine is the part of a multi-line value that messages and activity
+// lines quote, so the value cannot push the rest off a one-line display.
+func firstLine(s string) string {
+	first, _, _ := strings.Cut(s, "\n")
 	return first
 }
 

@@ -84,7 +84,7 @@ func toolActivity(name string, input toolInput) string {
 	case "Grep", "Glob":
 		target = input.Pattern
 	}
-	target, _, _ = strings.Cut(target, "\n")
+	target = firstLine(target)
 	if target == "" {
 		return "→ " + name
 	}
