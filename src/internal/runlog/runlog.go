@@ -107,7 +107,7 @@ func (l *Log) start(info Info) error {
 	l.ledger = ledger
 	l.enc = json.NewEncoder(ledger)
 	// People read the ledger too: a gate's "a > b && c" stays as written
-	// instead of becoming > and &.
+	// instead of becoming \u003e and \u0026.
 	l.enc.SetEscapeHTML(false)
 
 	st := l.stamp("run_started")
