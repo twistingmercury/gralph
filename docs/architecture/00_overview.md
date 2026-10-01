@@ -1,8 +1,8 @@
 # Gralph — Architecture Overview
 
-> **Version**: v04
+> **Version**: v05
 > **Date**: 2026-09-30
-> **Notes**: Added gates: commands from the task file that gralph runs after a session reports `completed`.
+> **Notes**: Sessions run in Claude Code's sandbox from a `--sandbox-settings` file, or unsandboxed with `--skip-permissions` (ADR-014).
 
 [Back to Project README](../../README.md)
 
@@ -25,7 +25,7 @@ Gralph was built specifically for Claude Code (`claude.ai/code`); an agent-agnos
 The Ralph loop is a command sequence driven by a shared prompt and an ordered task list. Gralph implements this pattern by:
 
 1. Loading a shared prompt and task list (both YAML)
-2. For each pending task, combining the prompt + task and starting a fresh `claude --print --dangerously-skip-permissions` session (in the TUI, with `--output-format stream-json --verbose` added)
+2. For each pending task, combining the prompt + task and starting a fresh `claude --print` session with the session flags chosen by `--sandbox-settings` (sandboxed) or `--skip-permissions` (no sandbox); the TUI adds `--output-format stream-json --verbose`
 3. Reading Claude's output to determine success/failure
 4. When Claude reports success, running the task's `gates` (commands listed in the task file) and requiring every one to exit zero
 5. Writing state back atomically
@@ -68,8 +68,9 @@ graph TB
 6. **Gates confirm a completed task** — A session's `completed` is then checked by gralph itself: the task's `gates` commands run in order and every one must exit zero. Claude is never sent the gates.
 7. **Failed task blocks** — A failed task must be manually reset (state changed to pending or completed) before the next run. Gralph refuses to start with any failed task present.
 8. **Unix only** — Linux, macOS, BSDs. Windows support was removed deliberately and will not be reintroduced.
-9. **Plain mode intact** — The full-screen TUI is the default in a terminal, but plain mode (`--no-tui` or no terminal) keeps the same argv, output, and exit codes. One loop serves both, through a `report` hook.
-10. **Docker-first CI** — Lint, gosec, govulncheck, unit tests, and e2e all run inside the build container; this is the only supported CI path.
+9. **Sandboxed unless asked otherwise by name** — A run must pass `--sandbox-settings <path>` (sessions run in Claude Code's sandbox) or `--skip-permissions` (no sandbox, the user's responsibility). There is no default and no fallback to an unsandboxed run.
+10. **Plain mode intact** — The full-screen TUI is the default in a terminal, but plain mode (`--no-tui` or no terminal) keeps the same argv, output, and exit codes. One loop serves both, through a `report` hook.
+11. **Docker-first CI** — Lint, gosec, govulncheck, unit tests, and e2e all run inside the build container; this is the only supported CI path.
 
 ## Document Navigation
 

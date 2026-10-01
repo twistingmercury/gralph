@@ -11,9 +11,8 @@
 
 Gralph runs "Ralph loops" with Claude Code. You give it a list of tasks in a
 YAML file and one shared prompt. It works through the list one task at a time,
-starting a fresh `claude --print --dangerously-skip-permissions` session for
-each, so every task gets a clean context instead of one long session that
-drifts.
+starting a fresh `claude --print` session for each, so every task gets a clean
+context instead of one long session that drifts.
 
 ## Table of Contents
 
@@ -27,23 +26,28 @@ drifts.
 ## Usage
 
 ```bash
-gralph --prompt path/to/prompt.md --tasks path/to/tasks.yaml
+gralph --prompt path/to/prompt.md --tasks path/to/tasks.yaml --sandbox-settings path/to/sandbox.json
 ```
 
-| Flag               | Required                                                                | Description                                                             |
-| ------------------ | ----------------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| `--prompt` / `-p`  | Yes, unless `--dry-run`; asked for when missing in the full-screen view | Path to the shared prompt sent to Claude for every task                 |
-| `--tasks` / `-t`   | Yes; asked for when missing in the full-screen view                     | Path to the YAML task list that drives the loop                         |
-| `--gate-timeout`   | No                                                                      | Time limit for every gate, like `90s`; overrides the task file's        |
-| `--dry-run`        | No                                                                      | Validate the task file and report on it without running anything        |
-| `--no-tui`         | No                                                                      | Use plain output instead of the full-screen view                        |
-| `--install-skill`  | No                                                                      | Install the bundled `gralph-docs-writer` skill for Claude Code and exit |
-| `--version` / `-v` | No                                                                      | Print version information and exit                                      |
+| Flag                 | Required                                                                | Description                                                                           |
+| -------------------- | ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `--prompt` / `-p`    | Yes, unless `--dry-run`; asked for when missing in the full-screen view | Path to the shared prompt sent to Claude for every task                               |
+| `--tasks` / `-t`     | Yes; asked for when missing in the full-screen view                     | Path to the YAML task list that drives the loop                                       |
+| `--sandbox-settings` | One of these two for any real run; not both                             | Path to a Claude Code settings file; sessions run in Claude's sandbox with it         |
+| `--skip-permissions` | One of these two for any real run; not both                             | Run sessions with no sandbox and no permission checks. You're on your own (see below) |
+| `--gate-timeout`     | No                                                                      | Time limit for every gate, like `90s`; overrides the task file's                      |
+| `--dry-run`          | No                                                                      | Validate the task file and report on it without running anything                      |
+| `--no-tui`           | No                                                                      | Use plain output instead of the full-screen view                                      |
+| `--install-skill`    | No                                                                      | Install the bundled `gralph-docs-writer` skill for Claude Code and exit               |
+| `--version` / `-v`   | No                                                                      | Print version information and exit                                                    |
 
 Run it in a terminal and you get a full-screen view of the run (see
 [The full-screen view](#the-full-screen-view)). Pipe it, redirect it, run it in
 CI, or pass `--no-tui`, and you get plain text output instead. `--dry-run` is
 always plain.
+
+Every real run needs either `--sandbox-settings` or `--skip-permissions`. There
+is no default: see [Sandboxing sessions](#sandboxing-sessions).
 
 ### Checking a task file first
 
@@ -54,12 +58,15 @@ gralph -t tasks.yaml --dry-run
 ```
 
 This uses the same checks as a real run, but never launches Claude or writes
-anything. `--prompt` is ignored. If the file is invalid, you get the error on
+anything. `--prompt` is ignored, and since nothing runs, you need neither
+`--sandbox-settings` nor `--skip-permissions`. If the file is invalid, you get the error on
 stderr and a non-zero exit. If it's valid, you get a table of each task's id,
 state, and name. If the file has gates, you then get one line per gate showing
 the timeout it would run under and where that came from (`flag`, `gate`, or
 `default`), like `task 1 gate: go test ./...: 10m (default)`. Pass
-`--gate-timeout` along with `--dry-run` to see what it would change. Last comes
+`--gate-timeout` along with `--dry-run` to see what it would change. If you
+pass `--sandbox-settings` too, gralph checks that file the same way a real run
+would and prints `sandbox settings: <path>`. Last comes
 `<tasks path> is valid`, and exit zero.
 
 If any task is `failed` (a real run would refuse to start), the table comes
@@ -150,16 +157,163 @@ ask Claude to end with a JSON line like `{"state": "completed", "error": ""}`.
 When every task succeeds, gralph exits zero.
 
 In plain mode, gralph also prints the combined prompt, and Claude's output
-passes straight through to your terminal. The full-screen view runs
-`claude --print --output-format stream-json --verbose
---dangerously-skip-permissions` instead, so it can show the session's activity
-live. It uses the same success and failure rules and saves the file the same
+passes straight through to your terminal. The full-screen view adds
+`--output-format stream-json --verbose` right after `--print` instead, so it
+can show the session's activity live. It uses the same success and failure rules and saves the file the same
 way.
 
 Gralph saves the task file after every task, atomically (it writes a temporary
 file and renames it over the original), so a crash never leaves you with half a
 file. The catch: comments and custom formatting don't survive, and every task's
 `state` gets written out explicitly.
+
+### Sandboxing sessions
+
+A sandbox is a fence the operating system puts around a program: it limits
+which files the program can read and write and which hosts it can reach on the
+network. Gralph runs unattended, so it makes you choose up front whether
+sessions get one.
+
+A run needs exactly one of these two flags:
+
+- `--sandbox-settings <path>`: sessions run inside Claude Code's sandbox, set up
+  by the file at that path.
+- `--skip-permissions`: sessions run with no sandbox at all.
+
+With neither, gralph stops with
+`error: pass --sandbox-settings <path>, or --skip-permissions to run without a sandbox`.
+With both, it stops with
+`error: --sandbox-settings and --skip-permissions cannot be used together`.
+Either way it exits 1 before anything runs.
+
+**What `--sandbox-settings` does.** The file is a normal Claude Code settings
+file, in JSON. Gralph reads it once at startup and never writes to it. If it
+can't be read or isn't a JSON object, gralph exits 1 with an error starting
+`--sandbox-settings:`. On top of whatever the file says, gralph always sets
+three keys:
+
+| Key                                | Forced to | Why                                                                   |
+| ---------------------------------- | --------- | --------------------------------------------------------------------- |
+| `sandbox.enabled`                  | `true`    | Turns the sandbox on                                                  |
+| `sandbox.allowUnsandboxedCommands` | `false`   | A session can't ask to run a command outside the sandbox              |
+| `sandbox.failIfUnavailable`        | `true`    | If the sandbox can't start, the session fails instead of running bare |
+
+Everything else in the file reaches Claude as you wrote it. Sessions then run as
+`claude --print --permission-mode acceptEdits --settings <your settings>`:
+
+- Claude may edit files inside the project.
+- Shell commands run inside the sandbox.
+- Anything that would normally stop and ask you first is refused, because
+  nobody is there to answer.
+
+#### Writing a settings file
+
+1. **Start from this file.** It's for a Go project. Save it anywhere, for
+   example next to the task file as `sandbox.json`.
+
+   ```json
+   {
+     "sandbox": {
+       "filesystem": {
+         "denyRead": ["~/"],
+         "allowRead": ["/home/you/dev/your-project", "/usr/local/go", "/home/you/go", "/home/you/.cache/go-build"],
+         "allowWrite": ["/home/you/.cache/go-build"]
+       },
+       "network": {
+         "allowedDomains": ["proxy.golang.org", "sum.golang.org"],
+         "strictAllowlist": true
+       }
+     }
+   }
+   ```
+
+   The paths are from one machine, so replace them with yours. Write the
+   project and toolchain paths in full (absolute paths, starting with `/`):
+   that's what was tested.
+
+2. **Know what each part does.**
+
+   - `denyRead: ["~/"]` hides your home directory (SSH keys, cloud
+     credentials, other projects) from shell commands.
+   - `allowRead` lets back in the project and whatever the build tools need to
+     read.
+   - `allowWrite` adds places outside the project that commands may write to.
+     The project directory itself is always writable.
+   - `allowedDomains` is the list of hosts shell commands may reach.
+   - `strictAllowlist: true` refuses every other host outright.
+
+   Leave `enabled`, `allowUnsandboxedCommands`, and `failIfUnavailable` out.
+   Gralph sets them.
+
+3. **Find your toolchain's paths.** For Go, run:
+
+   ```bash
+   go env GOROOT GOPATH GOCACHE
+   ```
+
+   It prints three paths. All three go in `allowRead`, and the `GOCACHE` one
+   also goes in `allowWrite`. Only this Go setup was tested. For any other
+   toolchain, use the same method: ask the tool where its install directory
+   and its caches are (most have an `env` or `config` command for that), then
+   allow reading both and writing the cache.
+
+4. **Try it before a real run.**
+
+   ```bash
+   gralph -t tasks.yaml --dry-run --sandbox-settings sandbox.json
+   ```
+
+   This checks that the file is readable JSON. It doesn't check that the paths
+   are right. For that, run a one-task file whose prompt only asks Claude to
+   build and test the project, and read the output.
+
+5. **Read the failures.** A file that's too tight shows up as errors in the
+   session's output:
+
+   | What you see                                                        | What to add                   |
+   | ------------------------------------------------------------------- | ----------------------------- |
+   | `read-only file system` on a path                                   | That path, to `allowWrite`    |
+   | `No such file or directory` for a file you know exists in your home | Its directory, to `allowRead` |
+   | `CONNECT tunnel failed, response 403`, or a download that hangs up  | The host, to `allowedDomains` |
+
+   Add the narrowest path or host that fixes it, and run again.
+
+6. **Keep it tight.** Don't allow all of `~/` to make an error go away. Don't
+   add `excludedCommands` unless a tool truly can't run sandboxed: those
+   commands run with no sandbox at all.
+
+7. **Look up the rest.** Every other key is in Claude Code's
+   [sandboxing reference](https://code.claude.com/docs/en/sandboxing). The
+   file can hold any Claude Code settings, not only `sandbox`.
+
+#### What the sandbox needs
+
+Claude Code's sandbox uses bubblewrap and socat on Linux and Seatbelt on macOS
+(two Linux packages you may need to install, and a tool built into macOS). If
+the sandbox can't start, the session exits non-zero and the task fails like any
+other. Gralph never falls back to running unsandboxed.
+
+#### What the sandbox doesn't cover
+
+- **Gates.** Gralph runs those itself, with no sandbox.
+- **Your other Claude settings.** `~/.claude/settings.json` and the project's
+  `.claude/settings.json` still apply on top.
+- **Anything the file itself opens up.** `excludedCommands`, wide `allowWrite`
+  paths, and allow rules do what they say.
+- **Network limits are by hostname.** The sandbox checks the name a command
+  asks for, not what the host behind it does.
+
+#### Running without a sandbox: `--skip-permissions`
+
+With `--skip-permissions`, sessions run as
+`claude --print --dangerously-skip-permissions`, as gralph always did before
+these flags existed. A session can then run any command, read, change, or
+delete anything your user can, and reach anything on the network, with nobody
+watching.
+
+**If you pass this flag, you are on your own: you are responsible for whatever
+the sessions do.** Use it only somewhere you wouldn't mind losing, such as a
+container or a throwaway VM.
 
 ### Gates
 
@@ -246,10 +400,10 @@ Want the background? The idea behind gralph is in
 - **Don't run gralph from inside a Claude session.** It starts Claude itself, as
   a subprocess, so run it from a normal terminal.
 - **You need the `claude` CLI on your `PATH`.** Gralph calls it directly.
-- **Only run task files you trust.** `--dangerously-skip-permissions` means
-  Claude won't stop to ask before running commands or editing files. Treat the
-  prompt and task files like code you're about to run. Gate commands are run by
-  gralph itself through `sh`, with no sandbox.
+- **Only run task files you trust.** The sandbox limits what a session can
+  reach, but the prompt and task files are still code you're about to run. With
+  `--skip-permissions` there's no limit at all. Gate commands are run by gralph
+  itself through `sh`, with no sandbox either way.
 - **Every session starts from scratch.** A session sees the shared prompt and
   its own task, nothing else. If a task depends on earlier work, say so in the
   prompt, or make sure the repository shows it.
@@ -267,7 +421,8 @@ Want the background? The idea behind gralph is in
   prints `Run stopped by signal`, and exits 1. Once the run has ended, it just
   closes the view.
 - **Unix only.** Gralph runs on Linux, macOS, and the BSDs. Windows isn't
-  supported.
+  supported. Sandboxed runs need Linux or macOS; on the BSDs only
+  `--skip-permissions` works.
 
 ## Development Considerations
 

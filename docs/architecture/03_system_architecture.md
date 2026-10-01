@@ -1,8 +1,8 @@
 # Gralph — System Architecture
 
-> **Version**: v07
+> **Version**: v08
 > **Date**: 2026-09-30
-> **Notes**: Added per-gate `timeout` to ADR-013: each gate runs under a timeout (flag > gate value > 10m default); `--gate-timeout` flag overrides all gates at run time.
+> **Notes**: Sessions run with flags picked by `--sandbox-settings` (Claude Code's sandbox, three keys forced) or `--skip-permissions` (ADR-014); added `sandbox.go` and the settings file as an input.
 
 [Back to Overview](00_overview.md) | [Back to Project README](../../README.md)
 
@@ -18,14 +18,22 @@
 
 Gralph is organized into four layers: CLI entry point, terminal UI, looper orchestration, and task/state management. Dependencies point one way: `cmd/main` → `internal/tui` → `internal/looper` → `internal/tasks` (`cmd/main` also calls `internal/looper` directly). The looper loads both input files (prompt.md and tasks.yaml), validates preconditions, then walks each pending task, spawning a fresh Claude session with the combined prompt and reading the result to determine outcome. When the session reports `completed`, the looper runs the task's gates (ADR-013), commands from the task file, and the task is completed only if every one exits zero.
 
+Every session's argv is `claude --print` plus the **session flags** (ADR-014), which `cmd/main` picks once from the two permission flags and passes down as `sessionArgs`:
+
+- `--sandbox-settings <path>` → `--permission-mode acceptEdits --settings <merged JSON>`: the session runs in Claude Code's sandbox.
+- `--skip-permissions` → `--dangerously-skip-permissions`: no sandbox and no permission checks, on the user's say-so.
+
+A real run with neither flag, or any run with both, exits 1.
+
 `cmd/main` picks one of two modes (ADR-011):
 
-- **Plain mode** — `--dry-run`, `--no-tui`, or stdin or stdout not a terminal. `looper.Start` runs the loop with a nil `report` hook; each task goes through `runTaskPlain`, which runs `claude --print --dangerously-skip-permissions`, echoes the combined prompt, tees claude's stdout, and inherits its stderr.
-- **TUI mode** — otherwise. `tui.Run` runs `looper.Run` in a goroutine with a `report` hook that forwards events to the Bubble Tea program; each task goes through `runTaskStream`, which runs `claude --print --output-format stream-json --verbose --dangerously-skip-permissions` and writes nothing to gralph's own stdout or stderr.
+- **Plain mode** — `--dry-run`, `--no-tui`, or stdin or stdout not a terminal. `looper.Start` runs the loop with a nil `report` hook; each task goes through `runTaskPlain`, which runs `claude --print <session flags>`, echoes the combined prompt, tees claude's stdout, and inherits its stderr.
+- **TUI mode** — otherwise. `tui.Run` runs `looper.Run` in a goroutine with a `report` hook that forwards events to the Bubble Tea program; each task goes through `runTaskStream`, which runs `claude --print --output-format stream-json --verbose <session flags>` and writes nothing to gralph's own stdout or stderr.
 
 ```mermaid
 graph TB
     CLI["cmd/main<br/>(mode selection)"]
+    Settings["sandbox settings file<br/>(--sandbox-settings)"] -->|read once: SandboxArgs| CLI
     CLI -->|plain: Start, DryRun| Looper["internal/looper<br/>(Run → runLoop)"]
     CLI -->|terminal: Setup, Run| TUI["internal/tui<br/>(SetupModel, Model)"]
     TUI -->|Run with report hook| Looper
@@ -33,8 +41,8 @@ graph TB
     Looper -->|reads| Prompt["prompt.md"]
     Looper -->|reads/writes| TaskFile["tasks.yaml"]
     Looper -->|ParseTasks| TaskParser["internal/tasks"]
-    Looper -->|plain: runTaskPlain| ClaudePlain["claude --print<br/>--dangerously-skip-permissions"]
-    Looper -->|TUI: runTaskStream| ClaudeStream["claude --print<br/>--output-format stream-json --verbose<br/>--dangerously-skip-permissions"]
+    Looper -->|plain: runTaskPlain| ClaudePlain["claude --print<br/>session flags"]
+    Looper -->|TUI: runTaskStream| ClaudeStream["claude --print<br/>--output-format stream-json --verbose<br/>session flags"]
     ClaudePlain -->|stdout| ResultParser["internal/looper<br/>(lastResultLine, outcome)"]
     ClaudeStream -->|stream-json events| StreamParser["internal/looper<br/>(parseStreamLine)"]
     StreamParser -->|result event text| ResultParser
@@ -49,9 +57,10 @@ graph TB
 ### CLI Entrypoint (cmd/main)
 
 **Responsibilities:**
-- Parse command-line flags (--prompt, --tasks, --dry-run, --no-tui, --gate-timeout, --install-skill, --version)
+- Parse command-line flags (--prompt, --tasks, --sandbox-settings, --skip-permissions, --dry-run, --no-tui, --gate-timeout, --install-skill, --version)
 - Validate `--gate-timeout` (if set) before any load or run; bad value exits 1
 - Choose the mode: plain when `--dry-run`, `--no-tui`, or stdin or stdout is not a terminal (`github.com/charmbracelet/x/term`); otherwise the TUI
+- Pick the session flags (`validateSessionFlags`/`sessionArgs`), after the `--gate-timeout` check and plain mode's required flags and before the skill check: `looper.SandboxArgs` for `--sandbox-settings`, `looper.BypassArgs` for `--skip-permissions`. Both flags together, or neither on a real run, exits 1; an empty `--sandbox-settings=` counts as not passed. A dry run needs neither, but a settings file it is given is still checked. The result goes to `looper.Start` and `tui.Run`
 - Plain mode: validate required flags and `--gate-timeout`, then route to `looper.Start` (normal run) or `looper.DryRun` (validation only)
 - TUI mode: load the given paths with `looper.LoadPrompt`/`looper.LoadTasksReport` (a failed task prints the `PrintTasks` table and exits 1, as in plain mode), run `tui.Setup` for any missing path, then `tui.Run`, and print the one-line summary after the view closes
 - Set up context with signal handling (SIGINT, SIGTERM)
@@ -94,8 +103,10 @@ graph TB
 - Iterate pending tasks in file order (`Run` → `runLoop`)
 - Combine shared prompt with each task
 - Run each task on one of two paths, picked by the `report` hook:
-  - `report == nil` → `runTaskPlain`: spawn `claude --print --dangerously-skip-permissions` in a process group, echo the combined prompt, tee claude's stdout, inherit stderr
-  - `report != nil` → `runTaskStream`: spawn `claude --print --output-format stream-json --verbose --dangerously-skip-permissions` in a process group, write nothing to gralph's stdout/stderr, report `TaskStarted`, `Activity` (parsed stdout events and raw stderr lines), and `TaskFinished` events, then `RunDone` from `Run`
+  - `report == nil` → `runTaskPlain`: spawn `claude --print <session flags>` in a process group, echo the combined prompt, tee claude's stdout, inherit stderr
+  - `report != nil` → `runTaskStream`: spawn `claude --print --output-format stream-json --verbose <session flags>` in a process group, write nothing to gralph's stdout/stderr, report `TaskStarted`, `Activity` (parsed stdout events and raw stderr lines), and `TaskFinished` events, then `RunDone` from `Run`
+- Build every claude command in `claudeCmd`: `--print`, then the stream flags on the TUI path, then the `sessionArgs` it was handed
+- Build the session flags (`sandbox.go`): `SandboxArgs` reads the settings file, forces `sandbox.enabled: true`, `sandbox.allowUnsandboxedCommands: false`, and `sandbox.failIfUnavailable: true`, keeps every other key as raw JSON, and returns `--permission-mode acceptEdits --settings <merged JSON>`; `BypassArgs` returns `--dangerously-skip-permissions`
 - Capture output, parse result line, determine the session's outcome
 - After a `completed` session, run the task's gates (`runGates`); a failing gate makes the task `failed`
 - Update task state and save atomically
@@ -107,7 +118,7 @@ graph TB
 | Characteristic      | Value                                   |
 | ------------------- | --------------------------------------- |
 | Language            | Go 1.27.1+                              |
-| Core Function       | `Run(ctx, prompt, tl, tasksFile, report)` runs the loop; `Start(ctx, promptFile, tasksFile)` is plain mode's load + `Run(..., nil)` |
+| Core Function       | `Run(ctx, prompt, tl, tasksFile, gateTimeout, sessionArgs, report)` runs the loop; `Start(ctx, promptFile, tasksFile, gateTimeout, sessionArgs)` is plain mode's load + `Run(..., nil)` |
 | Scaling Model       | Sequential tasks; on the TUI path stdout and stderr are read concurrently, so `report` may be called from more than one goroutine |
 | Communication       | Reads files, spawns subprocess, reads stdout (plain text or stream-json) |
 | UI dependency       | None; never imports `internal/tui` or Bubble Tea |
@@ -216,8 +227,11 @@ sequenceDiagram
     participant Gates
     participant Filesystem
 
-    User->>CLI: gralph -p prompt.md -t tasks.yaml
-    CLI->>Looper: Start(ctx, prompt.md, tasks.yaml)
+    User->>CLI: gralph -p prompt.md -t tasks.yaml --sandbox-settings sandbox.json
+    CLI->>Looper: SandboxArgs(sandbox.json)
+    Looper->>Filesystem: read sandbox.json
+    Looper-->>CLI: session flags
+    CLI->>Looper: Start(ctx, prompt.md, tasks.yaml, gateTimeout, sessionArgs)
     Looper->>Filesystem: read prompt.md
     Looper->>Filesystem: read tasks.yaml
     Looper->>TaskParser: ParseTasks(yaml bytes)
@@ -261,7 +275,7 @@ sequenceDiagram
         TUI->>Looper: LoadTasks / LoadPrompt on each entry
         TUI-->>CLI: paths, prompt, task list
     end
-    CLI->>TUI: Run(ctx, prompt, tl, tasksFile)
+    CLI->>TUI: Run(ctx, prompt, tl, tasksFile, gateTimeout, sessionArgs)
     TUI->>Looper: Run(runCtx, ..., report) in a goroutine
     loop For each pending task
         Looper-->>TUI: TaskStarted
@@ -292,8 +306,8 @@ sequenceDiagram
     participant Looper
     participant Filesystem
 
-    User->>CLI: gralph -p prompt.md -t tasks.yaml
-    CLI->>Looper: Start(ctx, prompt.md, tasks.yaml)
+    User->>CLI: gralph -p prompt.md -t tasks.yaml --skip-permissions
+    CLI->>Looper: Start(ctx, prompt.md, tasks.yaml, gateTimeout, sessionArgs)
     Looper->>Filesystem: read tasks.yaml
     Looper->>Looper: ParseTasks
     Looper->>Looper: scan for failed tasks
@@ -313,7 +327,7 @@ sequenceDiagram
 | CLI         | Looper          | Direct function call             | Plain start or dry-run; load paths for the TUI | Go function args |
 | CLI         | TUI             | Direct function call             | Setup screen and run view                  | Go function args   |
 | TUI         | Looper          | `Run` with `report` hook         | Run the loop, receive progress             | `looper.Event`     |
-| Looper      | Filesystem      | os.ReadFile, os.WriteFile        | Load inputs, persist state                 | Text files (YAML)  |
+| Looper      | Filesystem      | os.ReadFile, os.WriteFile        | Load inputs, persist state                 | Text files (YAML); the sandbox settings file (JSON, read only) |
 | Looper      | TaskParser      | ParseTasks, SaveTasks functions  | Parse and serialize task lists             | YAML bytes         |
 | Looper      | Claude          | os/exec.Cmd, stdin/stdout/stderr | Invoke Claude session                      | Text (prompt)      |
 | Claude      | Looper          | stdout, exit code                | Return output and completion status        | Plain: text ending in a JSON result line; TUI: stream-json events, the `result` event's text ending in it |
@@ -326,18 +340,22 @@ sequenceDiagram
 
 Gralph reads the prompt and task files. Both must be treated as user-provided code: they are executed by Claude, and each task's `gates` commands are run by gralph itself through `sh -c`. Gralph does not sanitize or sandbox them; the user is responsible for not running gralph against untrusted prompts or task files.
 
+The sandbox settings file (`--sandbox-settings`, ADR-014) is a third input. Gralph reads it once at startup and never writes it. It must hold a JSON object; gralph forces `sandbox.enabled: true`, `sandbox.allowUnsandboxedCommands: false`, and `sandbox.failIfUnavailable: true` on top and passes every other key to Claude untouched, so the file cannot turn the sandbox off, but whatever else it opens up is opened. The sandbox limits what a session's shell commands can read, write, and reach; it does not cover gates. With `--skip-permissions` there is no settings file and no limit on the session.
+
 ```mermaid
 graph LR
     subgraph TrustZone["Trust Zone: Gralph User"]
         Gralph["gralph process"]
         PromptFile["prompt.md"]
         TaskFile["tasks.yaml"]
+        SettingsFile["sandbox settings file"]
     end
     subgraph External["Untrusted External"]
         Claude["claude --print"]
     end
     Gralph -->|reads| PromptFile
     Gralph -->|reads/writes| TaskFile
+    Gralph -->|reads once| SettingsFile
     Gralph -->|executes|Claude
     Claude -->|returns result| Gralph
 ```
@@ -347,8 +365,9 @@ graph LR
 | Boundary                              | What Crosses        | Rules                                                      |
 | ------------------------------------- | ------------------- | ---------------------------------------------------------- |
 | Gralph → Filesystem (read)            | Prompt, task files  | Files must be readable; content is not sanitized           |
+| Gralph → Filesystem (read)            | Sandbox settings file | Read once at startup, never written; must be a JSON object; three sandbox keys forced, the rest passed through |
 | Gralph ← Filesystem (write)           | Task state          | Atomic writes; temp-file + rename ensures consistency      |
-| Gralph → Claude (subprocess)          | Combined prompt     | Passed on stdin; fixed argv per mode: plain `--print --dangerously-skip-permissions`, TUI adds `--output-format stream-json --verbose` |
+| Gralph → Claude (subprocess)          | Combined prompt     | Passed on stdin; argv is `--print`, then `--output-format stream-json --verbose` in the TUI, then the session flags: `--permission-mode acceptEdits --settings <merged JSON>` (`--sandbox-settings`) or `--dangerously-skip-permissions` (`--skip-permissions`) |
 | Gralph → Gate command (subprocess)    | `cmd` text from tasks.yaml | Run as `sh -c <cmd>` in gralph's working directory, unsandboxed; only the exit code is used |
 | Claude → Gralph (subprocess output)   | Stdout, stderr, exit code | Parsed for JSON result line; plain mode passes all other output through, the TUI shows it as activity only |
 
