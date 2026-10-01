@@ -44,7 +44,8 @@ func Install() (string, error) {
 	}
 
 	stamp := version.Version() + "\n" + hash + "\n"
-	if err := os.WriteFile(filepath.Join(dest, "VERSION"), []byte(stamp), 0o600); err != nil {
+	versionPath := filepath.Join(dest, "VERSION")
+	if err := os.WriteFile(versionPath, []byte(stamp), 0o600); err != nil {
 		return "", err
 	}
 
@@ -86,7 +87,8 @@ func Hash() (string, error) {
 		return "", err
 	}
 
-	return "sha256:" + hex.EncodeToString(h.Sum(nil)), nil
+	sum := h.Sum(nil)
+	return "sha256:" + hex.EncodeToString(sum), nil
 }
 
 // hashInto returns a WalkDirFunc that writes each embedded skill file's
@@ -103,7 +105,8 @@ func hashInto(h hash.Hash) fs.WalkDirFunc {
 			return err
 		}
 
-		h.Write([]byte(strings.TrimPrefix(path, skillName+"/")))
+		rel := strings.TrimPrefix(path, skillName+"/")
+		h.Write([]byte(rel))
 		h.Write(data)
 		return nil
 	}
@@ -132,7 +135,8 @@ func Check() error {
 	}
 
 	installedBy := "unknown"
-	if data, err := fs.ReadFile(os.DirFS(dest), "VERSION"); err == nil {
+	installed := os.DirFS(dest)
+	if data, err := fs.ReadFile(installed, "VERSION"); err == nil {
 		lines := strings.Split(string(data), "\n")
 		if lines[0] != "" {
 			installedBy = lines[0]
@@ -143,5 +147,6 @@ func Check() error {
 		}
 	}
 
-	return fmt.Errorf("the gralph-docs-writer skill is outdated (installed by %s, this is gralph %s).\nRun: gralph --install-skill", installedBy, version.Version())
+	current := version.Version()
+	return fmt.Errorf("the gralph-docs-writer skill is outdated (installed by %s, this is gralph %s).\nRun: gralph --install-skill", installedBy, current)
 }
