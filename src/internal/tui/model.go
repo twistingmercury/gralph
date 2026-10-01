@@ -91,106 +91,165 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.layout(msg.Width, msg.Height)
 	case interruptedMsg:
-		if m.done {
-			return m, tea.Quit
-		}
-
-		m.confirming = false
-		m.stopBy = "signal"
-		m.legend.SetContent(legend)
+		return m.handleInterrupt()
 	case tea.KeyPressMsg:
-		k := msg.String()
-		if m.confirming {
-			m.confirming = false
-			m.legend.SetContent(legend)
-			if k == "y" {
-				m.cancel()
-				m.stopBy = "user"
-			}
-
-			return m, nil
-		}
-
-		if k == "q" || k == "ctrl+c" {
-			if m.done {
-				return m, tea.Quit
-			}
-
-			if m.stopBy == "" {
-				m.confirming = true
-				m.legend.SetContent(stopPrompt)
-			}
-
-			return m, nil
-		}
-
-		panes := m.panes()
-		vp := panes[m.focus]
-		switch k {
-		case "tab":
-			m.focus = (m.focus + 1) % len(panes)
-		case "up":
-			vp.ScrollUp(1)
-		case "down":
-			vp.ScrollDown(1)
-		case "pgup":
-			vp.PageUp()
-		case "pgdown":
-			vp.PageDown()
-		}
+		return m.handleKey(msg)
 	case looper.Event:
-		switch msg.Kind {
-		case looper.TaskStarted:
-			m.setState(msg.Task.ID, inProgressState)
-			taskText := msg.Task.String()
-			m.prompt.SetContent(taskText)
-			m.prompt.GotoTop()
-			m.output = []string{fmt.Sprintf("task %d: %s", msg.Task.ID, msg.Task.Name)}
-			m.outPane.SetContentLines(m.output)
-			m.outPane.GotoTop()
-		case looper.Activity:
-			follow := m.outPane.AtBottom()
-			m.output = append(m.output, msg.Line)
-			m.outPane.SetContentLines(m.output)
-			if follow {
-				m.outPane.GotoBottom()
-			}
-		case looper.TaskFinished:
-			m.setState(msg.Task.ID, msg.Task.State)
-			m.failed = ""
-			if msg.Task.State == tasks.FailedState {
-				m.failed = fmt.Sprintf("Task %d failed: %s", msg.Task.ID, msg.Task.Error)
-			}
-		case looper.RunDone:
-			m.confirming = false
-			if m.stopBy != "" {
-				for _, t := range m.tasks {
-					if t.State == inProgressState {
-						m.setState(t.ID, tasks.PendingState)
-					}
-				}
-				m.exitCode = 1
-				return m, tea.Quit
-			}
-
-			m.done = true
-			switch {
-			case msg.Err == nil:
-				m.status = "All tasks completed"
-			case m.failed != "":
-				m.status = m.failed
-			default:
-				m.status = "Run stopped: " + msg.Err.Error()
-			}
-			if msg.Err != nil {
-				m.exitCode = 1
-			}
-
-			m.legend.SetContent(m.status + " · " + legend)
-			m.renderTasks()
-		}
+		return m.handleEvent(msg)
 	}
 	return m, nil
+}
+
+func (m Model) handleInterrupt() (tea.Model, tea.Cmd) {
+	if m.done {
+		return m, tea.Quit
+	}
+
+	m.confirming = false
+	m.stopBy = "signal"
+	m.legend.SetContent(legend)
+	return m, nil
+}
+
+func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	k := msg.String()
+	if m.confirming {
+		return m.answerStopPrompt(k)
+	}
+
+	if k == "q" || k == "ctrl+c" {
+		return m.handleQuitKey()
+	}
+
+	m.navigate(k)
+	return m, nil
+}
+
+// answerStopPrompt closes the stop confirmation; only "y" stops the run.
+func (m Model) answerStopPrompt(k string) (tea.Model, tea.Cmd) {
+	m.confirming = false
+	m.legend.SetContent(legend)
+	if k == "y" {
+		m.cancel()
+		m.stopBy = "user"
+	}
+
+	return m, nil
+}
+
+// handleQuitKey quits a finished run at once; a running one is asked about
+// first, unless a stop is already under way.
+func (m Model) handleQuitKey() (tea.Model, tea.Cmd) {
+	if m.done {
+		return m, tea.Quit
+	}
+
+	if m.stopBy == "" {
+		m.confirming = true
+		m.legend.SetContent(stopPrompt)
+	}
+
+	return m, nil
+}
+
+func (m *Model) navigate(k string) {
+	panes := m.panes()
+	vp := panes[m.focus]
+	switch k {
+	case "tab":
+		m.focus = (m.focus + 1) % len(panes)
+	case "up":
+		vp.ScrollUp(1)
+	case "down":
+		vp.ScrollDown(1)
+	case "pgup":
+		vp.PageUp()
+	case "pgdown":
+		vp.PageDown()
+	}
+}
+
+func (m Model) handleEvent(ev looper.Event) (tea.Model, tea.Cmd) {
+	switch ev.Kind {
+	case looper.TaskStarted:
+		m.taskStarted(ev)
+	case looper.Activity:
+		m.activity(ev)
+	case looper.TaskFinished:
+		m.taskFinished(ev)
+	case looper.RunDone:
+		return m.runDone(ev)
+	}
+	return m, nil
+}
+
+func (m *Model) taskStarted(ev looper.Event) {
+	m.setState(ev.Task.ID, inProgressState)
+	taskText := ev.Task.String()
+	m.prompt.SetContent(taskText)
+	m.prompt.GotoTop()
+	m.output = []string{fmt.Sprintf("task %d: %s", ev.Task.ID, ev.Task.Name)}
+	m.outPane.SetContentLines(m.output)
+	m.outPane.GotoTop()
+}
+
+func (m *Model) activity(ev looper.Event) {
+	follow := m.outPane.AtBottom()
+	m.output = append(m.output, ev.Line)
+	m.outPane.SetContentLines(m.output)
+	if follow {
+		m.outPane.GotoBottom()
+	}
+}
+
+func (m *Model) taskFinished(ev looper.Event) {
+	m.setState(ev.Task.ID, ev.Task.State)
+	m.failed = ""
+	if ev.Task.State == tasks.FailedState {
+		m.failed = fmt.Sprintf("Task %d failed: %s", ev.Task.ID, ev.Task.Error)
+	}
+}
+
+func (m Model) runDone(ev looper.Event) (tea.Model, tea.Cmd) {
+	m.confirming = false
+	if m.stopBy != "" {
+		m.resetInProgress()
+		m.exitCode = 1
+		return m, tea.Quit
+	}
+
+	m.done = true
+	m.status = m.doneStatus(ev.Err)
+	if ev.Err != nil {
+		m.exitCode = 1
+	}
+
+	m.legend.SetContent(m.status + " · " + legend)
+	m.renderTasks()
+	return m, nil
+}
+
+// resetInProgress puts a stopped run's task back to pending on screen, which
+// is what its state in the file still is.
+func (m *Model) resetInProgress() {
+	for _, t := range m.tasks {
+		if t.State == inProgressState {
+			m.setState(t.ID, tasks.PendingState)
+		}
+	}
+}
+
+// doneStatus prefers the failed task's own message over the run error.
+func (m *Model) doneStatus(err error) string {
+	if err == nil {
+		return "All tasks completed"
+	}
+
+	if m.failed != "" {
+		return m.failed
+	}
+
+	return "Run stopped: " + err.Error()
 }
 
 // ExitCode is the exit code for the run: 0 only when it finished with no error.
