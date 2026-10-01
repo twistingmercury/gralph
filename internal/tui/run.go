@@ -12,7 +12,7 @@ import (
 // Run runs the loop over tl inside the run view and returns the run's exit
 // code and one-line summary. ctx is the outside SIGINT/SIGTERM context. opts
 // are extra program options, for tests.
-func Run(ctx context.Context, prompt string, tl *tasks.TaskList, tasksFile string, opts ...tea.ProgramOption) (exitCode int, summary string, err error) {
+func Run(ctx context.Context, prompt string, tl *tasks.TaskList, tasksFile, gateTimeout string, opts ...tea.ProgramOption) (exitCode int, summary string, err error) {
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -21,7 +21,7 @@ func Run(ctx context.Context, prompt string, tl *tasks.TaskList, tasksFile strin
 	loopDone, progDone := make(chan struct{}), make(chan struct{})
 	go func() {
 		defer close(loopDone)
-		_ = looper.Run(runCtx, prompt, tl, tasksFile, func(e looper.Event) { p.Send(e) })
+		_ = looper.Run(runCtx, prompt, tl, tasksFile, gateTimeout, func(e looper.Event) { p.Send(e) })
 	}()
 	go func() {
 		select {

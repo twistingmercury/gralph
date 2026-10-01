@@ -1,8 +1,8 @@
 # Gralph — System Architecture
 
-> **Version**: v06
+> **Version**: v07
 > **Date**: 2026-09-30
-> **Notes**: Added the gate runner (ADR-013): per-task `gates` commands run by gralph after a `completed` session, on both task paths.
+> **Notes**: Added per-gate `timeout` to ADR-013: each gate runs under a timeout (flag > gate value > 10m default); `--gate-timeout` flag overrides all gates at run time.
 
 [Back to Overview](00_overview.md) | [Back to Project README](../../README.md)
 
@@ -49,9 +49,10 @@ graph TB
 ### CLI Entrypoint (cmd/main)
 
 **Responsibilities:**
-- Parse command-line flags (--prompt, --tasks, --dry-run, --no-tui, --install-skill, --version)
+- Parse command-line flags (--prompt, --tasks, --dry-run, --no-tui, --gate-timeout, --install-skill, --version)
+- Validate `--gate-timeout` (if set) before any load or run; bad value exits 1
 - Choose the mode: plain when `--dry-run`, `--no-tui`, or stdin or stdout is not a terminal (`github.com/charmbracelet/x/term`); otherwise the TUI
-- Plain mode: validate required flags, then route to `looper.Start` (normal run) or `looper.DryRun` (validation only)
+- Plain mode: validate required flags and `--gate-timeout`, then route to `looper.Start` (normal run) or `looper.DryRun` (validation only)
 - TUI mode: load the given paths with `looper.LoadPrompt`/`looper.LoadTasksReport` (a failed task prints the `PrintTasks` table and exits 1, as in plain mode), run `tui.Setup` for any missing path, then `tui.Run`, and print the one-line summary after the view closes
 - Set up context with signal handling (SIGINT, SIGTERM)
 - Exit with appropriate code (0 on success, 1 on error); a Bubble Tea error exits 1 with a hint to rerun with `--no-tui`
@@ -195,11 +196,11 @@ graph TB
 
 | Characteristic      | Value                                   |
 | ------------------- | --------------------------------------- |
-| Input               | The task's `Gates` (`[]tasks.Gate`, each a `Cmd` string) |
+| Input               | The task's `Gates` (`[]tasks.Gate`, each with `Cmd` string and optional `Timeout` duration) |
 | Output              | Nothing on success; the failed gate's error message; or a cancellation error |
 | Judged by           | Exit code only; output is shown, never parsed |
 | Seen by Claude      | Never; gates are not part of the stdin prompt |
-| Timeout / retry     | None                                    |
+| Timeout / retry     | Always a timeout: `--gate-timeout` if passed, else the gate's `timeout`, else 10m. No retry |
 
 ## Data Flow
 

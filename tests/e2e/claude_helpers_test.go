@@ -287,7 +287,8 @@ func waitForFile(t *testing.T, path string, timeout time.Duration) []byte {
 // re-marshals the whole file on every write-back (comments/formatting are
 // not preserved and every task gets an explicit state key).
 type gateFixture struct {
-	Cmd string `yaml:"cmd"`
+	Cmd     string `yaml:"cmd"`
+	Timeout string `yaml:"timeout,omitempty"`
 }
 
 type taskFixture struct {

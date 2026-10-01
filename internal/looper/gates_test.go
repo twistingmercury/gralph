@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -34,7 +35,7 @@ func TestRunLoop_GatesPassCompletesTask(t *testing.T) {
 	gates := []tasks.Gate{touchGate(first), {Cmd: "test -e '" + first + "' && touch '" + second + "'"}}
 	tl := gatedTask(gates...)
 
-	require.NoError(t, runLoop(context.Background(), "prompt", tl, tasksPath, nil))
+	require.NoError(t, runLoop(context.Background(), "prompt", tl, tasksPath, "", nil))
 
 	assert.FileExists(t, first)
 	assert.FileExists(t, second)
@@ -60,7 +61,7 @@ func TestRunLoop_GateFailureFailsTaskAndStopsRun(t *testing.T) {
 	}}
 
 	const wantErr = `gate "test \"a\" = \"b\"" failed: exit status 1`
-	err := runLoop(context.Background(), "prompt", tl, tasksPath, nil)
+	err := runLoop(context.Background(), "prompt", tl, tasksPath, "", nil)
 	require.EqualError(t, err, "task 1: First failed: "+wantErr)
 
 	assert.NoFileExists(t, never, "gates after a failed gate must not run")
@@ -90,7 +91,7 @@ func TestRunLoop_GatesSkippedWhenSessionFails(t *testing.T) {
 			dir := t.TempDir()
 			marker := filepath.Join(dir, "gate-ran")
 
-			err := runLoop(context.Background(), "prompt", gatedTask(touchGate(marker)), filepath.Join(dir, "tasks.yaml"), nil)
+			err := runLoop(context.Background(), "prompt", gatedTask(touchGate(marker)), filepath.Join(dir, "tasks.yaml"), "", nil)
 			require.Error(t, err)
 			assert.ErrorContains(t, err, tt.wantErr)
 			assert.NotContains(t, err.Error(), "gate")
@@ -106,7 +107,7 @@ func TestRunLoop_GatesNeverReachClaude(t *testing.T) {
 	t.Setenv("FAKE_CLAUDE_RECORD", recordPath)
 
 	tl := gatedTask(tasks.Gate{Cmd: "true # gate-only-text"})
-	require.NoError(t, runLoop(context.Background(), "prompt", tl, filepath.Join(dir, "tasks.yaml"), nil))
+	require.NoError(t, runLoop(context.Background(), "prompt", tl, filepath.Join(dir, "tasks.yaml"), "", nil))
 
 	records := readFakeClaudeRecords(t, recordPath)
 	require.Len(t, records, 1)
@@ -132,7 +133,7 @@ func TestRunLoop_GateShellBehavior(t *testing.T) {
 			useFakeClaude(t)
 			tasksPath := filepath.Join(t.TempDir(), "tasks.yaml")
 
-			err := runLoop(context.Background(), "prompt", gatedTask(tasks.Gate{Cmd: tt.cmd}), tasksPath, nil)
+			err := runLoop(context.Background(), "prompt", gatedTask(tasks.Gate{Cmd: tt.cmd}), tasksPath, "", nil)
 			saved := readSavedTasks(t, tasksPath)
 			require.Len(t, saved.Tasks, 1)
 
@@ -158,7 +159,7 @@ func TestRunLoop_PlainPrintsGateLineAndOutput(t *testing.T) {
 	require.NoError(t, err)
 	os.Stdout = w
 
-	runErr := runLoop(context.Background(), "prompt", gatedTask(tasks.Gate{Cmd: "echo gate-says-hi"}), tasksPath, nil)
+	runErr := runLoop(context.Background(), "prompt", gatedTask(tasks.Gate{Cmd: "echo gate-says-hi"}), tasksPath, "", nil)
 
 	require.NoError(t, w.Close())
 	os.Stdout = origStdout
@@ -188,7 +189,7 @@ func TestRun_GateOutputArrivesAsActivity(t *testing.T) {
 
 	var rec recorder
 	tl := gatedTask(tasks.Gate{Cmd: "echo from-stdout\necho from-stderr >&2"})
-	runErr := Run(context.Background(), "prompt", tl, tasksPath, rec.report)
+	runErr := Run(context.Background(), "prompt", tl, tasksPath, "", rec.report)
 	os.Stdout = orig
 	require.NoError(t, w.Close())
 	require.NoError(t, runErr)
@@ -210,7 +211,7 @@ func TestRun_GateFailureReportsFailedTask(t *testing.T) {
 	tasksPath := filepath.Join(t.TempDir(), "tasks.yaml")
 
 	var rec recorder
-	err := Run(context.Background(), "prompt", gatedTask(tasks.Gate{Cmd: "exit 3"}), tasksPath, rec.report)
+	err := Run(context.Background(), "prompt", gatedTask(tasks.Gate{Cmd: "exit 3"}), tasksPath, "", rec.report)
 	require.Error(t, err)
 
 	var finished []Event
@@ -228,19 +229,22 @@ func TestRun_GateFailureReportsFailedTask(t *testing.T) {
 
 func TestRun_CancelDuringGateLeavesFileUntouched(t *testing.T) {
 	tests := []struct {
-		name   string
-		stream bool
+		name    string
+		stream  bool
+		timeout string
 	}{
 		{name: "plain"},
 		{name: "stream", stream: true},
+		{name: "plain with timeout", timeout: "30s"},
+		{name: "stream with timeout", stream: true, timeout: "30s"},
 	}
 
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) { cancelDuringGate(t, tt.stream) })
+		t.Run(tt.name, func(t *testing.T) { cancelDuringGate(t, tt.stream, tt.timeout) })
 	}
 }
 
-func cancelDuringGate(t *testing.T, stream bool) {
+func cancelDuringGate(t *testing.T, stream bool, timeout string) {
 	useFakeClaude(t)
 	dir := t.TempDir()
 	readyPath := filepath.Join(dir, "ready")
@@ -248,7 +252,7 @@ func cancelDuringGate(t *testing.T, stream bool) {
 
 	tasksYAML := "tasks:\n  - {id: 1, name: First, prompt: p1, state: pending}\n"
 	require.NoError(t, os.WriteFile(tasksPath, []byte(tasksYAML), 0o600))
-	tl := gatedTask(tasks.Gate{Cmd: "touch '" + readyPath + "'; sleep 60"})
+	tl := gatedTask(tasks.Gate{Cmd: "touch '" + readyPath + "'; sleep 60", Timeout: timeout})
 
 	var rec recorder
 	var report func(Event)
@@ -260,7 +264,7 @@ func cancelDuringGate(t *testing.T, stream bool) {
 	t.Cleanup(cancel)
 
 	errCh := make(chan error, 1)
-	go func() { errCh <- Run(ctx, "prompt", tl, tasksPath, report) }()
+	go func() { errCh <- Run(ctx, "prompt", tl, tasksPath, "", report) }()
 
 	require.Eventually(t, func() bool {
 		_, err := os.Stat(readyPath)
@@ -281,4 +285,174 @@ func cancelDuringGate(t *testing.T, stream bool) {
 	got, err := os.ReadFile(tasksPath)
 	require.NoError(t, err)
 	assert.Equal(t, tasksYAML, string(got), "the tasks file must be byte-for-byte unchanged after a cancel during a gate")
+}
+
+func TestRun_GateTimeoutFailsTaskAndSkipsLaterGates(t *testing.T) {
+	tests := []struct {
+		name   string
+		stream bool
+	}{
+		{name: "plain"},
+		{name: "stream", stream: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			useFakeClaude(t)
+			dir := t.TempDir()
+			tasksPath := filepath.Join(dir, "tasks.yaml")
+			never := filepath.Join(dir, "never")
+
+			tl := gatedTask(tasks.Gate{Cmd: "sleep 30", Timeout: "100ms"}, touchGate(never))
+
+			var rec recorder
+			var report func(Event)
+			if tt.stream {
+				report = rec.report
+			}
+
+			const wantErr = `gate "sleep 30" timed out after 100ms`
+			start := time.Now()
+			err := Run(context.Background(), "prompt", tl, tasksPath, "", report)
+
+			require.EqualError(t, err, "task 1: First failed: "+wantErr)
+			assert.Less(t, time.Since(start), 10*time.Second, "the deadline must kill the gate, not wait out its sleep")
+			assert.NoFileExists(t, never, "gates after a timed-out gate must not run")
+
+			saved := readSavedTasks(t, tasksPath)
+			require.Len(t, saved.Tasks, 1)
+			assert.Equal(t, tasks.FailedState, saved.Tasks[0].State)
+			assert.Equal(t, wantErr, saved.Tasks[0].Error)
+		})
+	}
+}
+
+func TestRun_GateWithinTimeoutPasses(t *testing.T) {
+	tests := []struct {
+		name   string
+		stream bool
+	}{
+		{name: "plain"},
+		{name: "stream", stream: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			useFakeClaude(t)
+			dir := t.TempDir()
+			tasksPath := filepath.Join(dir, "tasks.yaml")
+			marker := filepath.Join(dir, "second")
+
+			tl := gatedTask(tasks.Gate{Cmd: "true", Timeout: "30s"}, touchGate(marker))
+
+			var rec recorder
+			var report func(Event)
+			if tt.stream {
+				report = rec.report
+			}
+
+			require.NoError(t, Run(context.Background(), "prompt", tl, tasksPath, "", report))
+			assert.FileExists(t, marker)
+
+			saved := readSavedTasks(t, tasksPath)
+			require.Len(t, saved.Tasks, 1)
+			assert.Equal(t, tasks.CompletedState, saved.Tasks[0].State)
+			assert.Equal(t, tl.Tasks[0].Gates, saved.Tasks[0].Gates, "timeout must survive the save as written")
+		})
+	}
+}
+
+func TestRun_GateTimeoutThatCannotBeParsedFailsTheGate(t *testing.T) {
+	useFakeClaude(t)
+	tasksPath := filepath.Join(t.TempDir(), "tasks.yaml")
+
+	err := Run(context.Background(), "prompt", gatedTask(tasks.Gate{Cmd: "true", Timeout: "soon"}), tasksPath, "", nil)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, `gate "true" failed:`)
+	assert.ErrorContains(t, err, "must be a duration string such as 90s or 10m")
+}
+
+func TestGateLimit_FlagBeatsGateBeatsDefault(t *testing.T) {
+	tests := []struct {
+		name       string
+		gate       tasks.Gate
+		override   string
+		wantLimit  string
+		wantSource string
+	}{
+		{name: "flag beats a gate's own timeout", gate: tasks.Gate{Cmd: "x", Timeout: "30s"}, override: "2m", wantLimit: "2m", wantSource: "flag"},
+		{name: "flag beats the default", gate: tasks.Gate{Cmd: "x"}, override: "90s", wantLimit: "90s", wantSource: "flag"},
+		{name: "gate beats the default", gate: tasks.Gate{Cmd: "x", Timeout: "30s"}, wantLimit: "30s", wantSource: "gate"},
+		{name: "default when neither is set", gate: tasks.Gate{Cmd: "x"}, wantLimit: defaultGateTimeout, wantSource: "default"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			limit, source := gateLimit(tt.gate, tt.override)
+			assert.Equal(t, tt.wantLimit, limit)
+			assert.Equal(t, tt.wantSource, source)
+		})
+	}
+}
+
+func TestGateLimit_DefaultIsTenMinutes(t *testing.T) {
+	assert.Equal(t, "10m", defaultGateTimeout)
+}
+
+func TestGateFailure_TimedOutNamesTheLimitThatApplied(t *testing.T) {
+	gate := tasks.Gate{Cmd: "sleep 30", Timeout: "30s"}
+
+	assert.Equal(t, `gate "sleep 30" timed out after 10m`, gateFailure(gate, "10m", context.DeadlineExceeded))
+	assert.Equal(t, `gate "sleep 30" timed out after 2m`, gateFailure(gate, "2m", context.DeadlineExceeded))
+}
+
+func TestRun_GateTimeoutFlagOverridesTheGateTimeout(t *testing.T) {
+	tests := []struct {
+		name       string
+		stream     bool
+		gateLimit  string
+		override   string
+		wantSuffix string
+	}{
+		{name: "plain, flag cuts a longer gate timeout", gateLimit: "30s", override: "100ms", wantSuffix: "100ms"},
+		{name: "stream, flag cuts a longer gate timeout", stream: true, gateLimit: "30s", override: "100ms", wantSuffix: "100ms"},
+		{name: "plain, flag applies to a gate with no timeout", override: "100ms", wantSuffix: "100ms"},
+		{name: "stream, flag applies to a gate with no timeout", stream: true, override: "100ms", wantSuffix: "100ms"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			useFakeClaude(t)
+			tasksPath := filepath.Join(t.TempDir(), "tasks.yaml")
+			tl := gatedTask(tasks.Gate{Cmd: "sleep 30", Timeout: tt.gateLimit})
+
+			var rec recorder
+			var report func(Event)
+			if tt.stream {
+				report = rec.report
+			}
+
+			start := time.Now()
+			err := Run(context.Background(), "prompt", tl, tasksPath, tt.override, report)
+
+			require.EqualError(t, err, `task 1: First failed: gate "sleep 30" timed out after `+tt.wantSuffix)
+			assert.Less(t, time.Since(start), 10*time.Second, "the flag must cut the gate short")
+		})
+	}
+}
+
+func TestRun_GateTimeoutFlagIsNeverSaved(t *testing.T) {
+	useFakeClaude(t)
+	tasksPath := filepath.Join(t.TempDir(), "tasks.yaml")
+	tl := gatedTask(tasks.Gate{Cmd: "true", Timeout: "30s"}, tasks.Gate{Cmd: "true"})
+
+	require.NoError(t, Run(context.Background(), "prompt", tl, tasksPath, "45s", nil))
+
+	data, err := os.ReadFile(tasksPath)
+	require.NoError(t, err)
+	assert.Equal(t, 1, strings.Count(string(data), "timeout:"), "only the gate that had a timeout may carry the key")
+	assert.Contains(t, string(data), "timeout: 30s")
+	assert.NotContains(t, string(data), "45s", "the flag must not reach the tasks file")
+	assert.NotContains(t, string(data), "10m", "the default must not reach the tasks file")
+	assert.Equal(t, []tasks.Gate{{Cmd: "true", Timeout: "30s"}, {Cmd: "true"}}, readSavedTasks(t, tasksPath).Tasks[0].Gates)
 }

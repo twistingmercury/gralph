@@ -34,6 +34,7 @@ gralph --prompt path/to/prompt.md --tasks path/to/tasks.yaml
 | ------------------ | ----------------------------------------------------------------------- | ----------------------------------------------------------------------- |
 | `--prompt` / `-p`  | Yes, unless `--dry-run`; asked for when missing in the full-screen view | Path to the shared prompt sent to Claude for every task                 |
 | `--tasks` / `-t`   | Yes; asked for when missing in the full-screen view                     | Path to the YAML task list that drives the loop                         |
+| `--gate-timeout`   | No                                                                      | Time limit for every gate, like `90s`; overrides the task file's        |
 | `--dry-run`        | No                                                                      | Validate the task file and report on it without running anything        |
 | `--no-tui`         | No                                                                      | Use plain output instead of the full-screen view                        |
 | `--install-skill`  | No                                                                      | Install the bundled `gralph-docs-writer` skill for Claude Code and exit |
@@ -55,7 +56,11 @@ gralph -t tasks.yaml --dry-run
 This uses the same checks as a real run, but never launches Claude or writes
 anything. `--prompt` is ignored. If the file is invalid, you get the error on
 stderr and a non-zero exit. If it's valid, you get a table of each task's id,
-state, and name, followed by `<tasks path> is valid`, and exit zero.
+state, and name. If the file has gates, you then get one line per gate showing
+the timeout it would run under and where that came from (`flag`, `gate`, or
+`default`), like `task 1 gate: go test ./...: 10m (default)`. Pass
+`--gate-timeout` along with `--dry-run` to see what it would change. Last comes
+`<tasks path> is valid`, and exit zero.
 
 If any task is `failed` (a real run would refuse to start), the table comes
 after `Some tasks failed previous runs:` instead, and each failed row ends in
@@ -79,6 +84,7 @@ tasks:
       - Command: go test ./internal/widget/...
     gates:
       - cmd: go test ./internal/widget/...
+        timeout: 10m
   - id: 2
     name: Expose GET /widgets/{id}
     state: pending
@@ -90,7 +96,9 @@ tasks:
   it's read as `pending`.
 - Gralph adds an `error` field when a task fails. The session never writes it.
 - `gates` is a list of commands gralph runs itself once the task's session says
-  it's done (see [Gates](#gates)). Each entry has exactly one key, `cmd`.
+  it's done (see [Gates](#gates)). Each entry has `cmd` (required) and
+  `timeout` (optional, a duration like `90s` or `10m`; when omitted, the gate
+  uses the built-in default 10m, or `--gate-timeout` if that flag is set).
 - Tasks run in file order. The `id` just identifies a task; it doesn't set the
   order.
 
@@ -175,7 +183,15 @@ the Claude activity pane as `→ gate <cmd>` followed by its output.
 
 A few things to know:
 
-- There's no timeout. A gate that never exits hangs the run until you stop it.
+- Every gate runs under a timeout. The limit is determined by (in order): the
+  `--gate-timeout` flag if set, the gate's `timeout` value if present, or the
+  built-in default 10m. When a gate exceeds its timeout, gralph kills it,
+  marks the task `failed` with `gate "<cmd>" timed out after <timeout>`, skips
+  any remaining gates, and stops the run. If your task has slow but legitimate
+  gates, set `timeout` on them (or use `--gate-timeout` for the whole run).
+- If you have existing task files with no `timeout` set, they now get a 10m
+  limit per gate (previously they had no limit). Gates that legitimately run
+  longer need their own `timeout`.
 - Write gates that check instead of fix: `test -z "$(gofmt -l .)"`, not
   `gofmt -w .`. Nothing commits what a gate changes.
 - Resetting a gate-failed task to `pending` runs its whole session again, not

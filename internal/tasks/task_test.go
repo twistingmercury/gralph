@@ -3,7 +3,9 @@ package tasks
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -479,6 +481,27 @@ func TestParseTasks_ReadsGates(t *testing.T) {
 	assert.Empty(t, got.Tasks[2].Gates)
 }
 
+func TestParseTasks_ReadsGateTimeout(t *testing.T) {
+	yml := []byte(`tasks:
+  - id: 1
+    name: Gated
+    prompt: p
+    gates:
+      - cmd: go test ./...
+        timeout: 10m
+      - cmd: echo hi
+      - cmd: sleep 1
+        timeout: 1h30m
+`)
+
+	got, err := ParseTasks(yml)
+	require.NoError(t, err)
+	require.Len(t, got.Tasks, 1)
+
+	want := []Gate{{Cmd: "go test ./...", Timeout: "10m"}, {Cmd: "echo hi"}, {Cmd: "sleep 1", Timeout: "1h30m"}}
+	assert.Equal(t, want, got.Tasks[0].Gates, "timeout text must be stored as written")
+}
+
 func TestTaskString_OmitsGates(t *testing.T) {
 	task := Task{ID: 1, Name: "First task", Prompt: "Do it.", Gates: []Gate{{Cmd: "go test ./..."}}}
 	assert.Equal(t, "1: First task\n\nDo it.", task.String(), "gates are gralph's check and must never reach the session")
@@ -495,12 +518,21 @@ func TestParseTasks_GateErrors(t *testing.T) {
 		{name: "mapping gates", gates: "gates: {cmd: go test ./...}", wantErr: "tasks[0] (id 1): gates: must be a sequence"},
 		{name: "string element", gates: "gates: [go test ./...]", wantErr: "tasks[0] (id 1): gates[0]: must be a mapping"},
 		{name: "missing cmd", gates: "gates: [{}]", wantErr: "tasks[0] (id 1): gates[0]: cmd: is required"},
-		{name: "misspelled key", gates: "gates: [{command: a}]", wantErr: "tasks[0] (id 1): gates[0]: command: unknown key; a gate has only cmd"},
-		{name: "extra key", gates: "gates: [{cmd: a, timeout: 5}]", wantErr: "tasks[0] (id 1): gates[0]: timeout: unknown key; a gate has only cmd"},
+		{name: "misspelled key", gates: "gates: [{command: a}]", wantErr: "tasks[0] (id 1): gates[0]: command: unknown key; a gate has only cmd and timeout"},
+		{name: "extra key", gates: "gates: [{cmd: a, retries: 3}]", wantErr: "tasks[0] (id 1): gates[0]: retries: unknown key; a gate has only cmd and timeout"},
 		{name: "duplicate cmd", gates: "gates: [{cmd: a, cmd: b}]", wantErr: "tasks[0] (id 1): gates[0]: cmd: duplicate key"},
 		{name: "integer cmd", gates: "gates: [{cmd: 5}]", wantErr: "tasks[0] (id 1): gates[0]: cmd: must be a string"},
 		{name: "null cmd", gates: "gates: [{cmd: }]", wantErr: "tasks[0] (id 1): gates[0]: cmd: must be a string"},
 		{name: "blank cmd", gates: `gates: [{cmd: "  "}]`, wantErr: "tasks[0] (id 1): gates[0]: cmd: must not be empty or whitespace"},
+		{name: "integer timeout", gates: "gates: [{cmd: a, timeout: 30}]", wantErr: "tasks[0] (id 1): gates[0]: timeout: must be a duration string such as 90s or 10m"},
+		{name: "null timeout", gates: "gates: [{cmd: a, timeout: }]", wantErr: "tasks[0] (id 1): gates[0]: timeout: must be a duration string such as 90s or 10m"},
+		{name: "sequence timeout", gates: "gates: [{cmd: a, timeout: [10m]}]", wantErr: "tasks[0] (id 1): gates[0]: timeout: must be a duration string such as 90s or 10m"},
+		{name: "unparseable timeout", gates: "gates: [{cmd: a, timeout: soon}]", wantErr: "tasks[0] (id 1): gates[0]: timeout: must be a duration string such as 90s or 10m"},
+		{name: "unitless timeout", gates: `gates: [{cmd: a, timeout: "30"}]`, wantErr: "tasks[0] (id 1): gates[0]: timeout: must be a duration string such as 90s or 10m"},
+		{name: "blank timeout", gates: `gates: [{cmd: a, timeout: "  "}]`, wantErr: "tasks[0] (id 1): gates[0]: timeout: must be a duration string such as 90s or 10m"},
+		{name: "zero timeout", gates: "gates: [{cmd: a, timeout: 0s}]", wantErr: "tasks[0] (id 1): gates[0]: timeout: must be greater than zero"},
+		{name: "negative timeout", gates: "gates: [{cmd: a, timeout: -5m}]", wantErr: "tasks[0] (id 1): gates[0]: timeout: must be greater than zero"},
+		{name: "duplicate timeout", gates: "gates: [{cmd: a, timeout: 1s, timeout: 2s}]", wantErr: "tasks[0] (id 1): gates[0]: timeout: duplicate key"},
 		{name: "second gate invalid", gates: "gates: [{cmd: a}, {cmd: ''}]", wantErr: "tasks[0] (id 1): gates[1]: cmd: must not be empty or whitespace"},
 	}
 
@@ -542,4 +574,57 @@ func TestSaveTasks_OmitsEmptyGates(t *testing.T) {
 	data, err := os.ReadFile(path)
 	require.NoError(t, err)
 	assert.NotContains(t, string(data), "gates", "a task without gates must not gain a gates key on save")
+}
+
+func TestSaveTasks_GateTimeoutKeptAsWrittenAndOmittedWhenAbsent(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "tasks.yaml")
+
+	want := TaskList{Tasks: []Task{
+		{ID: 1, Name: "First", Prompt: "p", State: PendingState, Gates: []Gate{
+			{Cmd: "go test ./...", Timeout: "90s"},
+			{Cmd: "echo one"},
+		}},
+	}}
+	require.NoError(t, SaveTasks(path, want))
+
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.Equal(t, 1, strings.Count(string(data), "timeout:"), "only the gate that set a timeout may carry the key")
+	assert.Contains(t, string(data), "timeout: 90s", "the duration must not be normalized to 1m30s")
+
+	got, err := ParseTasks(data)
+	require.NoError(t, err)
+	assert.Equal(t, want, got)
+}
+
+func TestParseTimeout(t *testing.T) {
+	tests := []struct {
+		name    string
+		in      string
+		want    time.Duration
+		wantErr string
+	}{
+		{name: "minutes", in: "10m", want: 10 * time.Minute},
+		{name: "compound", in: "1h30m", want: 90 * time.Minute},
+		{name: "milliseconds", in: "200ms", want: 200 * time.Millisecond},
+		{name: "unitless", in: "30", wantErr: "must be a duration string such as 90s or 10m"},
+		{name: "blank", in: " ", wantErr: "must be a duration string such as 90s or 10m"},
+		{name: "empty", in: "", wantErr: "must be a duration string such as 90s or 10m"},
+		{name: "words", in: "soon", wantErr: "must be a duration string such as 90s or 10m"},
+		{name: "zero", in: "0s", wantErr: "must be greater than zero"},
+		{name: "negative", in: "-1m", wantErr: "must be greater than zero"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ParseTimeout(tt.in)
+			if tt.wantErr != "" {
+				require.EqualError(t, err, tt.wantErr)
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
 }
