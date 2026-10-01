@@ -286,12 +286,17 @@ func waitForFile(t *testing.T, path string, timeout time.Duration) []byte {
 // resulting YAML rather than asserting on exact bytes, since gralph
 // re-marshals the whole file on every write-back (comments/formatting are
 // not preserved and every task gets an explicit state key).
+type gateFixture struct {
+	Cmd string `yaml:"cmd"`
+}
+
 type taskFixture struct {
-	ID     int    `yaml:"id"`
-	Name   string `yaml:"name"`
-	Prompt string `yaml:"prompt"`
-	State  string `yaml:"state"`
-	Error  string `yaml:"error,omitempty"`
+	ID     int           `yaml:"id"`
+	Name   string        `yaml:"name"`
+	Prompt string        `yaml:"prompt"`
+	State  string        `yaml:"state"`
+	Error  string        `yaml:"error,omitempty"`
+	Gates  []gateFixture `yaml:"gates,omitempty"`
 }
 
 type taskListFixture struct {

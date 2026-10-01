@@ -17,12 +17,19 @@ const (
 	CompletedState = "completed"
 )
 
+// Gate is one command gralph runs itself after a task's session reports
+// completed. It is never sent to the session.
+type Gate struct {
+	Cmd string `yaml:"cmd"`
+}
+
 type Task struct {
 	ID     int16  `yaml:"id"`
 	Name   string `yaml:"name"`
 	Prompt string `yaml:"prompt"`
 	State  string `yaml:"state"`
 	Error  string `yaml:"error,omitempty"`
+	Gates  []Gate `yaml:"gates,omitempty"`
 }
 
 type TaskList struct {
@@ -155,6 +162,10 @@ func parseTask(i int, el *yaml.Node) (Task, string, error) {
 		return Task{}, where, err
 	}
 
+	if err := checkGates(where, fields["gates"]); err != nil {
+		return Task{}, where, err
+	}
+
 	task, err := decodeTask(where, el)
 	return task, where, err
 }
@@ -220,6 +231,62 @@ func checkStringField(where, field string, node *yaml.Node) error {
 	case field == "state" && node.Value != "" && node.Value != PendingState &&
 		node.Value != CompletedState && node.Value != FailedState:
 		return fmt.Errorf("%s: state: must be pending, completed, or failed, got %q", where, node.Value)
+	}
+
+	return nil
+}
+
+// checkGates checks the optional gates sequence before it is decoded. A
+// malformed gate must reject the file: decoding would silently drop what it
+// does not recognize, and the next save would then erase it.
+func checkGates(where string, node *yaml.Node) error {
+	if node == nil {
+		return nil
+	}
+
+	if node.Kind != yaml.SequenceNode {
+		return fmt.Errorf("%s: gates: must be a sequence", where)
+	}
+
+	for j, el := range node.Content {
+		if err := checkGate(fmt.Sprintf("%s: gates[%d]", where, j), el); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// checkGate allows only the cmd key so a misspelled or invented option is an
+// error instead of a gate that quietly does less than its author meant.
+func checkGate(where string, el *yaml.Node) error {
+	if el.Kind == yaml.AliasNode {
+		el = el.Alias
+	}
+
+	if el.Kind != yaml.MappingNode {
+		return fmt.Errorf("%s: must be a mapping", where)
+	}
+
+	fields, err := taskFields(where, el)
+	if err != nil {
+		return err
+	}
+
+	for j := 0; j+1 < len(el.Content); j += 2 {
+		if key := el.Content[j].Value; key != "cmd" {
+			return fmt.Errorf("%s: %s: unknown key; a gate has only cmd", where, key)
+		}
+	}
+
+	cmd := fields["cmd"]
+	switch {
+	case cmd == nil:
+		return fmt.Errorf("%s: cmd: is required", where)
+	case cmd.Kind != yaml.ScalarNode || cmd.Tag != "!!str":
+		return fmt.Errorf("%s: cmd: must be a string", where)
+	case strings.TrimSpace(cmd.Value) == "":
+		return fmt.Errorf("%s: cmd: must not be empty or whitespace", where)
 	}
 
 	return nil

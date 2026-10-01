@@ -31,6 +31,12 @@ result line, or a non-zero exit, marks the task `failed`. Gralph refuses to run
 while any task is `failed`; a person fixes the cause (often by editing the
 task's `prompt`) and resets its `state` to `pending` by hand.
 
+A task may also list `gates`: commands Gralph runs itself, in order, after a
+session that reported `completed`. The task is `completed` only when every gate
+exits zero; the first gate that fails marks the task `failed` and stops the
+run. Gates are never sent to the session, so the prompt must still tell Claude
+what to verify.
+
 A `tasks.yaml` that does not match the rules below is invalid and Gralph
 refuses to run it. There is no migration from other formats or older states.
 
@@ -55,7 +61,8 @@ in place when authorized.
    scanners, builds, end-to-end suites) as runnable commands, then ask which
    ones every task must pass and what to add. Ask one question at a time.
    Every task's Verification lists the agreed gates, plus its own
-   task-specific checks.
+   task-specific checks, so Claude runs them. The same commands also go in
+   each task's `gates` list (step 5), so Gralph checks them itself.
 4. Draft the task list and show the user a summary, one line per task:
    `<id>: <name> - <one short sentence>`. Nothing else goes in the summary.
    Ask whether they approve it or want changes. Revise and show the summary
@@ -67,8 +74,17 @@ in place when authorized.
    Names are unique ignoring case and surrounding whitespace. `state` is
    `pending`, `completed`, or `failed`; leave it empty for new work, which
    Gralph reads as `pending`. The optional `error` field is gralph-only: never
-   write it; preserve it if present when updating an existing file. Write no
-   other keys: Gralph ignores them when reading and drops them the first time
+   write it; preserve it if present when updating an existing file. The
+   optional `gates` field is a sequence of mappings, each with exactly one
+   key, `cmd`, a nonblank string holding one shell command; any other key in
+   a gate makes the file invalid. Gralph runs each `cmd` through `sh` from the
+   directory it was started in and judges it only by its exit code. Write
+   commands that exit non-zero when the check fails
+   (`test -z "$(gofmt -l .)"`, not `gofmt -w .`), that need no input, and that
+   finish on their own: there is no timeout. Give every task the agreed
+   quality gates plus any task-specific check that is a plain command; leave
+   `gates` out when a task has nothing to check by command. Write no other
+   task keys: Gralph ignores them when reading and drops them the first time
    it saves the file.
 6. Put scope, steps, the agreed quality gates, task-specific verification, and
    completion criteria inside each task's prompt. Preserve project-specific

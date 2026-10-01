@@ -1,8 +1,8 @@
 # Gralph — Deployment Architecture
 
-> **Version**: v03
-> **Date**: 2026-09-26
-> **Notes**: Unit tests now cover `cmd/main` (`make test` runs `./cmd/... ./internal/...`); the release build runs `go test ./...`.
+> **Version**: v04
+> **Date**: 2026-09-30
+> **Notes**: Testing strategy now covers gates (ADR-013).
 
 [Back to Overview](00_overview.md) | [Back to Project README](../../README.md)
 
@@ -151,6 +151,7 @@ GitHub Actions runs on `develop` and `main` branches for both push and pull requ
   - Signal handling (SIGINT/SIGTERM kills claude group)
   - Dry-run validation (--dry-run works, doesn't run claude)
   - Prompt formatting (task + shared prompt combined correctly)
+  - Gates: passing gates, a failing gate (and the blocked next run), gates skipped after a failed session, dry-run gate validation
 - Run via `make build` → docker-compose in container (authoritative)
 - Native e2e run possible with `make local && cd tests/e2e && GRALPH_BINARY=... go test` but not recommended (Go test cache can mask binary changes)
 
@@ -163,6 +164,7 @@ All non-trivial code paths are exercised:
 - Stream parsing: assistant text and tool calls to activity lines, result event text to outcome, lines over 64 KiB, event order on the TUI path
 - TUI: event handling, pane focus and scrolling, stop confirm, signal stop, layout, setup screen validation
 - Signal handling: SIGINT/SIGTERM during run, process group killed
+- Gates: parse rules and errors, file order, first failure stops the rest, shell syntax and empty stdin, cancel during a gate, plain and stream output
 
 Tests pin the combined-prompt wire contract (shared + task format) via golden assertions.
 

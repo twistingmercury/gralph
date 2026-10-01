@@ -5,6 +5,9 @@
 # - Put only task-specific content in `prompt`; the shared prompt.md already
 #   covers scope, verification, cleanup, commit, and task-file rules.
 # - Leave `state` empty; Gralph reads an empty state as pending.
+# - `gates` are run by Gralph itself after the session: one command per `cmd`.
+#   Repeat the agreed quality gates here and in the prompt's Verification.
+#   Drop `gates` when the task has no command to check.
 # - Comments are not passed to the agent, so drop this header from the
 #   generated file.
 tasks:
@@ -31,3 +34,6 @@ tasks:
 
       Completion criteria:
       - GENERATE_CONCRETE_DELIVERED_BEHAVIOR_AND_RELEVANT_ACCEPTANCE_CHECKS
+    gates:
+      - cmd: "GENERATE_AGREED_QUALITY_GATE_COMMAND"
+      - cmd: "GENERATE_TASK_SPECIFIC_CHECK_COMMAND_OR_DROP_THIS_ENTRY"

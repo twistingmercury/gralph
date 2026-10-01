@@ -1,8 +1,8 @@
 # Gralph — Architectural Decisions
 
-> **Version**: v04
-> **Date**: 2026-09-25
-> **Notes**: ADR-011 makes the full-screen TUI the default in a terminal, with live activity from stream-json on the TUI path only and plain mode unchanged; ADR-012 adopts Bubble Tea v2, bubbles, and lipgloss, confined to `internal/tui` and `cmd/main`.
+> **Version**: v05
+> **Date**: 2026-09-30
+> **Notes**: ADR-013 adds per-task `gates`: commands gralph runs itself after a session reports `completed`; the task is completed only when every gate exits zero. Gates run as `sh -c <cmd>` under one owner-approved `#nosec G204`.
 
 [Back to Overview](00_overview.md) | [Back to Project README](../../README.md)
 
@@ -38,6 +38,7 @@ Each architectural decision is recorded as an ADR with the following structure:
 | ADR-010 | Refuse to run with a stale installed skill     | Accepted | 2026-09-25 |
 | ADR-011 | Full-screen TUI by default, plain mode intact  | Accepted | 2026-09-25 |
 | ADR-012 | Bubble Tea v2 for the TUI, confined to its use | Accepted | 2026-09-25 |
+| ADR-013 | Gralph runs a task's gates after a session     | Accepted | 2026-09-30 |
 
 ## Decisions
 
@@ -384,6 +385,64 @@ The TUI uses Bubble Tea v2 only: `charm.land/bubbletea/v2`, `charm.land/bubbles/
 - New third-party dependencies to track and scan (govulncheck, gosec)
 - v2 differs from v1 (`View()` returns `tea.View`, keys are `tea.KeyPressMsg`), so most examples and answers written for v1 do not apply
 - If Bubble Tea fails to start despite the terminal check, gralph exits 1 and suggests `--no-tui`; there is no automatic fallback
+
+---
+
+### ADR-013: Gralph runs a task's gates after a completed session
+
+**Status:** Accepted
+
+**Context:**
+
+Under ADR-005 the only evidence that a task worked is the session's own result line. The prompts ask Claude to run the task's verification, but gralph checks nothing itself. A session that skips a check, or reports `completed` anyway, marks the task `completed`, and the next task builds on it. The checks that matter (lint, tests, a build) are ordinary commands with exit codes, and gralph can run them the same way every time, whatever the session did or said.
+
+**Decision:**
+
+A task may carry an optional `gates` list. Each entry is a mapping with exactly one key, `cmd`, a nonblank string:
+
+```yaml
+tasks:
+  - id: 1
+    name: Add the widget repository
+    prompt: |
+      ...
+    gates:
+      - cmd: golangci-lint run ./...
+      - cmd: go test ./internal/widget/...
+```
+
+When a session exits zero and ends with the `completed` result line (ADR-005), gralph runs that task's gates in file order, one at a time, each through `sh` in gralph's working directory. The task is `completed` only when every gate exits zero. The first gate that exits non-zero, or cannot be started, makes the task `failed` with `error` set to `gate "<cmd>" failed: <exit error>`; later gates do not run, the file is saved, and the run stops as it does for any failed task (ADR-003, ADR-006). The rest of the rules:
+
+- **Gates belong to gralph, not to Claude.** Gralph reads them from `tasks.yaml`. They are never sent to the session: the combined prompt on stdin is unchanged, and `Task.String()` does not include them. The shared prompt and task prompts may still tell Claude to verify its own work; that is Claude's self-check and a separate layer.
+- **Gates run only after a `completed` session.** If the session failed (non-zero exit, `failed` result, or no valid result line), no gate runs and the task fails with the session's error, as today.
+- **A task with no `gates`, or an empty list, behaves exactly as before.**
+- **A gate is any command, judged only by its exit code.** Gralph does not restrict what a gate does or look at its output. The skill suggests commands that exit non-zero when the check fails.
+- **Per-task only.** There is no file-level gate list, no timeout, and no retry.
+- **Validation happens at parse time**, in `internal/tasks`, with the existing error style (`tasks[<i>] (id <id>): gates[<j>]: cmd: <problem>`), so `--dry-run` and the setup screen catch a bad `gates` value. `gates` must be a sequence; each element must be a mapping whose only key is `cmd`; `cmd` must be a nonblank string. The stored `cmd` is never altered. `SaveTasks` writes `gates` back unchanged (omitted when empty).
+- **How the command reaches the shell.** Each gate runs as `sh -c <cmd>`, with the `cmd` text from the file as the script, so pipes, substitutions, and multi-line commands work. gosec flags this call (G204: a subprocess whose argv comes from a variable). The finding is accurate and accepted: running commands from the task file is what a gate is. The call carries a single `// #nosec G204` with its reason, approved by the project owner as an explicit exception to the "never add `#nosec`" rule. It is not a precedent; any other suppression needs the owner's explicit approval too.
+- **Process handling matches claude's** (ADR-007): each gate runs in its own process group with no stdin. Cancelling the context while a gate runs kills the group and leaves the task's state and the file untouched, so the next run starts that task again.
+- **Output.** Plain mode prints `gate: <cmd>` to stdout before each gate, and the gate's stdout and stderr pass straight through. On the TUI path gralph writes nothing itself: it reports an `Activity` event `→ gate <cmd>` (only the command's first line, so a multi-line command stays one activity line) and then one `Activity` event per line of the gate's stdout and stderr. The task stays `in progress` until its gates finish; `TaskFinished` is reported after them. No new event kinds.
+- **The skill** (`gralph-docs-writer`) gains `gates` in its template and field rules, and proposes each task's gates from the project's agreed quality gates plus the task's own checks. It keeps writing the prompt-side verification for Claude.
+
+Alternatives not taken: letting the gates replace the result line (Claude can know the task was not finished when every gate would still pass); sending the gate list to Claude (gralph's check should not depend on what the session was told); a file-level list shared by all tasks (not needed to start; can be added without changing per-task gates).
+
+**Consequences:**
+
+*Positive:*
+- A `completed` state now means gralph itself saw every gate pass, not only that Claude said so
+- The same commands run the same way for every task and every run, independent of the session
+- Plain mode, the stdin contract, and task files without gates are unchanged
+- One place for the rule: both task paths go through the same gate runner after `finishTask`
+
+*Negative:*
+- Gate commands are shell text from the task file, run without a sandbox; the file was already code to be trusted (it drives `--dangerously-skip-permissions`), and now gralph executes part of it directly
+- A failed gate leaves whatever the session did, including commits, in the repository for a person to sort out
+- Resetting a gate-failed task to `pending` runs the whole session again, not just the gates; setting it to `completed` by hand skips the gates
+- Common gates are repeated in every task
+- The gate call carries the project's one approved inline gosec suppression (`#nosec G204`), which a later scanner upgrade or code move has to keep intact
+- A gate that never exits hangs the run until it is cancelled (no timeout)
+- A gate that changes files leaves those changes uncommitted for the next session
+- Claude is not told the gates, so a session can report `completed` and still fail one; the skill keeps the prompt-side verification and the gates in step
 
 ---
 

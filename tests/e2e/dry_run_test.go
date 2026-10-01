@@ -106,3 +106,30 @@ func TestDryRun_MissingTasksFlag(t *testing.T) {
 	assert.Contains(t, result.stderr, "--tasks")
 	assert.NotContains(t, result.stderr, "--prompt not set")
 }
+
+func TestDryRun_ValidGatesAreNotRun(t *testing.T) {
+	t.Parallel()
+	marker := filepath.Join(t.TempDir(), "gate-ran")
+	tasksYAML := "tasks:\n  - id: 1\n    name: First task\n    prompt: p\n    gates:\n      - cmd: touch '" + marker + "'\n"
+
+	res, tasksPath := runDryRun(t, tasksYAML, func(p string) []string {
+		return []string{"-t", p, "--dry-run"}
+	})
+
+	require.Equal(t, 0, res.exitCode, "stdout:\n%s\nstderr:\n%s", res.stdout, res.stderr)
+	assert.Contains(t, res.stdout, tasksPath+" is valid\n")
+	assert.NoFileExists(t, marker, "a dry run must never run a gate")
+}
+
+func TestDryRun_InvalidGates(t *testing.T) {
+	t.Parallel()
+	tasksYAML := "tasks:\n  - id: 1\n    name: First task\n    prompt: p\n    gates:\n      - command: go test ./...\n"
+
+	res, tasksPath := runDryRun(t, tasksYAML, func(p string) []string {
+		return []string{"--tasks=" + p, "--dry-run"}
+	})
+
+	require.NotEqual(t, 0, res.exitCode, "stdout:\n%s\nstderr:\n%s", res.stdout, res.stderr)
+	assert.Contains(t, res.stderr, "tasks[0] (id 1): gates[0]: command: unknown key; a gate has only cmd")
+	assert.NotContains(t, res.stdout, tasksPath+" is valid")
+}
