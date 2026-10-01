@@ -68,9 +68,8 @@ func DryRun(w io.Writer, tasksFile, gateTimeout string) error {
 func printGateLimits(w io.Writer, tl *tasks.TaskList, override string) {
 	for _, task := range tl.Tasks {
 		for _, gate := range task.Gates {
-			first, _, _ := strings.Cut(gate.Cmd, "\n")
 			limit, source := gateLimit(gate, override)
-			_, _ = fmt.Fprintf(w, "task %d gate: %s: %s (%s)\n", task.ID, first, limit, source)
+			_, _ = fmt.Fprintf(w, "task %d gate: %s: %s (%s)\n", task.ID, firstLine(gate.Cmd), limit, source)
 		}
 	}
 }

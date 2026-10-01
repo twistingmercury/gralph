@@ -24,13 +24,20 @@ func runGates(ctx context.Context, task tasks.Task, override string, report func
 		}
 
 		if ctx.Err() != nil {
-			return "", "", fmt.Errorf("task %d: %s failed: gate %q: %w", task.ID, task.Name, gate.Cmd, runErr)
+			return "", "", fmt.Errorf("task %d: %s failed: gate %q: %w", task.ID, task.Name, firstLine(gate.Cmd), runErr)
 		}
 
 		return tasks.FailedState, gateFailure(gate, limit, runErr), nil
 	}
 
 	return tasks.CompletedState, "", nil
+}
+
+// firstLine is the part of a multi-line command that messages quote, so one
+// long gate cannot bury the reason in a wrapped, truncated banner.
+func firstLine(cmd string) string {
+	first, _, _ := strings.Cut(cmd, "\n")
+	return first
 }
 
 // defaultGateTimeout limits every gate that neither the flag nor the file
@@ -62,10 +69,10 @@ func gateLimit(gate tasks.Gate, override string) (limit, source string) {
 // non-zero exit because "signal: killed" would hide that the gate was cut off.
 func gateFailure(gate tasks.Gate, limit string, runErr error) string {
 	if errors.Is(runErr, context.DeadlineExceeded) {
-		return fmt.Sprintf("gate %q timed out after %s", gate.Cmd, limit)
+		return fmt.Sprintf("gate %q timed out after %s", firstLine(gate.Cmd), limit)
 	}
 
-	return fmt.Sprintf("gate %q failed: %s", gate.Cmd, runErr)
+	return fmt.Sprintf("gate %q failed: %s", firstLine(gate.Cmd), runErr)
 }
 
 // runGate runs one gate through `sh -c` so the command can use shell syntax
@@ -97,8 +104,7 @@ func runGateCmd(ctx context.Context, task tasks.Task, gate tasks.Gate, report fu
 
 	if report != nil {
 		// Only the first line, so a multi-line command stays one activity line.
-		first, _, _ := strings.Cut(gate.Cmd, "\n")
-		report(Event{Kind: Activity, Task: task, Line: "→ gate " + first})
+		report(Event{Kind: Activity, Task: task, Line: "→ gate " + firstLine(gate.Cmd)})
 		return runGateStream(cmd, task, report)
 	}
 

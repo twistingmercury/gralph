@@ -187,7 +187,7 @@ graph TB
 **Responsibilities:**
 - `runGates` runs after `finishTask` returns `completed`, on both task paths, before the state is saved (ADR-013); it is skipped when the task has no gates or the session failed
 - Run the task's gates in file order, one at a time, each as `sh -c <cmd>` in gralph's working directory, with no stdin, in its own process group (`configureProcessTree`). The call carries the one owner-approved `// #nosec G204` (ADR-013)
-- Stop at the first gate that exits non-zero or cannot be started: the task becomes `failed` with error `gate "<cmd>" failed: <exit error>`, and later gates do not run
+- Stop at the first gate that exits non-zero or cannot be started: the task becomes `failed` with error `gate "<cmd>" failed: <exit error>` (or `gate "<cmd>" timed out after <timeout>` when it hit its limit; `<cmd>` is the command's first line), and later gates do not run
 - Plain path (`report == nil`): print `gate: <cmd>` to stdout, then let the gate's stdout and stderr pass straight through
 - TUI path (`report != nil`): write nothing to gralph's stdout/stderr; report `Activity` `→ gate <first line of cmd>`, then one `Activity` per line of the gate's stdout and stderr
 - On context cancellation, return the error without a state, like a cancelled session: the task and the file stay untouched

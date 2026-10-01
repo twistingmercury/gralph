@@ -192,6 +192,8 @@ A few things to know:
 - If you have existing task files with no `timeout` set, they now get a 10m
   limit per gate (previously they had no limit). Gates that legitimately run
   longer need their own `timeout`.
+- For a multi-line gate, error messages quote only the command's first line, so
+  the reason stays readable.
 - Write gates that check instead of fix: `test -z "$(gofmt -l .)"`, not
   `gofmt -w .`. Nothing commits what a gate changes.
 - Resetting a gate-failed task to `pending` runs its whole session again, not

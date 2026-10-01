@@ -266,3 +266,26 @@ func TestGates_BadGateTimeoutFlagRunsNothing(t *testing.T) {
 		})
 	}
 }
+
+func TestGates_MultiLineGateErrorNamesOnlyTheFirstLine(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	promptPath := writePrompt(t, dir, "Body.\n")
+
+	tasksPath := writeTasksYAML(t, dir, `tasks:
+  - id: 1
+    name: First task
+    prompt: Do the first thing.
+    gates:
+      - cmd: |
+          echo first-line
+          exit 3
+`)
+	env := gralphEnv(fakeClaudeDir, nil)
+
+	res := runGralph(t, 15*time.Second, []string{"--prompt=" + promptPath, "--tasks=" + tasksPath}, env)
+
+	const gateErr = `gate "echo first-line" failed: exit status 3`
+	require.NotEqual(t, 0, res.exitCode, "stdout:\n%s\nstderr:\n%s", res.stdout, res.stderr)
+	assert.Equal(t, gateErr, taskErrors(readTasksYAML(t, tasksPath))[1])
+}

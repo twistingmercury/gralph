@@ -456,3 +456,43 @@ func TestRun_GateTimeoutFlagIsNeverSaved(t *testing.T) {
 	assert.NotContains(t, string(data), "10m", "the default must not reach the tasks file")
 	assert.Equal(t, []tasks.Gate{{Cmd: "true", Timeout: "30s"}, {Cmd: "true"}}, readSavedTasks(t, tasksPath).Tasks[0].Gates)
 }
+
+func TestRun_MultiLineGateErrorsNameOnlyTheFirstLine(t *testing.T) {
+	tests := []struct {
+		name    string
+		gate    tasks.Gate
+		wantErr string
+	}{
+		{name: "non-zero exit", gate: tasks.Gate{Cmd: "echo first\nexit 3"}, wantErr: `gate "echo first" failed: exit status 3`},
+		{name: "timeout", gate: tasks.Gate{Cmd: "echo first\nsleep 30", Timeout: "100ms"}, wantErr: `gate "echo first" timed out after 100ms`},
+	}
+
+	for _, tt := range tests {
+		for _, stream := range []bool{false, true} {
+			name := tt.name + " plain"
+			var rec recorder
+			var report func(Event)
+			if stream {
+				name = tt.name + " stream"
+				report = rec.report
+			}
+
+			t.Run(name, func(t *testing.T) {
+				useFakeClaude(t)
+				tasksPath := filepath.Join(t.TempDir(), "tasks.yaml")
+
+				err := Run(context.Background(), "prompt", gatedTask(tt.gate), tasksPath, "", report)
+
+				require.EqualError(t, err, "task 1: First failed: "+tt.wantErr)
+				assert.Equal(t, tt.wantErr, readSavedTasks(t, tasksPath).Tasks[0].Error)
+				assert.Equal(t, tt.gate.Cmd, readSavedTasks(t, tasksPath).Tasks[0].Gates[0].Cmd, "the stored command stays whole")
+			})
+		}
+	}
+}
+
+func TestGateFirstLine(t *testing.T) {
+	assert.Equal(t, "one", firstLine("one"))
+	assert.Equal(t, "  one ", firstLine("  one \ntwo"))
+	assert.Equal(t, "", firstLine("\ntwo"))
+}
