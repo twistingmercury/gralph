@@ -115,21 +115,18 @@ func TestRunLoop_SavesAfterEachCompletedTask(t *testing.T) {
 	assert.Equal(t, tasks.PendingState, saved.Tasks[1].State)
 }
 
-// unwritableTasksFile writes a two-task file into a directory of its own and
-// then takes away the directory's write permission, which is how a user would
-// hit a failed save: SaveTasks cannot create its temporary file there. The
-// mode is restored on cleanup so the temp dir can be removed.
-func unwritableTasksFile(t *testing.T) (string, *tasks.TaskList) {
+// unsavableTasksFile returns a two-task list and a task file path whose
+// directory is gone, as when it is removed during a run. A read-only
+// directory would not do: the release build runs the tests as root, which
+// ignores directory permissions, so the save would succeed there.
+func unsavableTasksFile(t *testing.T) (string, *tasks.TaskList) {
 	t.Helper()
 
-	dir := t.TempDir()
 	tasksYAML := "tasks:\n  - {id: 1, name: First, prompt: p1, state: pending}\n  - {id: 2, name: Second, prompt: p2, state: pending}\n"
-	tasksPath := writeTasksFile(t, dir, tasksYAML)
 	tl, err := tasks.ParseTasks([]byte(tasksYAML))
 	require.NoError(t, err)
 
-	require.NoError(t, os.Chmod(dir, 0o500))
-	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+	tasksPath := filepath.Join(t.TempDir(), "removed", "tasks.yaml")
 
 	return tasksPath, &tl
 }
@@ -142,7 +139,7 @@ func TestRunLoop_FailedSaveAfterCompletedTaskStopsRun(t *testing.T) {
 	useFakeClaude(t)
 	recordPath := filepath.Join(t.TempDir(), "record.log")
 	t.Setenv("FAKE_CLAUDE_RECORD", recordPath)
-	tasksPath, tl := unwritableTasksFile(t)
+	tasksPath, tl := unsavableTasksFile(t)
 
 	err := runLoop(context.Background(), "prompt", tl, tasksPath, "", bypass, nil, nil)
 
@@ -160,7 +157,7 @@ func TestRunLoop_FailedSaveAfterCompletedTaskStopsRun(t *testing.T) {
 func TestRunLoop_FailedSaveAfterFailedTaskReportsBoth(t *testing.T) {
 	useFakeClaude(t)
 	t.Setenv("FAKE_CLAUDE_OUTPUT", `{"state":"failed","error":"boom"}`)
-	tasksPath, tl := unwritableTasksFile(t)
+	tasksPath, tl := unsavableTasksFile(t)
 
 	err := runLoop(context.Background(), "prompt", tl, tasksPath, "", bypass, nil, nil)
 
