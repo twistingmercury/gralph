@@ -105,7 +105,7 @@ func runGateCmd(ctx context.Context, task tasks.Task, gate tasks.Gate, report fu
 	if report != nil {
 		// Only the first line, so a multi-line command stays one activity line.
 		report(Event{Kind: Activity, Task: task, Line: "→ gate " + firstLine(gate.Cmd)})
-		return runGateStream(cmd, task, report)
+		return runCmdStream(cmd, task, report)
 	}
 
 	fmt.Printf("gate: %s\n", gate.Cmd)
@@ -114,10 +114,11 @@ func runGateCmd(ctx context.Context, task tasks.Task, gate tasks.Gate, report fu
 	return cmd.Run()
 }
 
-// runGateStream runs cmd with each stdout and stderr line reported as an
+// runCmdStream runs cmd with each stdout and stderr line reported as an
 // Activity event, so nothing reaches gralph's own stdout or stderr. Both
-// pipes are drained before Wait, as runTaskStream does.
-func runGateStream(cmd *exec.Cmd, task tasks.Task, report func(Event)) error {
+// pipes are drained before Wait, as runTaskStream does. Gates and the commit
+// step share it.
+func runCmdStream(cmd *exec.Cmd, task tasks.Task, report func(Event)) error {
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return err

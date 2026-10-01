@@ -1,8 +1,8 @@
 # Gralph — Architecture Overview
 
-> **Version**: v05
+> **Version**: v07
 > **Date**: 2026-09-30
-> **Notes**: Sessions run in Claude Code's sandbox from a `--sandbox-settings` file, or unsandboxed with `--skip-permissions` (ADR-014).
+> **Notes**: With `--commit`, the task file must be git-ignored or outside the repo; gralph uses plain `git add -A` without pathspec exclusions; git stops gracefully on cancel (ADR-015).
 
 [Back to Project README](../../README.md)
 
@@ -28,8 +28,9 @@ The Ralph loop is a command sequence driven by a shared prompt and an ordered ta
 2. For each pending task, combining the prompt + task and starting a fresh `claude --print` session with the session flags chosen by `--sandbox-settings` (sandboxed) or `--skip-permissions` (no sandbox); the TUI adds `--output-format stream-json --verbose`
 3. Reading Claude's output to determine success/failure
 4. When Claude reports success, running the task's `gates` (commands listed in the task file) and requiring every one to exit zero
-5. Writing state back atomically
-6. Blocking on the first failure until a person intervenes
+5. With `--commit`, committing the task's changes with git once its gates pass, under the task's name
+6. Writing state back atomically
+7. Blocking on the first failure until a person intervenes
 
 In a terminal, gralph shows the run in a full-screen view: the current task's prompt, the task list and statuses, and the current session's live activity. With `--no-tui`, `--dry-run`, or no terminal, it runs in plain mode and prints to stdout as it always has.
 
@@ -57,6 +58,7 @@ graph TB
 | State Persistence  | Atomic task state writes via temp-file + rename; YAML rewritten on every change    |
 | Result Interpreter | Parses JSON result line from claude output; missing/invalid line = failed          |
 | Gate Runner        | After a `completed` session, runs the task's `gates` commands with `sh -c`; any non-zero exit = failed |
+| Committer          | With `--commit`, commits a completed task's changes after its gates; requires a clean work tree at startup |
 
 ## Key Principles
 
@@ -69,8 +71,9 @@ graph TB
 7. **Failed task blocks** — A failed task must be manually reset (state changed to pending or completed) before the next run. Gralph refuses to start with any failed task present.
 8. **Unix only** — Linux, macOS, BSDs. Windows support was removed deliberately and will not be reintroduced.
 9. **Sandboxed unless asked otherwise by name** — A run must pass `--sandbox-settings <path>` (sessions run in Claude Code's sandbox) or `--skip-permissions` (no sandbox, the user's responsibility). There is no default and no fallback to an unsandboxed run.
-10. **Plain mode intact** — The full-screen TUI is the default in a terminal, but plain mode (`--no-tui` or no terminal) keeps the same argv, output, and exit codes. One loop serves both, through a `report` hook.
-11. **Docker-first CI** — Lint, gosec, govulncheck, unit tests, and e2e all run inside the build container; this is the only supported CI path.
+10. **Gralph commits, not the session** — With `--commit`, a commit is made only after the gates pass; a failed task is never committed.
+11. **Plain mode intact** — The full-screen TUI is the default in a terminal, but plain mode (`--no-tui` or no terminal) keeps the same argv, output, and exit codes. One loop serves both, through a `report` hook.
+12. **Docker-first CI** — Lint, gosec, govulncheck, unit tests, and e2e all run inside the build container; this is the only supported CI path.
 
 ## Document Navigation
 

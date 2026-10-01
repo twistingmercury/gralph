@@ -10,6 +10,10 @@ local/
 .claude/settings.local.json
 rlm_state/
 
+# Gralph run files
+tasks.yaml
+prompt.md
+
 # Local working files
 _archive/
 _ideas/

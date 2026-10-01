@@ -35,7 +35,7 @@ func TestRunLoop_GatesPassCompletesTask(t *testing.T) {
 	gates := []tasks.Gate{touchGate(first), {Cmd: "test -e '" + first + "' && touch '" + second + "'"}}
 	tl := gatedTask(gates...)
 
-	require.NoError(t, runLoop(context.Background(), "prompt", tl, tasksPath, "", bypass, nil))
+	require.NoError(t, runLoop(context.Background(), "prompt", tl, tasksPath, "", bypass, nil, nil))
 
 	assert.FileExists(t, first)
 	assert.FileExists(t, second)
@@ -61,7 +61,7 @@ func TestRunLoop_GateFailureFailsTaskAndStopsRun(t *testing.T) {
 	}}
 
 	const wantErr = `gate "test \"a\" = \"b\"" failed: exit status 1`
-	err := runLoop(context.Background(), "prompt", tl, tasksPath, "", bypass, nil)
+	err := runLoop(context.Background(), "prompt", tl, tasksPath, "", bypass, nil, nil)
 	require.EqualError(t, err, "task 1: First failed: "+wantErr)
 
 	assert.NoFileExists(t, never, "gates after a failed gate must not run")
@@ -91,7 +91,7 @@ func TestRunLoop_GatesSkippedWhenSessionFails(t *testing.T) {
 			dir := t.TempDir()
 			marker := filepath.Join(dir, "gate-ran")
 
-			err := runLoop(context.Background(), "prompt", gatedTask(touchGate(marker)), filepath.Join(dir, "tasks.yaml"), "", bypass, nil)
+			err := runLoop(context.Background(), "prompt", gatedTask(touchGate(marker)), filepath.Join(dir, "tasks.yaml"), "", bypass, nil, nil)
 			require.Error(t, err)
 			assert.ErrorContains(t, err, tt.wantErr)
 			assert.NotContains(t, err.Error(), "gate")
@@ -107,7 +107,7 @@ func TestRunLoop_GatesNeverReachClaude(t *testing.T) {
 	t.Setenv("FAKE_CLAUDE_RECORD", recordPath)
 
 	tl := gatedTask(tasks.Gate{Cmd: "true # gate-only-text"})
-	require.NoError(t, runLoop(context.Background(), "prompt", tl, filepath.Join(dir, "tasks.yaml"), "", bypass, nil))
+	require.NoError(t, runLoop(context.Background(), "prompt", tl, filepath.Join(dir, "tasks.yaml"), "", bypass, nil, nil))
 
 	records := readFakeClaudeRecords(t, recordPath)
 	require.Len(t, records, 1)
@@ -133,7 +133,7 @@ func TestRunLoop_GateShellBehavior(t *testing.T) {
 			useFakeClaude(t)
 			tasksPath := filepath.Join(t.TempDir(), "tasks.yaml")
 
-			err := runLoop(context.Background(), "prompt", gatedTask(tasks.Gate{Cmd: tt.cmd}), tasksPath, "", bypass, nil)
+			err := runLoop(context.Background(), "prompt", gatedTask(tasks.Gate{Cmd: tt.cmd}), tasksPath, "", bypass, nil, nil)
 			saved := readSavedTasks(t, tasksPath)
 			require.Len(t, saved.Tasks, 1)
 
@@ -159,7 +159,7 @@ func TestRunLoop_PlainPrintsGateLineAndOutput(t *testing.T) {
 	require.NoError(t, err)
 	os.Stdout = w
 
-	runErr := runLoop(context.Background(), "prompt", gatedTask(tasks.Gate{Cmd: "echo gate-says-hi"}), tasksPath, "", bypass, nil)
+	runErr := runLoop(context.Background(), "prompt", gatedTask(tasks.Gate{Cmd: "echo gate-says-hi"}), tasksPath, "", bypass, nil, nil)
 
 	require.NoError(t, w.Close())
 	os.Stdout = origStdout
@@ -189,7 +189,7 @@ func TestRun_GateOutputArrivesAsActivity(t *testing.T) {
 
 	var rec recorder
 	tl := gatedTask(tasks.Gate{Cmd: "echo from-stdout\necho from-stderr >&2"})
-	runErr := Run(context.Background(), "prompt", tl, tasksPath, "", bypass, rec.report)
+	runErr := Run(context.Background(), "prompt", tl, tasksPath, "", bypass, nil, rec.report)
 	os.Stdout = orig
 	require.NoError(t, w.Close())
 	require.NoError(t, runErr)
@@ -211,7 +211,7 @@ func TestRun_GateFailureReportsFailedTask(t *testing.T) {
 	tasksPath := filepath.Join(t.TempDir(), "tasks.yaml")
 
 	var rec recorder
-	err := Run(context.Background(), "prompt", gatedTask(tasks.Gate{Cmd: "exit 3"}), tasksPath, "", bypass, rec.report)
+	err := Run(context.Background(), "prompt", gatedTask(tasks.Gate{Cmd: "exit 3"}), tasksPath, "", bypass, nil, rec.report)
 	require.Error(t, err)
 
 	var finished []Event
@@ -264,7 +264,7 @@ func cancelDuringGate(t *testing.T, stream bool, timeout string) {
 	t.Cleanup(cancel)
 
 	errCh := make(chan error, 1)
-	go func() { errCh <- Run(ctx, "prompt", tl, tasksPath, "", bypass, report) }()
+	go func() { errCh <- Run(ctx, "prompt", tl, tasksPath, "", bypass, nil, report) }()
 
 	require.Eventually(t, func() bool {
 		_, err := os.Stat(readyPath)
@@ -313,7 +313,7 @@ func TestRun_GateTimeoutFailsTaskAndSkipsLaterGates(t *testing.T) {
 
 			const wantErr = `gate "sleep 30" timed out after 100ms`
 			start := time.Now()
-			err := Run(context.Background(), "prompt", tl, tasksPath, "", bypass, report)
+			err := Run(context.Background(), "prompt", tl, tasksPath, "", bypass, nil, report)
 
 			require.EqualError(t, err, "task 1: First failed: "+wantErr)
 			assert.Less(t, time.Since(start), 10*time.Second, "the deadline must kill the gate, not wait out its sleep")
@@ -351,7 +351,7 @@ func TestRun_GateWithinTimeoutPasses(t *testing.T) {
 				report = rec.report
 			}
 
-			require.NoError(t, Run(context.Background(), "prompt", tl, tasksPath, "", bypass, report))
+			require.NoError(t, Run(context.Background(), "prompt", tl, tasksPath, "", bypass, nil, report))
 			assert.FileExists(t, marker)
 
 			saved := readSavedTasks(t, tasksPath)
@@ -366,7 +366,7 @@ func TestRun_GateTimeoutThatCannotBeParsedFailsTheGate(t *testing.T) {
 	useFakeClaude(t)
 	tasksPath := filepath.Join(t.TempDir(), "tasks.yaml")
 
-	err := Run(context.Background(), "prompt", gatedTask(tasks.Gate{Cmd: "true", Timeout: "soon"}), tasksPath, "", bypass, nil)
+	err := Run(context.Background(), "prompt", gatedTask(tasks.Gate{Cmd: "true", Timeout: "soon"}), tasksPath, "", bypass, nil, nil)
 	require.Error(t, err)
 	assert.ErrorContains(t, err, `gate "true" failed:`)
 	assert.ErrorContains(t, err, "must be a duration string such as 90s or 10m")
@@ -433,7 +433,7 @@ func TestRun_GateTimeoutFlagOverridesTheGateTimeout(t *testing.T) {
 			}
 
 			start := time.Now()
-			err := Run(context.Background(), "prompt", tl, tasksPath, tt.override, bypass, report)
+			err := Run(context.Background(), "prompt", tl, tasksPath, tt.override, bypass, nil, report)
 
 			require.EqualError(t, err, `task 1: First failed: gate "sleep 30" timed out after `+tt.wantSuffix)
 			assert.Less(t, time.Since(start), 10*time.Second, "the flag must cut the gate short")
@@ -446,7 +446,7 @@ func TestRun_GateTimeoutFlagIsNeverSaved(t *testing.T) {
 	tasksPath := filepath.Join(t.TempDir(), "tasks.yaml")
 	tl := gatedTask(tasks.Gate{Cmd: "true", Timeout: "30s"}, tasks.Gate{Cmd: "true"})
 
-	require.NoError(t, Run(context.Background(), "prompt", tl, tasksPath, "45s", bypass, nil))
+	require.NoError(t, Run(context.Background(), "prompt", tl, tasksPath, "45s", bypass, nil, nil))
 
 	data, err := os.ReadFile(tasksPath)
 	require.NoError(t, err)
@@ -481,7 +481,7 @@ func TestRun_MultiLineGateErrorsNameOnlyTheFirstLine(t *testing.T) {
 				useFakeClaude(t)
 				tasksPath := filepath.Join(t.TempDir(), "tasks.yaml")
 
-				err := Run(context.Background(), "prompt", gatedTask(tt.gate), tasksPath, "", bypass, report)
+				err := Run(context.Background(), "prompt", gatedTask(tt.gate), tasksPath, "", bypass, nil, report)
 
 				require.EqualError(t, err, "task 1: First failed: "+tt.wantErr)
 				assert.Equal(t, tt.wantErr, readSavedTasks(t, tasksPath).Tasks[0].Error)

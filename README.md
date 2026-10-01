@@ -1,7 +1,7 @@
 # Gralph
 
 > **Maturity Level**: Emerging - under active development; the CLI contract has already changed between minor versions  
-> **Version**: v0.9.0 
+> **Version**: v0.9.1 
 >
 > - **Emerging**: Prototype, not production-ready, expect breaking changes
 > - **Basic**: Production-ready but actively evolving, expect minor version changes
@@ -36,6 +36,7 @@ gralph --prompt path/to/prompt.md --tasks path/to/tasks.yaml --sandbox-settings 
 | `--sandbox-settings` | One of these two for any real run; not both                             | Path to a Claude Code settings file; sessions run in Claude's sandbox with it         |
 | `--skip-permissions` | One of these two for any real run; not both                             | Run sessions with no sandbox and no permission checks. You're on your own (see below) |
 | `--gate-timeout`     | No                                                                      | Time limit for every gate, like `90s`; overrides the task file's                      |
+| `--commit`           | No                                                                      | Commit each completed task with git, after its gates pass                             |
 | `--dry-run`          | No                                                                      | Validate the task file and report on it without running anything                      |
 | `--no-tui`           | No                                                                      | Use plain output instead of the full-screen view                                      |
 | `--install-skill`    | No                                                                      | Install the bundled `gralph-docs-writer` skill for Claude Code and exit               |
@@ -66,8 +67,9 @@ the timeout it would run under and where that came from (`flag`, `gate`, or
 `default`), like `task 1 gate: go test ./...: 10m (default)`. Pass
 `--gate-timeout` along with `--dry-run` to see what it would change. If you
 pass `--sandbox-settings` too, gralph checks that file the same way a real run
-would and prints `sandbox settings: <path>`. Last comes
-`<tasks path> is valid`, and exit zero.
+would and prints `sandbox settings: <path>`. With `--commit`, it also checks
+the work tree the way a real run would and prints `commit: <work tree root>`.
+Last comes `<tasks path> is valid`, and exit zero.
 
 If any task is `failed` (a real run would refuse to start), the table comes
 after `Some tasks failed previous runs:` instead, and each failed row ends in
@@ -300,6 +302,8 @@ been tried.
 #### What the sandbox doesn't cover
 
 - **Gates.** Gralph runs those itself, with no sandbox.
+- **Commits.** With `--commit`, gralph runs git, and so the repository's hooks,
+  itself, with no sandbox.
 - **Your other Claude settings.** `~/.claude/settings.json` and the project's
   `.claude/settings.json` still apply on top.
 - **Anything the file itself opens up.** `excludedCommands`, wide `allowWrite`
@@ -353,10 +357,78 @@ A few things to know:
 - For a multi-line gate, error messages quote only the command's first line, so
   the reason stays readable.
 - Write gates that check instead of fix: `test -z "$(gofmt -l .)"`, not
-  `gofmt -w .`. Nothing commits what a gate changes.
+  `gofmt -w .`. Without `--commit`, nothing commits what a gate changes; with
+  it, the task's whole change, including what a gate does, goes into one commit.
 - Resetting a gate-failed task to `pending` runs its whole session again, not
   just the gates. Setting it to `completed` by hand skips them.
 - `--dry-run` checks that `gates` is well formed. It never runs a gate.
+
+### Committing tasks
+
+Pass `--commit` and gralph commits each task for you. The order for a task is
+session, gates, commit: the commit happens only after the session reported
+`completed` and every gate passed. That's why the session shouldn't commit
+its own work: it would be committing before the gates ran.
+
+- With `--commit`, gralph stages what a plain `git add -A` would stage and
+  commits it with the task's `name` as the message. Ignored files stay out.
+- The commit holds everything the task changed, anywhere in the repository.
+  A task that changed nothing gets no commit and is still `completed`.
+- If git refuses the commit (a pre-commit hook fails, say), the task is
+  `failed` with an error like `commit failed: exit status 1` and the run stops.
+  Hooks always run.
+- A failed task is never committed. Its changes stay in the work tree for you
+  to look at.
+- Gralph never pushes.
+
+**The task file must be ignored by git or kept outside the repository.** Inside
+a repository, gralph exits 1 with
+`error: --commit needs the task file ignored by git or outside the repository: <path>`
+if the file is tracked or not ignored. **The work tree must also be clean when
+the run starts.** Otherwise gralph exits 1 with
+`error: --commit needs a clean work tree; commit, stash, or remove:` and the
+files in the way. The simplest setup is to ignore the run's files. In the
+project's `.gitignore`:
+
+```
+tasks.yaml
+prompt.md
+```
+
+or ignore the directory you keep them in. A sandbox settings file kept in the
+project needs the same treatment.
+
+After a failed task, the tree is dirty with that task's leftovers, so the next
+`--commit` run is refused too. If it was the commit itself that failed, the
+leftovers are also staged. Either throw them away
+(`git restore --staged --worktree .` plus `git clean -f` for new files, or
+`git stash -u`) and set the task back to `pending`, or finish the work yourself,
+commit it, and set the task to `completed`.
+
+Outside a git repository `--commit` does nothing: the run goes ahead, and plain
+mode prints `commit: not a git repository, nothing will be committed`. The
+full-screen view doesn't mention it. A repository git can't read is different:
+if git fails for any other reason (a broken `.git/config`, say), gralph exits 1
+with `error: --commit: git rev-parse: <git's message>` instead of running
+without commits.
+
+In plain mode gralph prints `commit: <name>` once something is staged, and git's
+output passes through. The full-screen view shows `→ commit <name>` in the Claude
+activity pane. `--dry-run --commit` applies the same startup checks: it validates
+the task file is ignored or outside the repository, checks that the work tree is
+clean, and prints `commit: <work tree root>` (or the not-a-repository line).
+It never commits anything.
+
+A few things to know:
+
+- Changes made only inside a git submodule are not committed by gralph (the task
+  is still `completed`, and the next `--commit` run is refused because the
+  submodule shows as modified).
+- A new git repository created inside the work tree by a task is committed as git
+  would commit it, as an embedded repository link, not as files.
+
+Tell Claude not to commit in your shared prompt when you use `--commit`. The
+`gralph-docs-writer` skill does that for you when you say the run will use it.
 
 ### The full-screen view
 
@@ -406,8 +478,9 @@ Want the background? The idea behind gralph is in
 - **You need the `claude` CLI on your `PATH`.** Gralph calls it directly.
 - **Only run task files you trust.** The sandbox limits what a session can
   reach, but the prompt and task files are still code you're about to run. With
-  `--skip-permissions` there's no limit at all. Gate commands are run by gralph
-  itself through `sh`, with no sandbox either way.
+  `--skip-permissions` there's no limit at all. Gate commands and, with
+  `--commit`, git and the repository's hooks are run by gralph itself, with no
+  sandbox either way.
 - **Every session starts from scratch.** A session sees the shared prompt and
   its own task, nothing else. If a task depends on earlier work, say so in the
   prompt, or make sure the repository shows it.
@@ -417,9 +490,11 @@ Want the background? The idea behind gralph is in
   set that task's `state` back to `pending` (or `completed`) by hand, and run
   again.
 - **Ctrl-C stops the run cleanly.** In plain mode, SIGINT (Ctrl-C) or SIGTERM
-  stops the current Claude session or gate and the run. Gralph kills Claude's
-  whole process group, so nothing Claude started is left running. The interrupted
-  task and the file stay as they were, so the next run picks it up again. In
+  stops the current Claude session, gate, or commit step and the run. Gralph
+  kills the process group. For git (when `--commit` is set), it asks the group
+  to stop first with SIGTERM, and only kills it with SIGKILL if still alive
+  after 2 seconds, so the repository is not left locked. The interrupted task
+  and the file stay as they were, so the next run picks it up again. In
   the full-screen view, Ctrl-C is just a key (see `q` above). A SIGINT or
   SIGTERM from outside stops a running loop without asking, closes the view,
   prints `Run stopped by signal`, and exits 1. Once the run has ended, it just

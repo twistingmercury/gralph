@@ -67,12 +67,20 @@ func gralphEnvWithPath(pathValue string, extra map[string]string) []string {
 // environment, enforcing timeout as a hang guard.
 func runGralph(t *testing.T, timeout time.Duration, args []string, env []string) gralphResult {
 	t.Helper()
+	return runGralphIn(t, "", timeout, args, env)
+}
+
+// runGralphIn is runGralph started from dir; "" keeps the test process's
+// working directory.
+func runGralphIn(t *testing.T, dir string, timeout time.Duration, args []string, env []string) gralphResult {
+	t.Helper()
 
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, testBinaryPath, args...)
 	cmd.Env = env
+	cmd.Dir = dir
 	// Bound how long Wait() can block flushing output after the context
 	// kills the process, so a child that inherited stdout/stderr can't hang
 	// Wait past the deadline.

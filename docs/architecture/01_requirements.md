@@ -1,8 +1,8 @@
 # Gralph — Requirements
 
-> **Version**: v06
+> **Version**: v08
 > **Date**: 2026-09-30
-> **Notes**: Sandboxed sessions are now a goal: a run needs `--sandbox-settings` or `--skip-permissions` (ADR-014). Gralph-managed containers and toolchain detection are out of scope.
+> **Notes**: With `--commit`, the task file must be git-ignored or outside the repo; gralph refuses to start otherwise; plain `git add -A` stages everything; git stops gracefully on cancel (ADR-015).
 
 [Back to Overview](00_overview.md) | [Back to Project README](../../README.md)
 
@@ -40,6 +40,7 @@ Claude Code users need a way to:
 7. Run only on Unix (Linux, macOS, BSDs)
 8. Check a completed task independently: run the task's `gates` commands after the session and mark the task completed only when every one exits zero
 9. Run sessions in Claude Code's sandbox, set up by the user's `--sandbox-settings` file; run without one only when the user asks by name with `--skip-permissions`. There is no default
+10. Commit a completed task's work itself, on request (`--commit`), only after its gates pass, one commit per task
 
 ### Secondary Goals
 
@@ -62,6 +63,8 @@ Claude Code users need a way to:
 - Gralph running sessions in a container it manages, or detecting the toolchain to guess sandbox paths; the settings file is the user's to write
 - Falling back to an unsandboxed run when the sandbox cannot start
 - Re-running only the gates of a task; a task reset to `pending` runs its session again
+- Pushing, writing commit bodies, or cleaning up a failed task's work tree
+- Requiring a git repository
 
 ## Success Criteria
 
@@ -76,6 +79,7 @@ Claude Code users need a way to:
 | Session independence                    | Each task has only its prompt + task  | Golden test asserts combined-prompt format      |
 | Exit code correctness                   | Zero only when all tasks complete     | E2E test matrix covers pass/fail/cancel cases   |
 | Signal handling                         | SIGINT/SIGTERM kills claude group    | Process tree test verifies Setpgid and signal   |
+| Commit on request                       | One commit per completed task, named after it; none for a failed task; a dirty tree refuses to start | Unit and e2e tests run real git in temporary repositories |
 | Unix-only behavior                      | No Windows build, no runtime fallback | Build pipeline has no Windows target            |
 
 ## Constraints
