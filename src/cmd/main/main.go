@@ -92,28 +92,10 @@ func isPlain(dryRun, noTUI, stdinTTY, stdoutTTY bool) bool {
 func runTUI(ctx context.Context, session []string) int {
 	tasksPath, promptPath := *tasksFlag, *promptFlag
 
-	var prompt string
-	if promptPath != "" {
-		var err error
-		if prompt, err = looper.LoadPrompt(promptPath); err != nil {
-			_, _ = fmt.Fprintf(os.Stderr, "error: failed to start loop runner: %v\n", err)
-			return 1
-		}
-	}
-
-	var tasklist *tasks.TaskList
-	if tasksPath != "" {
-		var err error
-		tasklist, err = looper.LoadTasksReport(os.Stdout, tasksPath)
-		if errors.Is(err, looper.ErrFailedTasks) {
-			_, _ = fmt.Fprintf(os.Stderr, "error: %v\n", err)
-			return 1
-		}
-
-		if err != nil {
-			_, _ = fmt.Fprintf(os.Stderr, "error: failed to start loop runner: %v\n", err)
-			return 1
-		}
+	prompt, tasklist, err := loadGiven(tasksPath, promptPath)
+	if err != nil {
+		_, _ = fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		return 1
 	}
 
 	if promptPath == "" || tasksPath == "" {
@@ -151,6 +133,37 @@ func runTUI(ctx context.Context, session []string) int {
 
 	fmt.Println(summary)
 	return code
+}
+
+// loadGiven loads the prompt and tasks whose paths were passed by flag; an
+// empty path is left for the setup screen. The prompt loads first so a bad
+// prompt fails before any failed-tasks table is printed. ErrFailedTasks is
+// returned bare because its table is the explanation; any other error is
+// wrapped like looper.Start's.
+func loadGiven(tasksPath, promptPath string) (string, *tasks.TaskList, error) {
+	var prompt string
+	if promptPath != "" {
+		var err error
+		prompt, err = looper.LoadPrompt(promptPath)
+		if err != nil {
+			return "", nil, fmt.Errorf("failed to start loop runner: %w", err)
+		}
+	}
+
+	if tasksPath == "" {
+		return prompt, nil, nil
+	}
+
+	tasklist, err := looper.LoadTasksReport(os.Stdout, tasksPath)
+	if errors.Is(err, looper.ErrFailedTasks) {
+		return "", nil, err
+	}
+
+	if err != nil {
+		return "", nil, fmt.Errorf("failed to start loop runner: %w", err)
+	}
+
+	return prompt, tasklist, nil
 }
 
 // openRepo opens the work tree for --commit; without the flag git is never
