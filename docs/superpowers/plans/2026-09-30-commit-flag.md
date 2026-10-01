@@ -34,6 +34,7 @@
 2. **Gralph started from a subdirectory of the repository**: the clean check and the commit must cover the whole work tree, not the subdirectory. Tests in Task 1 (`TestOpenRepo_FromSubdirectoryCoversWholeTree`) and Task 2 (`TestRun_CommitFromSubdirectoryCommitsWholeTree`).
 3. **Task file already staged or tracked**: it must stay out of every commit. Test in Task 2 (`TestRun_CommitLeavesStagedTaskFileOut`).
 4. **Task file alone in an untracked directory**: must count as clean. Test in Task 1 (`TestOpenRepo_TaskFileNeverCountsAsDirty`).
+6. **Task file ignored by git** (the recommended setup): `git add` exits 1 when a pathspec names an ignored path, so an ignored task file must get no exclude pathspec. Found when the loop ran Task 4; fixed in `OpenRepo` with `(*Repo).ignored` (`git check-ignore -q`) and pinned by `TestRun_CommitWithIgnoredTaskFile`.
 5. **Odd task names** (multi-line, leading dash): the commit must succeed and messages must show only the first line. Test in Task 2 (`TestRun_CommitOddTaskNames`).
 
 ## File Structure
@@ -352,7 +353,9 @@ func OpenRepo(tasksFile string) (*Repo, error) {
 	}
 
 	r := &Repo{root: strings.TrimSpace(string(out)), paths: []string{"--", "."}}
-	if rel, ok := r.relative(tasksFile); ok {
+	// An ignored task file gets no exclude: git can never stage it, and
+	// `git add` rejects a pathspec that names an ignored path.
+	if rel, ok := r.relative(tasksFile); ok && !r.ignored(rel) {
 		r.paths = append(r.paths, ":(exclude,literal)"+rel)
 	}
 
