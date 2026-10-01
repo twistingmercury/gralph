@@ -326,6 +326,64 @@ func TestUpdate_InterruptedQuitsAfterRunDoneWithoutPrompt(t *testing.T) {
 	assert.Equal(t, tasks.PendingState, m.tasks[0].State)
 }
 
+// A finished run holds the view open for q, and no RunDone is left to close
+// it, so a signal has to close it itself or the process outlives the signal.
+func TestUpdate_InterruptedAfterRunDoneQuits(t *testing.T) {
+	m, _ := runningModel(t, func() {})
+	m, quit := step(t, m, looper.Event{Kind: looper.RunDone})
+	require.False(t, quit)
+
+	m, quit = step(t, m, interruptedMsg{})
+	assert.True(t, quit)
+	assert.Equal(t, 0, m.ExitCode())
+	assert.Equal(t, "All tasks completed", m.Summary(), "the run's outcome stands, the signal stopped nothing")
+}
+
+// A prompt left open over a finished run would swallow the q that should exit,
+// and a y would report a stop that never happened.
+func TestUpdate_RunDoneClosesStopPrompt(t *testing.T) {
+	cancelled := false
+	m, _ := runningModel(t, func() { cancelled = true })
+	m = update(t, m, key('q'))
+	require.Contains(t, render(m), stopPrompt)
+
+	m, quit := step(t, m, looper.Event{Kind: looper.RunDone, Err: errors.New("disk full")})
+	assert.False(t, quit)
+	assert.NotContains(t, render(m), stopPrompt)
+	assert.Contains(t, render(m), "Run stopped: disk full · "+legend)
+
+	m, quit = step(t, m, key('q'))
+	assert.True(t, quit, "q exits a finished run instead of answering the prompt")
+	assert.False(t, cancelled)
+	assert.Contains(t, render(m), "Run stopped: disk full · "+legend)
+	assert.Equal(t, "Run stopped: disk full", m.Summary())
+}
+
+// The signal already stops the run, so the question on screen is moot: left
+// open, it would take the next key as its answer and a y would claim the stop
+// for the user.
+func TestUpdate_InterruptedClosesStopPrompt(t *testing.T) {
+	cancelled := false
+	m, _ := runningModel(t, func() { cancelled = true })
+	m = update(t, m, key('q'))
+	require.Contains(t, render(m), stopPrompt)
+
+	m, quit := step(t, m, interruptedMsg{})
+	assert.False(t, quit, "waits for RunDone")
+	assert.NotContains(t, render(m), stopPrompt)
+	assert.Contains(t, render(m), legend)
+
+	m, quit = step(t, m, key('y'))
+	assert.False(t, quit)
+	assert.False(t, cancelled, "y answers nothing once the prompt is closed")
+	assert.Equal(t, "Run stopped by signal", m.Summary())
+
+	m, quit = step(t, m, looper.Event{Kind: looper.RunDone, Err: context.Canceled})
+	assert.True(t, quit)
+	assert.Equal(t, 1, m.ExitCode())
+	assert.Equal(t, "Run stopped by signal", m.Summary())
+}
+
 func TestUpdate_SuccessHoldsUntilQuit(t *testing.T) {
 	m, tl := runningModel(t, func() {})
 	done := tl.Tasks[0]
