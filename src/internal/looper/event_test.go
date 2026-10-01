@@ -43,15 +43,19 @@ func TestRun_ReportsTwoTaskSuccess(t *testing.T) {
 	events, err := runWithRecorder(t, tl)
 	require.NoError(t, err)
 
-	require.Equal(t, []EventKind{TaskStarted, Activity, TaskFinished, TaskStarted, Activity, TaskFinished, RunDone}, eventKinds(events))
+	require.Equal(t, []EventKind{
+		TaskStarted, Activity, SessionFinished, TaskFinished,
+		TaskStarted, Activity, SessionFinished, TaskFinished,
+		RunDone,
+	}, eventKinds(events))
 	assert.Equal(t, int16(1), events[0].Task.ID)
-	assert.Equal(t, int16(1), events[2].Task.ID)
-	assert.Equal(t, tasks.CompletedState, events[2].Task.State)
-	assert.NoError(t, events[2].Err)
-	assert.Equal(t, int16(2), events[3].Task.ID)
-	assert.Equal(t, int16(2), events[5].Task.ID)
-	assert.Equal(t, tasks.CompletedState, events[5].Task.State)
-	assert.NoError(t, events[6].Err)
+	assert.Equal(t, int16(1), events[3].Task.ID)
+	assert.Equal(t, tasks.CompletedState, events[3].Task.State)
+	assert.NoError(t, events[3].Err)
+	assert.Equal(t, int16(2), events[4].Task.ID)
+	assert.Equal(t, int16(2), events[7].Task.ID)
+	assert.Equal(t, tasks.CompletedState, events[7].Task.State)
+	assert.NoError(t, events[8].Err)
 }
 
 func TestRun_ReportsFailedTask(t *testing.T) {
@@ -65,10 +69,10 @@ func TestRun_ReportsFailedTask(t *testing.T) {
 	events, err := runWithRecorder(t, tl)
 	require.Error(t, err)
 
-	require.Equal(t, []EventKind{TaskStarted, Activity, TaskFinished, RunDone}, eventKinds(events))
-	assert.Equal(t, tasks.FailedState, events[2].Task.State)
-	assert.Error(t, events[2].Err)
-	assert.Equal(t, err, events[3].Err)
+	require.Equal(t, []EventKind{TaskStarted, Activity, SessionFinished, TaskFinished, RunDone}, eventKinds(events))
+	assert.Equal(t, tasks.FailedState, events[3].Task.State)
+	assert.Error(t, events[3].Err)
+	assert.Equal(t, err, events[4].Err)
 }
 
 func TestRun_SkippedCompletedTaskSendsNoEvent(t *testing.T) {
@@ -81,4 +85,38 @@ func TestRun_SkippedCompletedTaskSendsNoEvent(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, []EventKind{RunDone}, eventKinds(events))
+}
+
+func eventsOfKind(events []Event, kind EventKind) []Event {
+	var out []Event
+	for _, e := range events {
+		if e.Kind == kind {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+func TestRun_ReportsSessionFinished(t *testing.T) {
+	events, err := runStream(t)
+	require.NoError(t, err)
+
+	require.Equal(t, []EventKind{TaskStarted, Activity, SessionFinished, TaskFinished, RunDone}, eventKinds(events))
+	session, task, run := events[2], events[3], events[4]
+	assert.Equal(t, int16(1), session.Task.ID)
+	assert.Equal(t, tasks.CompletedState, session.Task.State)
+	assert.Positive(t, session.Duration)
+	assert.GreaterOrEqual(t, task.Duration, session.Duration)
+	assert.GreaterOrEqual(t, run.Duration, task.Duration)
+}
+
+func TestRun_SessionFinishedCarriesAFailedOutcome(t *testing.T) {
+	t.Setenv("FAKE_CLAUDE_OUTPUT", `{"state":"failed","error":"boom"}`)
+	events, err := runStream(t)
+	require.Error(t, err)
+
+	sessions := eventsOfKind(events, SessionFinished)
+	require.Len(t, sessions, 1)
+	assert.Equal(t, tasks.FailedState, sessions[0].Task.State)
+	assert.Equal(t, "boom", sessions[0].Task.Error)
 }

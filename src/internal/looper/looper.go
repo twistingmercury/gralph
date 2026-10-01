@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/twistingmercury/gralph/internal/tasks"
 )
@@ -196,9 +197,11 @@ func LoadPrompt(path string) (string, error) {
 // sessionArgs is as for Start. repo, when not nil, is where each completed
 // task is committed.
 func Run(ctx context.Context, prompt string, tl *tasks.TaskList, tasksFile, gateTimeout string, sessionArgs []string, repo *Repo, report func(Event)) error {
+	start := time.Now()
 	err := runLoop(ctx, prompt, tl, tasksFile, gateTimeout, sessionArgs, repo, report)
 	if report != nil {
-		report(Event{Kind: RunDone, Err: err})
+		elapsed := time.Since(start)
+		report(Event{Kind: RunDone, Err: err, Duration: elapsed})
 	}
 
 	return err
@@ -220,6 +223,7 @@ func runLoop(ctx context.Context, p string, tl *tasks.TaskList, tasksFile, gateT
 			report(Event{Kind: TaskStarted, Task: *task})
 		}
 
+		start := time.Now()
 		state, errMsg, err := runTask(ctx, p, *task, gateTimeout, sessionArgs, repo, report)
 		if err != nil {
 			return err
@@ -234,7 +238,8 @@ func runLoop(ctx context.Context, p string, tl *tasks.TaskList, tasksFile, gateT
 			}
 
 			if report != nil {
-				report(Event{Kind: TaskFinished, Task: *task})
+				elapsed := time.Since(start)
+				report(Event{Kind: TaskFinished, Task: *task, Duration: elapsed})
 			}
 
 			continue
@@ -246,7 +251,8 @@ func runLoop(ctx context.Context, p string, tl *tasks.TaskList, tasksFile, gateT
 		}
 
 		if report != nil {
-			report(Event{Kind: TaskFinished, Task: *task, Err: runFailure})
+			elapsed := time.Since(start)
+			report(Event{Kind: TaskFinished, Task: *task, Err: runFailure, Duration: elapsed})
 		}
 
 		return runFailure
@@ -262,7 +268,7 @@ func runTask(ctx context.Context, p string, task tasks.Task, gateTimeout string,
 	if report == nil {
 		state, errMsg, err = runTaskPlain(ctx, p, task, sessionArgs)
 	} else {
-		state, errMsg, err = runTaskStream(ctx, p, task, sessionArgs, report)
+		state, errMsg, err = runSession(ctx, p, task, sessionArgs, report)
 	}
 
 	if err != nil || state != tasks.CompletedState {

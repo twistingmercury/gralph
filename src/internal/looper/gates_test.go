@@ -664,6 +664,75 @@ func TestRun_MultiLineGateErrorsNameOnlyTheFirstLine(t *testing.T) {
 	}
 }
 
+func TestRun_ReportsGateFinished(t *testing.T) {
+	useFakeClaude(t)
+	tasksPath := filepath.Join(t.TempDir(), "tasks.yaml")
+	gates := []tasks.Gate{{Cmd: "true"}, {Cmd: "sleep 5", Timeout: "100ms"}, {Cmd: "true"}}
+
+	var rec recorder
+	err := Run(context.Background(), "prompt", gatedTask(gates...), tasksPath, "", bypass, nil, rec.report)
+	require.Error(t, err)
+
+	finished := eventsOfKind(rec.snapshot(), GateFinished)
+	require.Len(t, finished, 2, "the gate after the failed one never runs")
+	passed, timedOut := finished[0], finished[1]
+	assert.Equal(t, int16(1), passed.Task.ID)
+	assert.Equal(t, "true", passed.Gate.Cmd)
+	assert.NoError(t, passed.Err)
+	assert.Equal(t, "10m", passed.Limit)
+	assert.ErrorIs(t, timedOut.Err, context.DeadlineExceeded)
+	assert.Equal(t, "100ms", timedOut.Limit)
+	assert.GreaterOrEqual(t, timedOut.Duration, 100*time.Millisecond)
+}
+
+func TestRun_GateFinishedCarriesANonZeroExit(t *testing.T) {
+	useFakeClaude(t)
+	tasksPath := filepath.Join(t.TempDir(), "tasks.yaml")
+
+	var rec recorder
+	err := Run(context.Background(), "prompt", gatedTask(tasks.Gate{Cmd: "exit 3"}), tasksPath, "30s", bypass, nil, rec.report)
+	require.Error(t, err)
+
+	finished := eventsOfKind(rec.snapshot(), GateFinished)
+	require.Len(t, finished, 1)
+	assert.EqualError(t, finished[0].Err, "exit status 3")
+	assert.NotErrorIs(t, finished[0].Err, context.DeadlineExceeded)
+	assert.Equal(t, "30s", finished[0].Limit, "the --gate-timeout override is the limit that applied")
+}
+
+func TestRun_CancelDuringGateReportsNoGateFinished(t *testing.T) {
+	useFakeClaude(t)
+	dir := t.TempDir()
+	readyPath := filepath.Join(dir, "ready")
+	tasksPath := filepath.Join(dir, "tasks.yaml")
+	tl := gatedTask(tasks.Gate{Cmd: "touch '" + readyPath + "' && sleep 30"})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	var rec recorder
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- Run(ctx, "prompt", tl, tasksPath, "", bypass, nil, rec.report)
+	}()
+
+	require.Eventually(t, func() bool {
+		_, err := os.Stat(readyPath)
+		return err == nil
+	}, 5*time.Second, 10*time.Millisecond, "the gate never started")
+
+	cancel()
+
+	select {
+	case err := <-errCh:
+		require.Error(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run did not return after cancellation")
+	}
+
+	assert.Empty(t, eventsOfKind(rec.snapshot(), GateFinished))
+}
+
 func TestGateFirstLine(t *testing.T) {
 	assert.Equal(t, "one", firstLine("one"))
 	assert.Equal(t, "  one ", firstLine("  one \ntwo"))

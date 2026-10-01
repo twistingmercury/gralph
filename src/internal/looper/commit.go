@@ -249,7 +249,29 @@ func (r *Repo) commitChanges(ctx context.Context, task tasks.Task, report func(E
 
 	announceCommit(task, report)
 	commitCmd := r.git(ctx, "commit", "-m", task.Name)
-	return runGit(commitCmd, task, report)
+	if err := runGit(commitCmd, task, report); err != nil {
+		return err
+	}
+
+	r.reportCommitted(ctx, task, report)
+	return nil
+}
+
+// reportCommitted tells a listener which commit the task produced. The
+// commit is already made, so a failure to read its hash must not change the
+// task's outcome: the event is then simply not sent.
+func (r *Repo) reportCommitted(ctx context.Context, task tasks.Task, report func(Event)) {
+	if report == nil {
+		return
+	}
+
+	out, _, err := r.output(ctx, "rev-parse", "HEAD")
+	if err != nil {
+		return
+	}
+
+	hash := strings.TrimSpace(string(out))
+	report(Event{Kind: Committed, Task: task, Hash: hash})
 }
 
 // staged reports whether the index holds anything to commit. git diff

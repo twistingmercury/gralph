@@ -83,12 +83,12 @@ func TestRunTaskStream_Success(t *testing.T) {
 	events, err := runStream(t)
 	require.NoError(t, err)
 
-	require.Equal(t, []EventKind{TaskStarted, Activity, TaskFinished, RunDone}, eventKinds(events))
+	require.Equal(t, []EventKind{TaskStarted, Activity, SessionFinished, TaskFinished, RunDone}, eventKinds(events))
 	assert.Equal(t, "working", events[1].Line)
 	assert.Equal(t, int16(1), events[1].Task.ID)
-	assert.Equal(t, tasks.CompletedState, events[2].Task.State)
-	assert.NoError(t, events[2].Err)
+	assert.Equal(t, tasks.CompletedState, events[3].Task.State)
 	assert.NoError(t, events[3].Err)
+	assert.NoError(t, events[4].Err)
 }
 
 func TestRunTaskStream_ResultReportsFailed(t *testing.T) {
@@ -96,9 +96,9 @@ func TestRunTaskStream_ResultReportsFailed(t *testing.T) {
 	events, err := runStream(t)
 	require.Error(t, err)
 
-	require.Equal(t, []EventKind{TaskStarted, Activity, TaskFinished, RunDone}, eventKinds(events))
-	assert.Equal(t, tasks.FailedState, events[2].Task.State)
-	assert.Equal(t, "boom", events[2].Task.Error)
+	require.Equal(t, []EventKind{TaskStarted, Activity, SessionFinished, TaskFinished, RunDone}, eventKinds(events))
+	assert.Equal(t, tasks.FailedState, events[3].Task.State)
+	assert.Equal(t, "boom", events[3].Task.Error)
 }
 
 func TestRunTaskStream_NonZeroExitFails(t *testing.T) {
@@ -106,8 +106,8 @@ func TestRunTaskStream_NonZeroExitFails(t *testing.T) {
 	events, err := runStream(t)
 	require.Error(t, err)
 
-	require.Equal(t, []EventKind{TaskStarted, Activity, TaskFinished, RunDone}, eventKinds(events))
-	assert.Equal(t, tasks.FailedState, events[2].Task.State)
+	require.Equal(t, []EventKind{TaskStarted, Activity, SessionFinished, TaskFinished, RunDone}, eventKinds(events))
+	assert.Equal(t, tasks.FailedState, events[3].Task.State)
 }
 
 func TestRunTaskStream_BigEventStillCompletes(t *testing.T) {
@@ -163,6 +163,7 @@ func TestRunTaskStream_CancelLeavesTasksFileUntouched(t *testing.T) {
 	}
 
 	assert.NotContains(t, eventKinds(rec.snapshot()), TaskFinished)
+	assert.NotContains(t, eventKinds(rec.snapshot()), SessionFinished)
 	got, err := os.ReadFile(tasksPath)
 	require.NoError(t, err)
 	assert.Equal(t, tasksYAML, string(got))

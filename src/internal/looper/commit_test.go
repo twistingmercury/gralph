@@ -663,6 +663,38 @@ func TestRun_StreamReportsCommitAsActivity(t *testing.T) {
 	assert.Equal(t, []EventKind{TaskFinished, RunDone}, kinds[len(kinds)-2:], "TaskFinished must follow the commit's activity")
 }
 
+func TestRun_ReportsCommittedWithTheNewHash(t *testing.T) {
+	useFakeClaude(t)
+	dir := initRepo(t)
+	tasksPath := taskFile(dir)
+	repo := openRepo(t, tasksPath)
+
+	var rec recorder
+	require.NoError(t, Run(context.Background(), "prompt", gatedTask(workGate("one.txt")), tasksPath, "", bypass, repo, rec.report))
+
+	events := rec.snapshot()
+	commits := eventsOfKind(events, Committed)
+	require.Len(t, commits, 1)
+	head := strings.TrimSpace(gitRun(t, dir, "rev-parse", "HEAD"))
+	assert.Equal(t, head, commits[0].Hash)
+	assert.Equal(t, int16(1), commits[0].Task.ID)
+
+	kinds := eventKinds(events)
+	assert.Equal(t, []EventKind{Committed, TaskFinished, RunDone}, kinds[len(kinds)-3:], "Committed comes after git's output and before TaskFinished")
+}
+
+func TestRun_NothingStagedReportsNoCommitted(t *testing.T) {
+	useFakeClaude(t)
+	dir := initRepo(t)
+	tasksPath := taskFile(dir)
+	repo := openRepo(t, tasksPath)
+
+	var rec recorder
+	require.NoError(t, Run(context.Background(), "prompt", gatedTask(), tasksPath, "", bypass, repo, rec.report))
+
+	assert.Empty(t, eventsOfKind(rec.snapshot(), Committed))
+}
+
 // cancelDuringCommit runs one task whose pre-commit hook is script, cancels
 // the context once the hook has started, and returns how long Run took to
 // return after the cancel and its error.
