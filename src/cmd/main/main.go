@@ -36,7 +36,11 @@ func main() {
 	checkVersion()
 	checkInstallSkill()
 	validateGateTimeout()
-	plain := isPlain(*dryRunFlag, *noTUIFlag, term.IsTerminal(os.Stdin.Fd()), term.IsTerminal(os.Stdout.Fd()))
+	stdinFd := os.Stdin.Fd()
+	stdinTTY := term.IsTerminal(stdinFd)
+	stdoutFd := os.Stdout.Fd()
+	stdoutTTY := term.IsTerminal(stdoutFd)
+	plain := isPlain(*dryRunFlag, *noTUIFlag, stdinTTY, stdoutTTY)
 	if plain {
 		validateRequiredFlags()
 	}
@@ -61,7 +65,8 @@ func main() {
 	defer stop()
 
 	if !plain {
-		os.Exit(runTUI(ctx, session))
+		exitCode := runTUI(ctx, session)
+		os.Exit(exitCode)
 	}
 
 	if err := looper.Start(ctx, *promptFlag, *tasksFlag, *gateTimeoutFlag, session, *commitFlag); err != nil {
