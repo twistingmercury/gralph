@@ -71,21 +71,26 @@ func TestUpdate_StatusesFollowEvents(t *testing.T) {
 	assert.Contains(t, render(m), row("✅", "1: First: completed", tasks.CompletedState))
 }
 
+// The styles are spelled out here rather than read from rowStyles, so the test
+// says which state gets which colour and a swap in that map fails it.
 func TestRenderTasks_RowFormatAndStylePerState(t *testing.T) {
 	states := []struct {
 		state, icon string
+		style       lipgloss.Style
 	}{
-		{tasks.PendingState, "  "},
-		{inProgressState, "▶ "},
-		{tasks.CompletedState, "✅"},
-		{tasks.FailedState, "❌"},
+		{tasks.PendingState, "  ", lipgloss.NewStyle().Foreground(lipgloss.Color("7"))},
+		{inProgressState, "▶ ", lipgloss.NewStyle().Italic(true).Foreground(lipgloss.Color("3"))},
+		{tasks.CompletedState, "✅", lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("10"))},
+		{tasks.FailedState, "❌", lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("9"))},
 	}
 	for _, tc := range states {
 		t.Run(tc.state, func(t *testing.T) {
 			m := New(&tasks.TaskList{Tasks: []tasks.Task{{ID: 26, Name: "Name", Prompt: "p", State: tc.state}}}, func() {})
+			text := "26: Name: " + tc.state
+			styled := tc.style.Render(text)
 
-			assert.Equal(t, row(tc.icon, "26: Name: "+tc.state, tc.state), m.taskPane.GetContent())
-			assert.NotEqual(t, "26: Name: "+tc.state, rowStyles[tc.state].Render("26: Name: "+tc.state))
+			assert.Equal(t, tc.icon+" "+styled, m.taskPane.GetContent())
+			assert.NotEqual(t, text, styled)
 		})
 	}
 }

@@ -145,6 +145,7 @@ func TestRun_OutsideCancelStopsRun(t *testing.T) {
 	r := waitRun(t, done)
 	require.NoError(t, r.err)
 	assert.Equal(t, 1, r.code)
+	assert.Equal(t, "Run stopped by signal", r.summary)
 	got, err := os.ReadFile(tasksPath)
 	require.NoError(t, err)
 	assert.Equal(t, tasksYAML, string(got))
