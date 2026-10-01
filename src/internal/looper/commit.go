@@ -73,17 +73,21 @@ func findRoot() (string, error) {
 		return "", nil
 	}
 
-	if slices.ContainsFunc(notARepo, func(msg string) bool { return strings.Contains(stderr.String(), msg) }) {
+	gitStderr := stderr.String()
+	if slices.ContainsFunc(notARepo, func(msg string) bool { return strings.Contains(gitStderr, msg) }) {
 		return "", nil
 	}
 
-	return "", fmt.Errorf("--commit: git rev-parse: %s", gitMessage(err, stderr.String()))
+	reason := gitMessage(err, gitStderr)
+	return "", fmt.Errorf("--commit: git rev-parse: %s", reason)
 }
 
 // gitMessage is why a git command failed: the first line of its stderr
 // without git's "fatal: " prefix, or err when git said nothing.
 func gitMessage(err error, stderr string) string {
-	msg := strings.TrimPrefix(firstLine(strings.TrimSpace(stderr)), "fatal: ")
+	trimmed := strings.TrimSpace(stderr)
+	first := firstLine(trimmed)
+	msg := strings.TrimPrefix(first, "fatal: ")
 	if msg == "" {
 		return err.Error()
 	}
@@ -119,11 +123,14 @@ func (r *Repo) checkClean() error {
 	// names readable in the error.
 	dirty, stderr, err := r.output(context.Background(), "-c", "core.quotePath=false", "status", "--porcelain", "--untracked-files=all")
 	if err != nil {
-		return fmt.Errorf("--commit: git status: %s", gitMessage(err, stderr))
+		reason := gitMessage(err, stderr)
+		return fmt.Errorf("--commit: git status: %s", reason)
 	}
 
-	if len(bytes.TrimSpace(dirty)) > 0 {
-		return fmt.Errorf("--commit needs a clean work tree; commit, stash, or remove:\n%s", strings.TrimRight(string(dirty), "\n"))
+	changes := bytes.TrimSpace(dirty)
+	if len(changes) > 0 {
+		files := strings.TrimRight(string(dirty), "\n")
+		return fmt.Errorf("--commit needs a clean work tree; commit, stash, or remove:\n%s", files)
 	}
 
 	return nil
@@ -139,7 +146,10 @@ func (r *Repo) relative(path string) (string, bool) {
 	}
 
 	// git reports the root with symlinks resolved, so the path must be too.
-	abs = filepath.Join(resolveExisting(filepath.Dir(abs)), filepath.Base(abs))
+	dir := filepath.Dir(abs)
+	resolvedDir := resolveExisting(dir)
+	base := filepath.Base(abs)
+	abs = filepath.Join(resolvedDir, base)
 
 	rel, err := filepath.Rel(r.root, abs)
 	if err != nil || !filepath.IsLocal(rel) {
@@ -161,7 +171,9 @@ func resolveExisting(dir string) string {
 		return dir
 	}
 
-	return filepath.Join(resolveExisting(parent), filepath.Base(dir))
+	resolvedParent := resolveExisting(parent)
+	base := filepath.Base(dir)
+	return filepath.Join(resolvedParent, base)
 }
 
 // ignored reports whether git ignores rel, a path relative to the root.
@@ -177,7 +189,8 @@ func (r *Repo) ignored(rel string) (bool, error) {
 	case errors.As(err, &exit) && exit.ExitCode() == 1:
 		return false, nil
 	default:
-		return false, fmt.Errorf("--commit: git check-ignore: %s", gitMessage(err, stderr))
+		reason := gitMessage(err, stderr)
+		return false, fmt.Errorf("--commit: git check-ignore: %s", reason)
 	}
 }
 
@@ -224,7 +237,8 @@ func (r *Repo) commit(ctx context.Context, task tasks.Task, report func(Event)) 
 // nothing is not an error and gets no empty commit; that also covers a
 // session that committed by itself.
 func (r *Repo) commitChanges(ctx context.Context, task tasks.Task, report func(Event)) error {
-	if err := runGit(r.git(ctx, "add", "-A"), task, report); err != nil {
+	addCmd := r.git(ctx, "add", "-A")
+	if err := runGit(addCmd, task, report); err != nil {
 		return err
 	}
 
@@ -234,7 +248,8 @@ func (r *Repo) commitChanges(ctx context.Context, task tasks.Task, report func(E
 	}
 
 	announceCommit(task, report)
-	return runGit(r.git(ctx, "commit", "-m", task.Name), task, report)
+	commitCmd := r.git(ctx, "commit", "-m", task.Name)
+	return runGit(commitCmd, task, report)
 }
 
 // staged reports whether the index holds anything to commit. git diff
