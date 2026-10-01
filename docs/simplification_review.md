@@ -27,6 +27,24 @@ Line numbers are as of the commit above. Items are ordered most valuable first.
 | 11  | `internal/skillinstall/skillinstall.go`           | Skill path built twice; nested `VERSION` parse           | Low  |
 | 12  | `internal/tasks/task.go`                          | Four small cleanups                                      | None |
 
+## Outcome
+
+Applied on branch `maint/code-simply` by a gralph loop run with `--commit`, one
+commit per task. A second rule was added during the work and applied first:
+never pass a function call as an argument (see the code style list in
+`CLAUDE.md`); 71 places changed.
+
+| Finding                  | Result                                                                 |
+| ------------------------ | ---------------------------------------------------------------------- |
+| 1                        | Applied: `Update` is a short dispatch over named handlers              |
+| 2                        | Applied: `fatal(err)` in `main.go`                                     |
+| 3                        | Applied: `loadGiven`, with unit tests; the cross-package helper was not |
+| 4                        | Not applied, on purpose: the two drains may diverge                    |
+| 5                        | Applied to the signal forwarder (`forwardSignal`); the two-line loop goroutine stays inline |
+| 6, 7, 8, 9, 10           | Applied                                                                |
+| 11, 12                   | Not applied                                                            |
+| Optional run-parameter struct | Not applied                                                       |
+
 ## Read against "simplify means readable"
 
 The owner's definition of simplify: easy to read, intent explicit, and
