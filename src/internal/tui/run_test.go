@@ -53,6 +53,12 @@ type runResult struct {
 // input pipe's writer and a channel with Run's result.
 func startRun(t *testing.T, ctx context.Context, tasksPath string) (*io.PipeWriter, <-chan runResult) {
 	t.Helper()
+	return startRunIn(t, ctx, tasksPath, nil)
+}
+
+// startRunIn is startRun for a run that commits into repo; nil means no git.
+func startRunIn(t *testing.T, ctx context.Context, tasksPath string, repo *looper.Repo) (*io.PipeWriter, <-chan runResult) {
+	t.Helper()
 	t.Setenv("PATH", fakeClaudeDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	data, err := os.ReadFile(tasksPath)
 	require.NoError(t, err)
@@ -63,7 +69,7 @@ func startRun(t *testing.T, ctx context.Context, tasksPath string) (*io.PipeWrit
 	t.Cleanup(func() { _ = w.Close() })
 	done := make(chan runResult, 1)
 	go func() {
-		code, summary, err := Run(ctx, "prompt", &tl, tasksPath, "", looper.BypassArgs(), nil,
+		code, summary, err := Run(ctx, "prompt", &tl, tasksPath, "", looper.BypassArgs(), repo,
 			tea.WithInput(in), tea.WithOutput(io.Discard), tea.WithWindowSize(120, 30))
 		done <- runResult{code, summary, err}
 	}()
@@ -142,4 +148,60 @@ func TestRun_OutsideCancelStopsRun(t *testing.T) {
 	got, err := os.ReadFile(tasksPath)
 	require.NoError(t, err)
 	assert.Equal(t, tasksYAML, string(got))
+}
+
+// initGitRepo makes a repository with one commit that ignores run/, where the
+// task file lives, and moves the test into it so a gate's work lands there.
+func initGitRepo(t *testing.T) string {
+	t.Helper()
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
+
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	t.Setenv("GIT_AUTHOR_NAME", "Test")
+	t.Setenv("GIT_AUTHOR_EMAIL", "test@example.com")
+	t.Setenv("GIT_COMMITTER_NAME", "Test")
+	t.Setenv("GIT_COMMITTER_EMAIL", "test@example.com")
+	t.Setenv("GIT_CEILING_DIRECTORIES", filepath.Dir(dir))
+	t.Chdir(dir)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".gitignore"), []byte("run/\n"), 0o600))
+	require.NoError(t, os.Mkdir(filepath.Join(dir, "run"), 0o750))
+	for _, args := range [][]string{{"init", "-q"}, {"add", ".gitignore"}, {"commit", "-q", "-m", "init"}} {
+		out, err := exec.Command("git", args...).CombinedOutput()
+		require.NoError(t, err, "git %v: %s", args, out)
+	}
+
+	return dir
+}
+
+func TestRun_CommitsEachTaskIntoTheRepo(t *testing.T) {
+	dir := initGitRepo(t)
+	tasksPath := filepath.Join(dir, "run", "tasks.yaml")
+	require.NoError(t, os.WriteFile(tasksPath, []byte(
+		"tasks:\n  - id: 1\n    name: First\n    prompt: p1\n    gates:\n      - cmd: echo work > one.txt\n"), 0o600))
+	repo, err := looper.OpenRepo(tasksPath)
+	require.NoError(t, err)
+	require.NotNil(t, repo)
+
+	w, done := startRunIn(t, context.Background(), tasksPath, repo)
+
+	// Keep pressing q until Run returns, as TestRun_TwoTasksCompleteThenQuit
+	// does; the view only closes after the run, commit included, is done.
+	go func() {
+		for {
+			if _, err := w.Write([]byte("q")); err != nil {
+				return
+			}
+
+			time.Sleep(50 * time.Millisecond)
+		}
+	}()
+	r := waitRun(t, done)
+	require.NoError(t, r.err)
+	assert.Equal(t, 0, r.code)
+
+	out, err := exec.Command("git", "log", "--format=%s").Output()
+	require.NoError(t, err)
+	assert.Equal(t, "First\ninit\n", string(out))
 }

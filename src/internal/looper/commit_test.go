@@ -39,7 +39,9 @@ func tempDir(t *testing.T) string {
 }
 
 // initRepo makes a git repository holding one commit and moves the test into
-// it. It uses t.Setenv and t.Chdir, so the calling test must not be parallel.
+// it. The commit ignores run/, where tests keep the task file as a --commit
+// run requires, and the directory exists so Run can save the file. It uses
+// t.Setenv and t.Chdir, so the calling test must not be parallel.
 func initRepo(t *testing.T) string {
 	t.Helper()
 	dir := tempDir(t)
@@ -47,9 +49,25 @@ func initRepo(t *testing.T) string {
 	t.Chdir(dir)
 	gitRun(t, dir, "init", "-q")
 	writeFile(t, filepath.Join(dir, "seed.txt"), "seed\n")
-	gitRun(t, dir, "add", "seed.txt")
+	writeFile(t, filepath.Join(dir, ".gitignore"), "run/\n")
+	gitRun(t, dir, "add", "seed.txt", ".gitignore")
 	gitRun(t, dir, "commit", "-q", "-m", "init")
+	require.NoError(t, os.Mkdir(filepath.Join(dir, "run"), 0o750))
 	return dir
+}
+
+// ignoreAndCommit replaces .gitignore with patterns and commits it, so the
+// tree stays clean.
+func ignoreAndCommit(t *testing.T, dir string, patterns ...string) {
+	t.Helper()
+	writeFile(t, filepath.Join(dir, ".gitignore"), strings.Join(patterns, "\n")+"\n")
+	gitRun(t, dir, "add", ".gitignore")
+	gitRun(t, dir, "commit", "-q", "-m", "ignore")
+}
+
+// taskFile is where tests keep the task file: inside the ignored run/.
+func taskFile(dir string) string {
+	return filepath.Join(dir, "run", "tasks.yaml")
 }
 
 func gitRun(t *testing.T, dir string, args ...string) string {
@@ -72,7 +90,7 @@ func TestOpenRepo_OutsideARepositoryIsNil(t *testing.T) {
 	isolateGit(t, dir)
 	t.Chdir(dir)
 
-	repo, err := OpenRepo(filepath.Join(dir, "tasks.yaml"))
+	repo, err := OpenRepo(taskFile(dir))
 	require.NoError(t, err)
 	assert.Nil(t, repo)
 }
@@ -81,7 +99,7 @@ func TestOpenRepo_GitNotInstalledIsNil(t *testing.T) {
 	dir := initRepo(t)
 	t.Setenv("PATH", t.TempDir())
 
-	repo, err := OpenRepo(filepath.Join(dir, "tasks.yaml"))
+	repo, err := OpenRepo(taskFile(dir))
 	require.NoError(t, err)
 	assert.Nil(t, repo)
 }
@@ -89,7 +107,7 @@ func TestOpenRepo_GitNotInstalledIsNil(t *testing.T) {
 func TestOpenRepo_CleanTree(t *testing.T) {
 	dir := initRepo(t)
 
-	repo, err := OpenRepo(filepath.Join(dir, "tasks.yaml"))
+	repo, err := OpenRepo(taskFile(dir))
 	require.NoError(t, err)
 	require.NotNil(t, repo)
 	assert.Equal(t, dir, repo.Root())
@@ -111,15 +129,18 @@ func TestOpenRepo_DirtyTreeIsRefused(t *testing.T) {
 		{name: "untracked", wantLine: "?? stray.txt", dirty: func(t *testing.T, dir string) {
 			writeFile(t, filepath.Join(dir, "stray.txt"), "stray\n")
 		}},
-		{name: "untracked beside the task file", wantLine: "?? run/prompt.md", dirty: func(t *testing.T, dir string) {
-			writeFile(t, filepath.Join(dir, "run", "prompt.md"), "prompt\n")
+		{name: "untracked file in a new directory is named", wantLine: "?? docs/notes.md", dirty: func(t *testing.T, dir string) {
+			writeFile(t, filepath.Join(dir, "docs", "notes.md"), "notes\n")
+		}},
+		{name: "non-ASCII path is readable", wantLine: "?? café.txt", dirty: func(t *testing.T, dir string) {
+			writeFile(t, filepath.Join(dir, "café.txt"), "latte\n")
 		}},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			dir := initRepo(t)
-			tasksPath := filepath.Join(dir, "run", "tasks.yaml")
+			tasksPath := taskFile(dir)
 			writeFile(t, tasksPath, "tasks: []\n")
 			tt.dirty(t, dir)
 
@@ -130,78 +151,128 @@ func TestOpenRepo_DirtyTreeIsRefused(t *testing.T) {
 	}
 }
 
-func TestOpenRepo_TaskFileNeverCountsAsDirty(t *testing.T) {
+func TestOpenRepo_IgnoredFilesAreClean(t *testing.T) {
+	dir := initRepo(t)
+	writeFile(t, filepath.Join(dir, "run", "prompt.md"), "prompt\n")
+	tasksPath := taskFile(dir)
+	writeFile(t, tasksPath, "tasks: []\n")
+
+	repo, err := OpenRepo(tasksPath)
+	require.NoError(t, err)
+	assert.NotNil(t, repo)
+}
+
+func TestOpenRepo_TaskFileMustBeIgnoredOrOutside(t *testing.T) {
 	tests := []struct {
-		name  string
-		setup func(t *testing.T, dir, tasksPath string)
+		name    string
+		setup   func(t *testing.T, dir string) string
+		wantRel string
 	}{
-		{name: "untracked in the root", setup: func(*testing.T, string, string) {}},
-		{name: "tracked and modified", setup: func(t *testing.T, dir, tasksPath string) {
-			gitRun(t, dir, "add", tasksPath)
-			gitRun(t, dir, "commit", "-q", "-m", "track tasks")
-			writeFile(t, tasksPath, "tasks: [changed]\n")
+		{name: "untracked and not ignored", wantRel: "tasks.yaml", setup: func(t *testing.T, dir string) string {
+			path := filepath.Join(dir, "tasks.yaml")
+			writeFile(t, path, "tasks: []\n")
+			return path
 		}},
-		{name: "staged", setup: func(t *testing.T, dir, tasksPath string) {
-			gitRun(t, dir, "add", tasksPath)
+		{name: "tracked", wantRel: "tasks.yaml", setup: func(t *testing.T, dir string) string {
+			path := filepath.Join(dir, "tasks.yaml")
+			writeFile(t, path, "tasks: []\n")
+			gitRun(t, dir, "add", "tasks.yaml")
+			gitRun(t, dir, "commit", "-q", "-m", "track tasks")
+			return path
+		}},
+		{name: "staged", wantRel: "tasks.yaml", setup: func(t *testing.T, dir string) string {
+			path := filepath.Join(dir, "tasks.yaml")
+			writeFile(t, path, "tasks: []\n")
+			gitRun(t, dir, "add", "tasks.yaml")
+			return path
+		}},
+		{name: "tracked but matching an ignore pattern", wantRel: "tasks.yaml", setup: func(t *testing.T, dir string) string {
+			path := filepath.Join(dir, "tasks.yaml")
+			writeFile(t, path, "tasks: []\n")
+			gitRun(t, dir, "add", "tasks.yaml")
+			gitRun(t, dir, "commit", "-q", "-m", "track tasks")
+			ignoreAndCommit(t, dir, "run/", "tasks.yaml")
+			return path
+		}},
+		{name: "relative path", wantRel: "docs/tasks.yaml", setup: func(t *testing.T, dir string) string {
+			writeFile(t, filepath.Join(dir, "docs", "tasks.yaml"), "tasks: []\n")
+			return filepath.Join("docs", "tasks.yaml")
+		}},
+		{name: "untracked symlink to a file outside the tree", wantRel: "link.yaml", setup: func(t *testing.T, dir string) string {
+			target := filepath.Join(tempDir(t), "tasks.yaml")
+			writeFile(t, target, "tasks: []\n")
+			link := filepath.Join(dir, "link.yaml")
+			require.NoError(t, os.Symlink(target, link))
+			return link
 		}},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			dir := initRepo(t)
-			tasksPath := filepath.Join(dir, "tasks.yaml")
-			writeFile(t, tasksPath, "tasks: []\n")
-			tt.setup(t, dir, tasksPath)
+			path := tt.setup(t, dir)
 
-			repo, err := OpenRepo(tasksPath)
-			require.NoError(t, err)
-			assert.NotNil(t, repo)
+			repo, err := OpenRepo(path)
+			assert.Nil(t, repo)
+			require.EqualError(t, err, "--commit needs the task file ignored by git or outside the repository: "+tt.wantRel)
 		})
 	}
 }
 
-func TestOpenRepo_TaskFileAloneInUntrackedDirIsClean(t *testing.T) {
-	dir := initRepo(t)
-	tasksPath := filepath.Join(dir, "run", "tasks.yaml")
-	writeFile(t, tasksPath, "tasks: []\n")
+func TestOpenRepo_TaskFileIgnoredOrOutsideIsAccepted(t *testing.T) {
+	tests := []struct {
+		name  string
+		setup func(t *testing.T, dir string) string
+	}{
+		{name: "ignored by a directory pattern", setup: func(t *testing.T, dir string) string {
+			path := taskFile(dir)
+			writeFile(t, path, "tasks: []\n")
+			return path
+		}},
+		{name: "ignored by a pattern naming the file", setup: func(t *testing.T, dir string) string {
+			ignoreAndCommit(t, dir, "tasks.yaml")
+			path := filepath.Join(dir, "tasks.yaml")
+			writeFile(t, path, "tasks: []\n")
+			return path
+		}},
+		{name: "outside the tree", setup: func(t *testing.T, _ string) string {
+			path := filepath.Join(tempDir(t), "tasks.yaml")
+			writeFile(t, path, "tasks: []\n")
+			return path
+		}},
+		{name: "not yet created in an ignored directory", setup: func(_ *testing.T, dir string) string {
+			return taskFile(dir)
+		}},
+		{name: "not yet created in a directory that does not exist", setup: func(_ *testing.T, dir string) string {
+			return filepath.Join(dir, "run", "later", "tasks.yaml")
+		}},
+		{name: "relative and ignored", setup: func(t *testing.T, dir string) string {
+			writeFile(t, taskFile(dir), "tasks: []\n")
+			return filepath.Join("run", "tasks.yaml")
+		}},
+	}
 
-	repo, err := OpenRepo(tasksPath)
-	require.NoError(t, err)
-	assert.NotNil(t, repo)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := initRepo(t)
+
+			repo, err := OpenRepo(tt.setup(t, dir))
+			require.NoError(t, err)
+			require.NotNil(t, repo)
+			assert.Equal(t, dir, repo.Root())
+		})
+	}
 }
 
-func TestOpenRepo_RelativeTaskPathIsExcluded(t *testing.T) {
+func TestOpenRepo_TaskFileReachedThroughASymlinkedDirectory(t *testing.T) {
 	dir := initRepo(t)
-	writeFile(t, filepath.Join(dir, "run", "tasks.yaml"), "tasks: []\n")
+	writeFile(t, taskFile(dir), "tasks: []\n")
+	alias := filepath.Join(tempDir(t), "alias")
+	require.NoError(t, os.Symlink(filepath.Join(dir, "run"), alias))
 
-	repo, err := OpenRepo(filepath.Join("run", "tasks.yaml"))
+	repo, err := OpenRepo(filepath.Join(alias, "tasks.yaml"))
 	require.NoError(t, err)
-	assert.NotNil(t, repo)
-}
-
-func TestOpenRepo_IgnoredFilesAreClean(t *testing.T) {
-	dir := initRepo(t)
-	writeFile(t, filepath.Join(dir, ".gitignore"), "run/\n")
-	gitRun(t, dir, "add", ".gitignore")
-	gitRun(t, dir, "commit", "-q", "-m", "ignore run")
-	writeFile(t, filepath.Join(dir, "run", "prompt.md"), "prompt\n")
-	tasksPath := filepath.Join(dir, "run", "tasks.yaml")
-	writeFile(t, tasksPath, "tasks: []\n")
-
-	repo, err := OpenRepo(tasksPath)
-	require.NoError(t, err)
-	assert.NotNil(t, repo)
-}
-
-func TestOpenRepo_TaskFileOutsideTheTree(t *testing.T) {
-	dir := initRepo(t)
-	outside := filepath.Join(tempDir(t), "tasks.yaml")
-	writeFile(t, outside, "tasks: []\n")
-
-	repo, err := OpenRepo(outside)
-	require.NoError(t, err)
-	require.NotNil(t, repo)
-	assert.Equal(t, dir, repo.Root())
+	assert.NotNil(t, repo, "the parent directory resolves into the tree, where run/ is ignored")
 }
 
 func TestOpenRepo_FromSubdirectoryCoversWholeTree(t *testing.T) {
@@ -211,9 +282,37 @@ func TestOpenRepo_FromSubdirectoryCoversWholeTree(t *testing.T) {
 	writeFile(t, filepath.Join(dir, "stray.txt"), "stray\n")
 	t.Chdir(sub)
 
-	repo, err := OpenRepo(filepath.Join(dir, "tasks.yaml"))
+	repo, err := OpenRepo(taskFile(dir))
 	assert.Nil(t, repo)
 	require.ErrorContains(t, err, "?? stray.txt")
+}
+
+func TestOpenRepo_BrokenRepositoryIsAnError(t *testing.T) {
+	dir := initRepo(t)
+	config, err := os.OpenFile(filepath.Join(dir, ".git", "config"), os.O_APPEND|os.O_WRONLY, 0o600)
+	require.NoError(t, err)
+	_, err = config.WriteString("[broken\n")
+	require.NoError(t, err)
+	require.NoError(t, config.Close())
+
+	repo, err := OpenRepo(taskFile(dir))
+	assert.Nil(t, repo)
+	require.Error(t, err)
+	assert.True(t, strings.HasPrefix(err.Error(), "--commit: git rev-parse: "), err.Error())
+	assert.NotContains(t, err.Error(), "fatal:", "git's own prefix is dropped")
+	assert.NotContains(t, err.Error(), "\n", "only git's first line")
+}
+
+func TestOpenRepo_StatusFailureCarriesGitsMessage(t *testing.T) {
+	dir := initRepo(t)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".git", "index"), []byte("garbage"), 0o600))
+
+	// Outside the tree, so the task file check does not touch the index first.
+	repo, err := OpenRepo(filepath.Join(tempDir(t), "tasks.yaml"))
+	assert.Nil(t, repo)
+	require.Error(t, err)
+	assert.True(t, strings.HasPrefix(err.Error(), "--commit: git status: "), err.Error())
+	assert.NotContains(t, err.Error(), "exit status", "git's message replaces the bare exit status")
 }
 
 // workGate stands in for a session's work: the fake claude changes no files,
@@ -261,7 +360,7 @@ func TestRun_CommitsOneCommitPerCompletedTask(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			useFakeClaude(t)
 			dir := initRepo(t)
-			tasksPath := filepath.Join(dir, "tasks.yaml")
+			tasksPath := taskFile(dir)
 			tl := &tasks.TaskList{Tasks: []tasks.Task{
 				{ID: 1, Name: "First", Prompt: "p1", Gates: []tasks.Gate{workGate("one.txt")}},
 				{ID: 2, Name: "Second", Prompt: "p2", Gates: []tasks.Gate{workGate("two.txt")}},
@@ -277,7 +376,7 @@ func TestRun_CommitsOneCommitPerCompletedTask(t *testing.T) {
 
 			assert.Equal(t, []string{"Second", "First", "init"}, subjects(t, dir))
 			assert.Equal(t, []string{"two.txt"}, headFiles(t, dir))
-			assert.Equal(t, "?? tasks.yaml\n", gitRun(t, dir, "status", "--porcelain"), "only the task file may be left uncommitted")
+			assert.Empty(t, gitRun(t, dir, "status", "--porcelain"), "nothing may be left uncommitted")
 
 			saved := readSavedTasks(t, tasksPath)
 			assert.Equal(t, tasks.CompletedState, saved.Tasks[0].State)
@@ -289,7 +388,7 @@ func TestRun_CommitsOneCommitPerCompletedTask(t *testing.T) {
 func TestRun_NilRepoNeverCommits(t *testing.T) {
 	useFakeClaude(t)
 	dir := initRepo(t)
-	tasksPath := filepath.Join(dir, "tasks.yaml")
+	tasksPath := taskFile(dir)
 	tl := gatedTask(workGate("one.txt"))
 
 	require.NoError(t, Run(context.Background(), "prompt", tl, tasksPath, "", bypass, nil, nil))
@@ -301,7 +400,7 @@ func TestRun_NilRepoNeverCommits(t *testing.T) {
 func TestRun_NothingToCommitStillCompletes(t *testing.T) {
 	useFakeClaude(t)
 	dir := initRepo(t)
-	tasksPath := filepath.Join(dir, "tasks.yaml")
+	tasksPath := taskFile(dir)
 	tl := gatedTask()
 
 	require.NoError(t, Run(context.Background(), "prompt", tl, tasksPath, "", bypass, openRepo(t, tasksPath), nil))
@@ -313,7 +412,7 @@ func TestRun_NothingToCommitStillCompletes(t *testing.T) {
 func TestRun_FailedGateLeavesChangesUncommitted(t *testing.T) {
 	useFakeClaude(t)
 	dir := initRepo(t)
-	tasksPath := filepath.Join(dir, "tasks.yaml")
+	tasksPath := taskFile(dir)
 	tl := gatedTask(tasks.Gate{Cmd: "echo work > one.txt; exit 1"})
 
 	err := Run(context.Background(), "prompt", tl, tasksPath, "", bypass, openRepo(t, tasksPath), nil)
@@ -327,7 +426,7 @@ func TestRun_SessionFailureSkipsCommit(t *testing.T) {
 	useFakeClaude(t)
 	t.Setenv("FAKE_CLAUDE_OUTPUT", `{"state":"failed","error":"nope"}`)
 	dir := initRepo(t)
-	tasksPath := filepath.Join(dir, "tasks.yaml")
+	tasksPath := taskFile(dir)
 	repo := openRepo(t, tasksPath)
 	writeFile(t, filepath.Join(dir, "left.txt"), "left by the session\n")
 
@@ -342,7 +441,7 @@ func TestRun_CommitFailureFailsTaskAndStopsRun(t *testing.T) {
 	installHook(t, dir, "echo hook-says-no >&2\nexit 1")
 	recordPath := filepath.Join(tempDir(t), "record.log")
 	t.Setenv("FAKE_CLAUDE_RECORD", recordPath)
-	tasksPath := filepath.Join(dir, "tasks.yaml")
+	tasksPath := taskFile(dir)
 	tl := &tasks.TaskList{Tasks: []tasks.Task{
 		{ID: 1, Name: "First", Prompt: "p1", Gates: []tasks.Gate{workGate("one.txt")}},
 		{ID: 2, Name: "Second", Prompt: "p2"},
@@ -361,47 +460,55 @@ func TestRun_CommitFailureFailsTaskAndStopsRun(t *testing.T) {
 	assert.Equal(t, tasks.PendingState, saved.Tasks[1].State)
 }
 
-func TestRun_CommitLeavesStagedTaskFileOut(t *testing.T) {
+// The task file is rewritten after every task and git must never see it, so
+// a gate that appends its own ignore pattern or edits .gitignore must not
+// disturb the commit: the edit is simply part of the task's work.
+func TestRun_CommitSurvivesAGateEditingGitignore(t *testing.T) {
 	useFakeClaude(t)
 	dir := initRepo(t)
-	tasksPath := filepath.Join(dir, "tasks.yaml")
-	writeFile(t, tasksPath, "tasks: []\n")
-	gitRun(t, dir, "add", "tasks.yaml")
+	tasksPath := taskFile(dir)
+	tl := gatedTask(
+		tasks.Gate{Cmd: "echo 'run/' >> .gitignore"},
+		tasks.Gate{Cmd: "echo '*.log' >> .gitignore"},
+		workGate("one.txt"),
+	)
 
-	require.NoError(t, Run(context.Background(), "prompt", gatedTask(workGate("one.txt")), tasksPath, "", bypass, openRepo(t, tasksPath), nil))
+	require.NoError(t, Run(context.Background(), "prompt", tl, tasksPath, "", bypass, openRepo(t, tasksPath), nil))
 
-	assert.Equal(t, []string{"one.txt"}, headFiles(t, dir), "the task file must stay out of the commit even when staged")
+	assert.Equal(t, []string{"First", "init"}, subjects(t, dir))
+	assert.ElementsMatch(t, []string{".gitignore", "one.txt"}, headFiles(t, dir))
+	assert.Empty(t, gitRun(t, dir, "status", "--porcelain"))
+	assert.Equal(t, tasks.CompletedState, readSavedTasks(t, tasksPath).Tasks[0].State)
 }
 
-// A git-ignored task file can never be staged, and git add refuses a
-// pathspec that names an ignored path, so it must get no exclude.
-func TestRun_CommitWithIgnoredTaskFile(t *testing.T) {
-	tests := []struct {
-		name     string
-		ignore   string
-		taskFile string
-	}{
-		{name: "directory pattern", ignore: "run/\n", taskFile: "run/tasks.yaml"},
-		{name: "pattern names the file", ignore: "tasks.yaml\n", taskFile: "tasks.yaml"},
-	}
+func TestRun_CommitAfterTheSessionCommittedItself(t *testing.T) {
+	useFakeClaude(t)
+	dir := initRepo(t)
+	tasksPath := taskFile(dir)
+	tl := gatedTask(tasks.Gate{Cmd: "echo work > one.txt && git add -A && git commit -q -m own"})
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			useFakeClaude(t)
-			dir := initRepo(t)
-			writeFile(t, filepath.Join(dir, ".gitignore"), tt.ignore)
-			gitRun(t, dir, "add", ".gitignore")
-			gitRun(t, dir, "commit", "-q", "-m", "ignore task file")
-			tasksPath := filepath.Join(dir, filepath.FromSlash(tt.taskFile))
-			writeFile(t, tasksPath, "tasks: []\n")
+	require.NoError(t, Run(context.Background(), "prompt", tl, tasksPath, "", bypass, openRepo(t, tasksPath), nil))
 
-			require.NoError(t, Run(context.Background(), "prompt", gatedTask(workGate("one.txt")), tasksPath, "", bypass, openRepo(t, tasksPath), nil))
+	assert.Equal(t, []string{"own", "init"}, subjects(t, dir), "gralph must add no commit of its own")
+	assert.Equal(t, tasks.CompletedState, readSavedTasks(t, tasksPath).Tasks[0].State)
+}
 
-			assert.Equal(t, []string{"First", "ignore task file", "init"}, subjects(t, dir))
-			assert.Equal(t, []string{"one.txt"}, headFiles(t, dir))
-			assert.Empty(t, gitRun(t, dir, "status", "--porcelain"))
-		})
-	}
+// An index.lock left in the repository makes git add fail before anything is
+// staged, which is the other way the commit step can fail.
+func TestRun_FailedAddFailsTheTask(t *testing.T) {
+	useFakeClaude(t)
+	dir := initRepo(t)
+	tasksPath := taskFile(dir)
+	tl := gatedTask(workGate("one.txt"), tasks.Gate{Cmd: "touch .git/index.lock"})
+
+	const wantErr = "commit failed: exit status 128"
+	err := Run(context.Background(), "prompt", tl, tasksPath, "", bypass, openRepo(t, tasksPath), nil)
+	require.EqualError(t, err, "task 1: First failed: "+wantErr)
+
+	saved := readSavedTasks(t, tasksPath)
+	assert.Equal(t, tasks.FailedState, saved.Tasks[0].State)
+	assert.Equal(t, wantErr, saved.Tasks[0].Error)
+	assert.Equal(t, []string{"init"}, subjects(t, dir))
 }
 
 func TestRun_CommitWithTaskFileOutsideTheTree(t *testing.T) {
@@ -424,7 +531,7 @@ func TestRun_CommitFromSubdirectoryCommitsWholeTree(t *testing.T) {
 	gitRun(t, dir, "add", "sub/keep.txt")
 	gitRun(t, dir, "commit", "-q", "-m", "add sub")
 	t.Chdir(sub)
-	tasksPath := filepath.Join(dir, "tasks.yaml")
+	tasksPath := taskFile(dir)
 
 	// The gate runs in sub and writes one file there and one in the root.
 	tl := gatedTask(tasks.Gate{Cmd: "echo a > here.txt; echo b > ../top.txt"})
@@ -448,7 +555,7 @@ func TestRun_CommitOddTaskNames(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			useFakeClaude(t)
 			dir := initRepo(t)
-			tasksPath := filepath.Join(dir, "tasks.yaml")
+			tasksPath := taskFile(dir)
 			tl := &tasks.TaskList{Tasks: []tasks.Task{{ID: 1, Name: tt.taskName, Prompt: "p", Gates: []tasks.Gate{workGate("one.txt")}}}}
 
 			var rec recorder
@@ -463,7 +570,7 @@ func TestRun_CommitOddTaskNames(t *testing.T) {
 func TestRun_PlainPrintsCommitLineAndGitOutput(t *testing.T) {
 	useFakeClaude(t)
 	dir := initRepo(t)
-	tasksPath := filepath.Join(dir, "tasks.yaml")
+	tasksPath := taskFile(dir)
 	repo := openRepo(t, tasksPath)
 
 	origStdout := os.Stdout
@@ -487,7 +594,7 @@ func TestRun_PlainPrintsCommitLineAndGitOutput(t *testing.T) {
 func TestRun_StreamReportsCommitAsActivity(t *testing.T) {
 	useFakeClaude(t)
 	dir := initRepo(t)
-	tasksPath := filepath.Join(dir, "tasks.yaml")
+	tasksPath := taskFile(dir)
 	repo := openRepo(t, tasksPath)
 
 	r, w, err := os.Pipe()
@@ -518,14 +625,13 @@ func TestRun_StreamReportsCommitAsActivity(t *testing.T) {
 	assert.Equal(t, []EventKind{TaskFinished, RunDone}, kinds[len(kinds)-2:], "TaskFinished must follow the commit's activity")
 }
 
-func TestRun_CancelDuringCommitLeavesFileUntouched(t *testing.T) {
-	useFakeClaude(t)
-	dir := initRepo(t)
+// cancelDuringCommit runs one task whose pre-commit hook is script, cancels
+// the context once the hook has started, and returns how long Run took to
+// return after the cancel and its error.
+func cancelDuringCommit(t *testing.T, dir, tasksPath, script string) (time.Duration, error) {
+	t.Helper()
 	readyPath := filepath.Join(tempDir(t), "ready")
-	installHook(t, dir, "touch '"+readyPath+"'\nsleep 60")
-	tasksPath := filepath.Join(dir, "tasks.yaml")
-	tasksYAML := "tasks:\n  - {id: 1, name: First, prompt: p1, state: pending}\n"
-	writeFile(t, tasksPath, tasksYAML)
+	installHook(t, dir, strings.ReplaceAll(script, "READY", "'"+readyPath+"'"))
 	repo := openRepo(t, tasksPath)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -541,18 +647,51 @@ func TestRun_CancelDuringCommitLeavesFileUntouched(t *testing.T) {
 		return err == nil
 	}, 5*time.Second, 10*time.Millisecond, "the commit hook never started")
 
+	start := time.Now()
 	cancel()
 
 	select {
 	case err := <-errCh:
-		require.ErrorContains(t, err, "task 1: First failed: commit")
-	case <-time.After(5 * time.Second):
-		t.Fatal("Run did not return after a cancel during the commit; git's process group was not killed")
+		return time.Since(start), err
+	case <-time.After(10 * time.Second):
+		t.Fatal("Run did not return after a cancel during the commit; git's process group was not stopped")
+		return 0, nil
 	}
+}
 
-	got, err := os.ReadFile(tasksPath)
-	require.NoError(t, err)
+func TestRun_CancelDuringCommitLeavesFileUntouched(t *testing.T) {
+	useFakeClaude(t)
+	dir := initRepo(t)
+	tasksPath := taskFile(dir)
+	tasksYAML := "tasks:\n  - {id: 1, name: First, prompt: p1, state: pending}\n"
+	writeFile(t, tasksPath, tasksYAML)
+
+	_, err := cancelDuringCommit(t, dir, tasksPath, "touch READY\nsleep 60")
+	require.ErrorContains(t, err, "task 1: First failed: commit")
+
+	got, readErr := os.ReadFile(tasksPath)
+	require.NoError(t, readErr)
 	assert.Equal(t, tasksYAML, string(got), "the tasks file must be byte-for-byte unchanged after a cancel during the commit")
+	assert.Equal(t, []string{"init"}, subjects(t, dir))
+
+	locks, globErr := filepath.Glob(filepath.Join(dir, ".git", "*.lock"))
+	require.NoError(t, globErr)
+	assert.Empty(t, locks, "git must be stopped politely so it removes its own lock")
+}
+
+// A hook that ignores SIGTERM must not hang gralph: after the grace period the
+// whole group is killed.
+func TestRun_CancelDuringCommitKillsAHookThatIgnoresSIGTERM(t *testing.T) {
+	useFakeClaude(t)
+	dir := initRepo(t)
+	tasksPath := taskFile(dir)
+	writeFile(t, tasksPath, "tasks:\n  - {id: 1, name: First, prompt: p1, state: pending}\n")
+
+	took, err := cancelDuringCommit(t, dir, tasksPath, "trap '' TERM\ntouch READY\nsleep 60")
+	require.ErrorContains(t, err, "task 1: First failed: commit")
+
+	assert.Less(t, took, 6*time.Second, "SIGKILL must follow the grace period")
+	assert.GreaterOrEqual(t, took, gitStopGrace/2, "SIGTERM must come first and be given time")
 	assert.Equal(t, []string{"init"}, subjects(t, dir))
 }
 
@@ -626,11 +765,27 @@ func TestDryRun_Commit(t *testing.T) {
 		assert.NotContains(t, out.String(), "is valid")
 	})
 
+	t.Run("broken repository is an error", func(t *testing.T) {
+		dir := initRepo(t)
+		config, err := os.OpenFile(filepath.Join(dir, ".git", "config"), os.O_APPEND|os.O_WRONLY, 0o600)
+		require.NoError(t, err)
+		_, err = config.WriteString("[broken\n")
+		require.NoError(t, err)
+		require.NoError(t, config.Close())
+		tasksPath := filepath.Join(tempDir(t), "tasks.yaml")
+		writeFile(t, tasksPath, validTasks)
+
+		var out bytes.Buffer
+		err = DryRun(&out, tasksPath, "", "", true)
+		require.ErrorContains(t, err, "--commit: git rev-parse: ")
+		assert.NotContains(t, out.String(), "is valid")
+	})
+
 	t.Run("outside a repository says nothing will be committed", func(t *testing.T) {
 		dir := tempDir(t)
 		isolateGit(t, dir)
 		t.Chdir(dir)
-		tasksPath := filepath.Join(dir, "tasks.yaml")
+		tasksPath := taskFile(dir)
 		writeFile(t, tasksPath, validTasks)
 
 		var out bytes.Buffer

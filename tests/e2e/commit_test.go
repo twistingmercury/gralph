@@ -151,6 +151,61 @@ func TestCommit_DirtyTreeRefusesToStart(t *testing.T) {
 	assert.Equal(t, twoWorkTasks, string(raw), "the tasks file must be untouched")
 }
 
+func TestCommit_TaskFileGitCanSeeIsRefused(t *testing.T) {
+	t.Parallel()
+	repo := newCommitRepo(t, twoWorkTasks)
+	visible := filepath.Join(repo.dir, "tasks.yaml")
+	require.NoError(t, os.WriteFile(visible, []byte(twoWorkTasks), 0o600))
+	repo.tasksPath = visible
+
+	res := repo.run(t, "--commit")
+
+	require.Equal(t, 1, res.exitCode, "stdout:\n%s\nstderr:\n%s", res.stdout, res.stderr)
+	assert.Contains(t, res.stderr, "error: --commit needs the task file ignored by git or outside the repository: tasks.yaml\n")
+	assert.Equal(t, 0, countAttempts(t, repo.attemptLog), "claude must not run")
+	assert.Equal(t, []string{"init"}, repo.subjects(t))
+}
+
+func TestCommit_BrokenRepositoryIsAnError(t *testing.T) {
+	t.Parallel()
+	const wantError = "error: --commit: git rev-parse:"
+
+	t.Run("run", func(t *testing.T) {
+		t.Parallel()
+		repo := newCommitRepo(t, twoWorkTasks)
+		breakRepo(t, repo.dir)
+
+		res := repo.run(t, "--commit")
+
+		require.Equal(t, 1, res.exitCode, "stdout:\n%s\nstderr:\n%s", res.stdout, res.stderr)
+		assert.Contains(t, res.stderr, wantError)
+		assert.Equal(t, 0, countAttempts(t, repo.attemptLog), "claude must not run")
+	})
+
+	t.Run("dry run", func(t *testing.T) {
+		t.Parallel()
+		repo := newCommitRepo(t, twoWorkTasks)
+		breakRepo(t, repo.dir)
+
+		res := runGralphIn(t, repo.dir, 15*time.Second, []string{"-t", repo.tasksPath, "--dry-run", "--commit"}, repo.env)
+
+		require.Equal(t, 1, res.exitCode, "stdout:\n%s\nstderr:\n%s", res.stdout, res.stderr)
+		assert.Contains(t, res.stderr, wantError)
+		assert.NotContains(t, res.stdout, "is valid")
+	})
+}
+
+// breakRepo makes git refuse to read the repository without making it look
+// like "not a repository".
+func breakRepo(t *testing.T, dir string) {
+	t.Helper()
+	config, err := os.OpenFile(filepath.Join(dir, ".git", "config"), os.O_APPEND|os.O_WRONLY, 0o600)
+	require.NoError(t, err)
+	_, err = config.WriteString("[broken\n")
+	require.NoError(t, err)
+	require.NoError(t, config.Close())
+}
+
 func TestCommit_FailedGateLeavesNoCommitAndBlocksTheRerun(t *testing.T) {
 	t.Parallel()
 	tasksYAML := `tasks:

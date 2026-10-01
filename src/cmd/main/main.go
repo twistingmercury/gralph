@@ -128,15 +128,10 @@ func runTUI(ctx context.Context, session []string) int {
 		}
 	}
 
-	// The view has nowhere to print plain mode's "not a git repository"
-	// notice, so the work tree is opened without it.
-	var repo *looper.Repo
-	if *commitFlag {
-		var err error
-		if repo, err = looper.OpenRepo(tasksPath); err != nil {
-			_, _ = fmt.Fprintf(os.Stderr, "error: %v\n", err)
-			return 1
-		}
+	repo, err := openRepo(tasksPath)
+	if err != nil {
+		_, _ = fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		return 1
 	}
 
 	code, summary, err := tui.Run(ctx, prompt, tasklist, tasksPath, *gateTimeoutFlag, session, repo)
@@ -147,6 +142,17 @@ func runTUI(ctx context.Context, session []string) int {
 
 	fmt.Println(summary)
 	return code
+}
+
+// openRepo opens the work tree for --commit; without the flag git is never
+// called. The view has nowhere to print plain mode's "not a git repository"
+// notice, so it is opened without it.
+func openRepo(tasksPath string) (*looper.Repo, error) {
+	if !*commitFlag {
+		return nil, nil
+	}
+
+	return looper.OpenRepo(tasksPath)
 }
 
 func checkVersion() {
