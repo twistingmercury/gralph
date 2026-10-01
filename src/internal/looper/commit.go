@@ -117,6 +117,36 @@ func (r *Repo) checkTaskFile(tasksFile string) error {
 	return nil
 }
 
+// CheckLogDir refuses a log directory git can see, for the same reason as
+// the task file: git add -A takes no exclusions, so an ignore rule is all
+// that keeps a run's record out of a task's commit (ADR-016). runDir is the
+// run's own folder inside the log directory. It is the path checked because
+// neither exists yet, and git matches a directory pattern such as "logs/"
+// only for a path it can tell lies inside that directory. A nil Repo, or a
+// folder outside the work tree, needs no check.
+func (r *Repo) CheckLogDir(runDir string) error {
+	if r == nil {
+		return nil
+	}
+
+	rel, ok := r.relative(runDir)
+	if !ok {
+		return nil
+	}
+
+	ignored, err := r.ignored(rel)
+	if err != nil {
+		return err
+	}
+
+	if !ignored {
+		logDir := filepath.Dir(rel)
+		return fmt.Errorf("--commit needs the log directory ignored by git or outside the repository: %s", logDir)
+	}
+
+	return nil
+}
+
 // checkClean refuses a work tree with uncommitted changes.
 func (r *Repo) checkClean() error {
 	// Every untracked file is listed by name, and quotePath keeps non-ASCII
@@ -249,7 +279,29 @@ func (r *Repo) commitChanges(ctx context.Context, task tasks.Task, report func(E
 
 	announceCommit(task, report)
 	commitCmd := r.git(ctx, "commit", "-m", task.Name)
-	return runGit(commitCmd, task, report)
+	if err := runGit(commitCmd, task, report); err != nil {
+		return err
+	}
+
+	r.reportCommitted(ctx, task, report)
+	return nil
+}
+
+// reportCommitted tells a listener which commit the task produced. The
+// commit is already made, so a failure to read its hash must not change the
+// task's outcome: the event is then simply not sent.
+func (r *Repo) reportCommitted(ctx context.Context, task tasks.Task, report func(Event)) {
+	if report == nil {
+		return
+	}
+
+	out, _, err := r.output(ctx, "rev-parse", "HEAD")
+	if err != nil {
+		return
+	}
+
+	hash := strings.TrimSpace(string(out))
+	report(Event{Kind: Committed, Task: task, Hash: hash})
 }
 
 // staged reports whether the index holds anything to commit. git diff

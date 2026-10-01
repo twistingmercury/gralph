@@ -663,6 +663,38 @@ func TestRun_StreamReportsCommitAsActivity(t *testing.T) {
 	assert.Equal(t, []EventKind{TaskFinished, RunDone}, kinds[len(kinds)-2:], "TaskFinished must follow the commit's activity")
 }
 
+func TestRun_ReportsCommittedWithTheNewHash(t *testing.T) {
+	useFakeClaude(t)
+	dir := initRepo(t)
+	tasksPath := taskFile(dir)
+	repo := openRepo(t, tasksPath)
+
+	var rec recorder
+	require.NoError(t, Run(context.Background(), "prompt", gatedTask(workGate("one.txt")), tasksPath, "", bypass, repo, rec.report))
+
+	events := rec.snapshot()
+	commits := eventsOfKind(events, Committed)
+	require.Len(t, commits, 1)
+	head := strings.TrimSpace(gitRun(t, dir, "rev-parse", "HEAD"))
+	assert.Equal(t, head, commits[0].Hash)
+	assert.Equal(t, int16(1), commits[0].Task.ID)
+
+	kinds := eventKinds(events)
+	assert.Equal(t, []EventKind{Committed, TaskFinished, RunDone}, kinds[len(kinds)-3:], "Committed comes after git's output and before TaskFinished")
+}
+
+func TestRun_NothingStagedReportsNoCommitted(t *testing.T) {
+	useFakeClaude(t)
+	dir := initRepo(t)
+	tasksPath := taskFile(dir)
+	repo := openRepo(t, tasksPath)
+
+	var rec recorder
+	require.NoError(t, Run(context.Background(), "prompt", gatedTask(), tasksPath, "", bypass, repo, rec.report))
+
+	assert.Empty(t, eventsOfKind(rec.snapshot(), Committed))
+}
+
 // cancelDuringCommit runs one task whose pre-commit hook is script, cancels
 // the context once the hook has started, and returns how long Run took to
 // return after the cancel and its error.
@@ -841,4 +873,52 @@ func TestDryRun_Commit(t *testing.T) {
 		require.NoError(t, DryRun(&out, tasksPath, "", "", false))
 		assert.NotContains(t, out.String(), "commit:")
 	})
+}
+
+func TestCheckLogDir_NilRepoChecksNothing(t *testing.T) {
+	var repo *Repo
+
+	assert.NoError(t, repo.CheckLogDir(filepath.Join("logs", "20261001T140211")))
+}
+
+func TestCheckLogDir_InsideTheTreeMustBeIgnored(t *testing.T) {
+	dir := initRepo(t)
+	repo := openRepo(t, taskFile(dir))
+
+	err := repo.CheckLogDir(filepath.Join(dir, "logs", "20261001T140211"))
+
+	require.EqualError(t, err, "--commit needs the log directory ignored by git or outside the repository: logs")
+}
+
+// The log directory does not exist yet and the rule is a directory pattern,
+// which git only matches for a path it can tell is inside that directory.
+func TestCheckLogDir_IgnoredByADirectoryPatternBeforeItExists(t *testing.T) {
+	dir := initRepo(t)
+	ignoreAndCommit(t, dir, "run/", "logs/")
+	repo := openRepo(t, taskFile(dir))
+
+	assert.NoError(t, repo.CheckLogDir(filepath.Join(dir, "logs", "20261001T140211")))
+	assert.NoDirExists(t, filepath.Join(dir, "logs"), "the check creates nothing")
+}
+
+func TestCheckLogDir_RelativePathFromASubdirectory(t *testing.T) {
+	dir := initRepo(t)
+	ignoreAndCommit(t, dir, "run/", "logs/")
+	repo := openRepo(t, taskFile(dir))
+	sub := filepath.Join(dir, "run", "deep")
+	require.NoError(t, os.MkdirAll(sub, 0o750))
+	t.Chdir(sub)
+
+	assert.NoError(t, repo.CheckLogDir(filepath.Join("..", "..", "logs", "20261001T140211")))
+
+	err := repo.CheckLogDir(filepath.Join("..", "..", "elsewhere", "20261001T140211"))
+	require.EqualError(t, err, "--commit needs the log directory ignored by git or outside the repository: elsewhere")
+}
+
+func TestCheckLogDir_OutsideTheTreeNeedsNoRule(t *testing.T) {
+	dir := initRepo(t)
+	repo := openRepo(t, taskFile(dir))
+	outside := tempDir(t)
+
+	assert.NoError(t, repo.CheckLogDir(filepath.Join(outside, "logs", "20261001T140211")))
 }

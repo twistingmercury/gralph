@@ -1,8 +1,8 @@
 # Gralph — Requirements
 
-> **Version**: v09
+> **Version**: v10
 > **Date**: 2026-10-01
-> **Notes**: Clarified Bubble Tea v2 modules imported only by internal/tui; cmd/main imports only x/term for terminal detection.
+> **Notes**: Added run logging on request (`--log-dir`, ADR-016): problem statement, secondary goal, non-goals, and success criterion.
 
 [Back to Overview](00_overview.md) | [Back to Project README](../../README.md)
 
@@ -26,6 +26,7 @@ Claude Code users need a way to:
 - Limit what an unattended session can read, write, and reach on the network
 - Block on failures until manually addressed
 - Resume interrupted runs without re-running completed work
+- Look back at a run after it ends: what each task did, and what ran when
 
 ## Goals
 
@@ -48,6 +49,7 @@ Claude Code users need a way to:
 2. Show a run live in a full-screen view by default in a terminal, while plain mode (`--no-tui` or no terminal) stays unchanged for scripts and CI
 3. Support Docker-based release builds and CI testing
 4. Provide clear error messages when task files are invalid or tasks fail
+5. Keep a record of a full-screen run on request (`--log-dir`): a JSON-lines ledger of the run plus each task's activity, written by gralph itself
 
 ## Non-Goals
 
@@ -65,6 +67,8 @@ Claude Code users need a way to:
 - Re-running only the gates of a task; a task reset to `pending` runs its session again
 - Pushing, writing commit bodies, or cleaning up a failed task's work tree
 - Requiring a git repository
+- Logging by default, logging in plain mode (a redirect keeps its output), keeping the raw stream-json, or rotating and deleting old logs
+- Having the session write or know about the logs
 
 ## Success Criteria
 
@@ -80,6 +84,7 @@ Claude Code users need a way to:
 | Exit code correctness                   | Zero only when all tasks complete     | E2E test matrix covers pass/fail/cancel cases   |
 | Signal handling                         | SIGINT/SIGTERM kills claude group    | Process tree test verifies Setpgid and signal   |
 | Commit on request                       | One commit per completed task, named after it; none for a failed task; a dirty tree refuses to start | Unit and e2e tests run real git in temporary repositories |
+| Run logging on request                  | With `--log-dir`, one folder per run holding the ledger and a detail file per task; nothing written without it; plain mode with the flag exits 1 | Unit tests feed events to `internal/runlog` and assert the files; e2e tests pin the plain-mode refusal and that `--dry-run` ignores the flag |
 | Unix-only behavior                      | No Windows build, no runtime fallback | Build pipeline has no Windows target            |
 
 ## Constraints

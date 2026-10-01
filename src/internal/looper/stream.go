@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"github.com/twistingmercury/gralph/internal/tasks"
 )
@@ -90,6 +91,22 @@ func toolActivity(name string, input toolInput) string {
 	}
 
 	return "→ " + name + " " + target
+}
+
+// runSession runs the task's stream session and reports how it ended, so a
+// listener learns the session's own outcome before any gate changes the
+// task's. A cancelled session reports nothing: it has no outcome.
+func runSession(ctx context.Context, p string, task tasks.Task, sessionArgs []string, report func(Event)) (state, errMsg string, err error) {
+	start := time.Now()
+	state, errMsg, err = runTaskStream(ctx, p, task, sessionArgs, report)
+	if err != nil {
+		return state, errMsg, err
+	}
+
+	task.State, task.Error = state, errMsg
+	elapsed := time.Since(start)
+	report(Event{Kind: SessionFinished, Task: task, Duration: elapsed})
+	return state, errMsg, nil
 }
 
 // runTaskStream runs one task with claude's stream-json output, sending each

@@ -1,8 +1,8 @@
 # Gralph — System Architecture
 
-> **Version**: v11
+> **Version**: v12
 > **Date**: 2026-10-01
-> **Notes**: Fixed gate validation rules (cmd required, timeout optional string); added git node and commit step to diagrams; clarified process control for graceful git stop; added whitespace trim to name uniqueness; added `--commit` to the flag list and to the `Start`/`Run` calls in the diagrams; fixed output case (PrintTasks) and Timeout type (string, not duration).
+> **Notes**: Added run logging (`--log-dir`, ADR-016): the `internal/runlog` component, the `SessionFinished`, `GateFinished`, and `Committed` events, the `observe` hook on `tui.Run`, and the log files in the diagrams, interactions, and boundary rules.
 
 [Back to Overview](00_overview.md) | [Back to Project README](../../README.md)
 
@@ -16,7 +16,7 @@
 
 ## Architecture Overview
 
-Gralph is organized into four layers: CLI entry point, terminal UI, looper orchestration, and task/state management. Dependencies point one way: `cmd/main` → `internal/tui` → `internal/looper` → `internal/tasks` (`cmd/main` also calls `internal/looper` directly). The looper loads both input files (prompt.md and tasks.yaml), validates preconditions, then walks each pending task, spawning a fresh Claude session with the combined prompt and reading the result to determine outcome. When the session reports `completed`, the looper runs the task's gates (ADR-013), commands from the task file, and the task is completed only if every one exits zero. With `--commit` (ADR-015), inside a git work tree, the looper then commits the task's changes under the task's name; a commit git refuses fails the task.
+Gralph is organized into four layers: CLI entry point, terminal UI, looper orchestration, and task/state management. Dependencies point one way: `cmd/main` → `internal/tui` → `internal/looper` → `internal/tasks` (`cmd/main` also calls `internal/looper` directly). Beside them sits the run log writer, `internal/runlog` (ADR-016), used only with `--log-dir`: `cmd/main` → `internal/runlog` → `internal/looper`. The looper loads both input files (prompt.md and tasks.yaml), validates preconditions, then walks each pending task, spawning a fresh Claude session with the combined prompt and reading the result to determine outcome. When the session reports `completed`, the looper runs the task's gates (ADR-013), commands from the task file, and the task is completed only if every one exits zero. With `--commit` (ADR-015), inside a git work tree, the looper then commits the task's changes under the task's name; a commit git refuses fails the task.
 
 Every session's argv is `claude --print` plus the **session flags** (ADR-014), which `cmd/main` picks once from the two permission flags and passes down as `sessionArgs`:
 
@@ -28,7 +28,7 @@ A real run with neither flag, or any run with both, exits 1.
 `cmd/main` picks one of two modes (ADR-011):
 
 - **Plain mode** — `--dry-run`, `--no-tui`, or stdin or stdout not a terminal. `looper.Start` runs the loop with a nil `report` hook; each task goes through `runTaskPlain`, which runs `claude --print <session flags>`, echoes the combined prompt, tees claude's stdout, and inherits its stderr.
-- **TUI mode** — otherwise. `tui.Run` runs `looper.Run` in a goroutine with a `report` hook that forwards events to the Bubble Tea program; each task goes through `runTaskStream`, which runs `claude --print --output-format stream-json --verbose <session flags>` and writes nothing to gralph's own stdout or stderr.
+- **TUI mode** — otherwise. `tui.Run` runs `looper.Run` in a goroutine with a `report` hook that hands each event to the optional `observe` hook (the run log, with `--log-dir`) and then forwards it to the Bubble Tea program; each task goes through `runTaskStream`, which runs `claude --print --output-format stream-json --verbose <session flags>` and writes nothing to gralph's own stdout or stderr.
 
 ```mermaid
 graph TB
@@ -38,6 +38,9 @@ graph TB
     CLI -->|terminal: Setup, Run| TUI["internal/tui<br/>(SetupModel, Model)"]
     TUI -->|Run with report hook| Looper
     Looper -.->|events via report| TUI
+    CLI -->|"--log-dir: Open"| RunLog["internal/runlog<br/>(Open, Record, Close)"]
+    TUI -.->|each event via observe| RunLog
+    RunLog -->|writes| LogFiles["log-dir/run/<br/>run.jsonl, task-N.log"]
     Looper -->|reads| Prompt["prompt.md"]
     Looper -->|reads/writes| TaskFile["tasks.yaml"]
     Looper -->|ParseTasks| TaskParser["internal/tasks"]
@@ -59,12 +62,13 @@ graph TB
 ### CLI Entrypoint (cmd/main)
 
 **Responsibilities:**
-- Parse command-line flags (--prompt, --tasks, --sandbox-settings, --skip-permissions, --dry-run, --no-tui, --gate-timeout, --commit, --install-skill, --version)
+- Parse command-line flags (--prompt, --tasks, --sandbox-settings, --skip-permissions, --dry-run, --no-tui, --gate-timeout, --commit, --log-dir, --install-skill, --version)
 - Validate `--gate-timeout` (if set) before any load or run; bad value exits 1
 - Choose the mode: plain when `--dry-run`, `--no-tui`, or stdin or stdout is not a terminal (`github.com/charmbracelet/x/term`); otherwise the TUI
 - Pick the session flags (`validateSessionFlags`/`sessionArgs`), after the `--gate-timeout` check and plain mode's required flags and before the skill check: `looper.SandboxArgs` for `--sandbox-settings`, `looper.BypassArgs` for `--skip-permissions`. Both flags together, or neither on a real run, exits 1; an empty `--sandbox-settings=` counts as not passed. A dry run needs neither, but a settings file it is given is still checked. The result goes to `looper.Start` and `tui.Run`
 - Plain mode: validate required flags and `--gate-timeout`, then route to `looper.Start` (normal run) or `looper.DryRun` (validation only)
 - TUI mode: load the given paths with `looper.LoadPrompt`/`looper.LoadTasksReport` (a failed task prints the `PrintTasks` table and exits 1, as in plain mode), run `tui.Setup` for any missing path, then `tui.Run`, and print the one-line summary after the view closes
+- `--log-dir` (ADR-016): in plain mode on a real run, exit 1 with `--log-dir only works with the full-screen view`; `--dry-run` ignores the flag; an empty `--log-dir=` counts as not passed. In TUI mode, after the setup screen and the repository checks: with a repository open, refuse a run folder inside the work tree that git does not ignore; then `runlog.Open`, pass its `Record` to `tui.Run` as `observe`, and `Close` it after the view closes
 - Set up context with signal handling (SIGINT, SIGTERM)
 - Exit with appropriate code (0 on success, 1 on error); a Bubble Tea error exits 1 with a hint to rerun with `--no-tui`
 
@@ -81,7 +85,7 @@ graph TB
 
 **Responsibilities:**
 - `Setup`/`SetupModel`: the path-entry screen; one text field per missing `--tasks`/`--prompt` path, each validated on Enter with `looper.LoadTasks` or `looper.LoadPrompt`, errors shown under the field; Esc or ctrl+c cancels (exit 1)
-- `Run`: derives a cancellable context from `cmd/main`'s signal context, runs `looper.Run` in a goroutine with a `report` hook that calls `program.Send`, and returns the exit code and summary when the view closes
+- `Run`: derives a cancellable context from `cmd/main`'s signal context, runs `looper.Run` in a goroutine with a `report` hook that calls `program.Send`, and returns the exit code and summary when the view closes. When given an `observe func(looper.Event) error` (nil without `--log-dir`), the hook calls it with each event first; on its first error `Run` cancels the run and puts that error in the final `RunDone`, so the status reads `Run stopped: log: <error>`
 - `Model`: the run view (alt screen, relaid out on resize) with three titled panes (title bars rendered above the viewports so they stay put while scrolling): Current task (`<id>: <name>` and prompt), Task progress (`<icon> <id>: <name>: <state>` per task, colored by state, under a one-line outcome banner once the run ends), Claude activity (the current task's activity, cleared on each `TaskStarted`, following the newest line unless scrolled up), and a key legend that also carries the confirm prompt and final status
 - Keys: `tab` switches the focused pane, `↑/↓/PgUp/PgDn` scroll it; `q` or ctrl+c opens a `[y/N]` stop confirm during the run and quits after it
 - Shows `in progress` for the running task; it is display only and never saved
@@ -92,7 +96,7 @@ graph TB
 | ------------------- | ----------------------------------------------------------- |
 | Libraries           | Bubble Tea v2, bubbles v2 (viewport, textinput), lipgloss v2 (ADR-012) |
 | Imported by         | `cmd/main` only; `looper` and `tasks` never import it or Bubble Tea |
-| Input from looper   | `looper.Event` messages: `TaskStarted`, `Activity`, `TaskFinished`, `RunDone` |
+| Input from looper   | `looper.Event` messages: `TaskStarted`, `Activity`, `TaskFinished`, `RunDone`; `SessionFinished`, `GateFinished`, and `Committed` are ignored by the view |
 | Signal Handling     | Bubble Tea's own handler is off (`tea.WithoutSignalHandler`) |
 | Exit code           | 0 only when every task completed; 1 on a failed task or a stop |
 
@@ -106,7 +110,7 @@ graph TB
 - Combine shared prompt with each task
 - Run each task on one of two paths, picked by the `report` hook:
   - `report == nil` → `runTaskPlain`: spawn `claude --print <session flags>` in a process group, echo the combined prompt, tee claude's stdout, inherit stderr
-  - `report != nil` → `runTaskStream`: spawn `claude --print --output-format stream-json --verbose <session flags>` in a process group, write nothing to gralph's stdout/stderr, report `TaskStarted`, `Activity` (parsed stdout events and raw stderr lines), and `TaskFinished` events, then `RunDone` from `Run`
+  - `report != nil` → `runTaskStream`: spawn `claude --print --output-format stream-json --verbose <session flags>` in a process group, write nothing to gralph's stdout/stderr, report `TaskStarted`, `Activity` (parsed stdout events and raw stderr lines), and `TaskFinished` events, then `RunDone` from `Run`. The same path reports what the run log needs (ADR-016): `SessionFinished` (outcome and duration), `GateFinished` per gate (the gate, its timeout, its error, its duration), and `Committed` (the new hash); `TaskFinished` and `RunDone` carry a duration. The looper measures the durations and knows nothing about the log
 - Build every claude command in `claudeCmd`: `--print`, then the stream flags on the TUI path, then the `sessionArgs` it was handed
 - Build the session flags (`sandbox.go`): `SandboxArgs` reads the settings file, forces `sandbox.enabled: true`, `sandbox.allowUnsandboxedCommands: false`, and `sandbox.failIfUnavailable: true`, keeps every other key as raw JSON, and returns `--permission-mode acceptEdits --settings <merged JSON>`; `BypassArgs` returns `--dangerously-skip-permissions`
 - Capture output, parse result line, determine the session's outcome
@@ -203,7 +207,7 @@ graph TB
 - Run the task's gates in file order, one at a time, each as `sh -c <cmd>` in gralph's working directory, with no stdin, in its own process group (`configureProcessTree`). The call carries the one owner-approved `// #nosec G204` (ADR-013)
 - Stop at the first gate that exits non-zero or cannot be started: the task becomes `failed` with error `gate "<cmd>" failed: <exit error>` (or `gate "<cmd>" timed out after <timeout>` when it hit its limit; `<cmd>` is the command's first line), and later gates do not run
 - Plain path (`report == nil`): print `gate: <cmd>` to stdout, then let the gate's stdout and stderr pass straight through
-- TUI path (`report != nil`): write nothing to gralph's stdout/stderr; report `Activity` `→ gate <first line of cmd>`, then one `Activity` per line of the gate's stdout and stderr
+- TUI path (`report != nil`): write nothing to gralph's stdout/stderr; report `Activity` `→ gate <first line of cmd>`, then one `Activity` per line of the gate's stdout and stderr, then `GateFinished` with the gate's result and duration
 - On context cancellation, return the error without a state, like a cancelled session: the task and the file stay untouched
 
 **Key Characteristics:**
@@ -227,7 +231,7 @@ graph TB
 - Nothing staged means no commit and the task stays `completed`; a non-zero exit makes it `failed` with `commit failed: <exit error>` (in practice e.g. `commit failed: exit status 1`)
 - Git runs from the work tree root in its own process group with no stdin, like a gate; but on cancellation, the group is sent SIGTERM first (`stopProcessTree`), waits up to 2 seconds (`gitStopGrace`, checking if still alive with signal 0), then SIGKILL only if still alive, so git removes its `index.lock` on the graceful stop. The task and file stay untouched on cancellation
 - Plain path (`report == nil`): once something is staged, print `commit: <first line of name>` to stdout; git's output passes straight through
-- TUI path (`report != nil`): write nothing to gralph's stdout/stderr; report `Activity` `→ commit <first line of name>` once something is staged, and each git output line as `Activity`
+- TUI path (`report != nil`): write nothing to gralph's stdout/stderr; report `Activity` `→ commit <first line of name>` once something is staged, and each git output line as `Activity`; after a successful commit, read the hash with `git rev-parse HEAD` and report `Committed`
 - Git commands are built by `(*Repo).git`, which appends arguments to a constant `git` command; keep it that way so gosec stays quiet without a suppression
 - Gralph never pushes, resets, stashes, or passes `--no-verify`
 
@@ -241,6 +245,26 @@ graph TB
 | Seen by Claude      | Never                                   |
 | Sandbox Coverage    | None; git runs unsandboxed with hooks |
 | Cancellation        | SIGTERM first, SIGKILL after 2 seconds |
+
+### Run Log Writer (internal/runlog)
+
+**Responsibilities:**
+- Exists only for `--log-dir` (ADR-016); without the flag it is never called and gralph writes nothing but the task file
+- `Open(dir, info)`: create `<dir>` if needed and the run folder `<dir>/<YYYYMMDDTHHMMSS>` (local start time; folders `0700`, files `0600`; an existing run folder is an error), create `run.jsonl`, and write the `run_started` line from `info` (version, task and prompt file paths, permission mode, sandbox settings path, gate timeout, commit)
+- `Record(event) error`: turn one `looper.Event` into output. `TaskStarted`, `SessionFinished`, `GateFinished`, `Committed`, `TaskFinished`, and `RunDone` each append one line to the ledger (`task_started`, `session_finished`, `gate_finished`, `committed`, `task_finished`, `run_finished`); `Activity` appends `HH:MM:SS <line>` to that task's `task-<id>.log`, opened on its `TaskStarted`
+- `Close`: close the open files
+- Safe for calls from more than one goroutine (a mutex), since `report` is
+
+**Key Characteristics:**
+
+| Characteristic      | Value                                   |
+| ------------------- | --------------------------------------- |
+| Imported by         | `cmd/main` only                         |
+| Imports             | `internal/looper` (the event type), `internal/tasks`; standard library only (`encoding/json`) |
+| Input               | `looper.Event`s, in the order `tui.Run` receives them |
+| Output              | `run.jsonl` (one JSON object per line, each with `time` and `event`) and one `task-<id>.log` per task that ran |
+| Used in             | TUI mode only; plain mode and `--dry-run` never open a log |
+| Error Handling      | `Open` errors exit 1 before the view opens (`--log-dir: ...`); a `Record` error stops the run |
 
 ## Data Flow
 
@@ -309,7 +333,7 @@ sequenceDiagram
         TUI->>Looper: LoadTasks / LoadPrompt on each entry
         TUI-->>CLI: paths, prompt, task list
     end
-    CLI->>TUI: Run(ctx, prompt, tl, tasksFile, gateTimeout, sessionArgs, repo)
+    CLI->>TUI: Run(ctx, prompt, tl, tasksFile, gateTimeout, sessionArgs, repo, observe)
     TUI->>Looper: Run(runCtx, ..., report) in a goroutine
     loop For each pending task
         Looper-->>TUI: TaskStarted
@@ -333,6 +357,8 @@ sequenceDiagram
 ```
 
 A cancelled task, whether its session or one of its gates was running, sends no `TaskFinished`; `RunDone` follows with the cancellation error and the view shows that task as `pending`.
+
+With `--log-dir`, `cmd/main` opens the run log before `tui.Run` and passes its `Record` as `observe`. Every event in the diagram, plus `SessionFinished` after the session's outcome, `GateFinished` after each gate, and `Committed` after a commit, goes to `observe` before it goes to the view. A `Record` error cancels the run; `RunDone` then carries `log: <error>`.
 
 ### Failed Task Blocking
 
@@ -370,6 +396,8 @@ sequenceDiagram
 | Claude      | Looper          | stdout, exit code                | Return output and completion status        | Plain: text ending in a JSON result line; TUI: stream-json events, the `result` event's text ending in it |
 | Looper      | Gate commands   | os/exec.Cmd (`sh -c`), exit code | Check a completed task independently       | Shell command text; output shown, not parsed |
 | Looper      | Git             | os/exec.Cmd, stdin/stdout/stderr | Commit completed task's changes            | Shell commands (git add -A, git commit -m); output shown, not parsed |
+| TUI         | RunLog          | `observe` hook (`Record`)        | Hand each event to the log before the view | `looper.Event`     |
+| RunLog      | Filesystem      | os.Mkdir, os.OpenFile, appends   | Write the ledger and detail files          | JSON lines (`run.jsonl`); text (`task-<id>.log`) |
 | Looper      | ProcessManager  | Setpgid, kill(-pgid)             | Configure and control subprocess lifecycle | Unix signals       |
 
 ## Boundary Definitions
@@ -408,6 +436,7 @@ graph LR
 | Gralph → Filesystem (read)            | Prompt, task files  | Files must be readable; content is not sanitized           |
 | Gralph → Filesystem (read)            | Sandbox settings file | Read once at startup, never written; must be a JSON object; three sandbox keys forced, the rest passed through |
 | Gralph ← Filesystem (write)           | Task state          | Atomic writes; temp-file + rename ensures consistency      |
+| Gralph ← Filesystem (write)           | Run log (`--log-dir`) | Written only when asked, only in the TUI; a new folder per run, `0700`, files `0600`; holds what sessions, gates, and git printed; with `--commit`, must be git-ignored or outside the work tree; never read back, rotated, or deleted |
 | Gralph → Claude (subprocess)          | Combined prompt     | Passed on stdin; argv is `--print`, then `--output-format stream-json --verbose` in the TUI, then the session flags: `--permission-mode acceptEdits --settings <merged JSON>` (`--sandbox-settings`) or `--dangerously-skip-permissions` (`--skip-permissions`) |
 | Gralph → Gate command (subprocess)    | `cmd` text from tasks.yaml | Run as `sh -c <cmd>` in gralph's working directory, unsandboxed; only the exit code is used |
 | Gralph → Git (subprocess)             | `add -A` and `commit -m <task name>` | Run from the work tree root with no path list (the task file is git-ignored or outside the tree), unsandboxed, with repository hooks running; only the exit code is used; gralph never pushes, resets, stashes, or bypasses hooks |

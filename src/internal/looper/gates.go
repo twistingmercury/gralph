@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/twistingmercury/gralph/internal/tasks"
 )
@@ -18,7 +19,7 @@ import (
 func runGates(ctx context.Context, task tasks.Task, override string, report func(Event)) (state, errMsg string, err error) {
 	for _, gate := range task.Gates {
 		limit, _ := gateLimit(gate, override)
-		runErr := runGate(ctx, task, gate, limit, report)
+		runErr := runGateReported(ctx, task, gate, limit, report)
 		if runErr == nil {
 			continue
 		}
@@ -32,6 +33,20 @@ func runGates(ctx context.Context, task tasks.Task, override string, report func
 	}
 
 	return tasks.CompletedState, "", nil
+}
+
+// runGateReported runs one gate and, on the stream path, reports how it
+// ended. A cancelled gate reports nothing, like a cancelled session.
+func runGateReported(ctx context.Context, task tasks.Task, gate tasks.Gate, limit string, report func(Event)) error {
+	start := time.Now()
+	runErr := runGate(ctx, task, gate, limit, report)
+	if report == nil || ctx.Err() != nil {
+		return runErr
+	}
+
+	elapsed := time.Since(start)
+	report(Event{Kind: GateFinished, Task: task, Gate: gate, Limit: limit, Err: runErr, Duration: elapsed})
+	return runErr
 }
 
 // firstLine is the part of a multi-line value that messages and activity

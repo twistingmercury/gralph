@@ -7,8 +7,10 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/twistingmercury/gralph/internal/looper"
+	"github.com/twistingmercury/gralph/internal/runlog"
 	"github.com/twistingmercury/gralph/internal/skillinstall"
 	"github.com/twistingmercury/gralph/internal/tasks"
 	"github.com/twistingmercury/gralph/internal/tui"
@@ -29,6 +31,7 @@ var (
 	sandboxFlag     = pflag.String("sandbox-settings", "", "Path to a Claude Code settings JSON file; sessions run in Claude's sandbox with it. A run needs this or --skip-permissions")
 	skipPermsFlag   = pflag.Bool("skip-permissions", false, "Run sessions with no sandbox and no permission checks (claude --dangerously-skip-permissions); what they do is on you")
 	commitFlag      = pflag.Bool("commit", false, "Commit each completed task with git after its gates pass, with the task name as the message; in a repository, the work tree must be clean")
+	logDirFlag      = pflag.String("log-dir", "", "Directory for a record of the run: a ledger and each task's activity, in a new folder per run; full-screen view only")
 )
 
 func main() {
@@ -45,6 +48,7 @@ func main() {
 		validateRequiredFlags()
 	}
 
+	validateLogDir(plain)
 	session := validateSessionFlags()
 
 	if err := skillinstall.Check(); err != nil {
@@ -88,7 +92,8 @@ func isPlain(dryRun, noTUI, stdinTTY, stdoutTTY bool) bool {
 // runTUI loads the given prompt and tasks like looper.Start, asks for any
 // missing path on the setup screen, runs the loop in the full-screen view,
 // prints its summary, and returns the exit code. session is the claude flags
-// from validateSessionFlags.
+// from validateSessionFlags. With --log-dir it opens the run's record and has
+// the view's events written to it.
 func runTUI(ctx context.Context, session []string) int {
 	tasksPath, promptPath := *tasksFlag, *promptFlag
 
@@ -115,7 +120,7 @@ func runTUI(ctx context.Context, session []string) int {
 		}
 
 		if promptPath == "" {
-			prompt = s.Prompt()
+			prompt, promptPath = s.Prompt(), s.PromptPath()
 		}
 	}
 
@@ -125,7 +130,16 @@ func runTUI(ctx context.Context, session []string) int {
 		return 1
 	}
 
-	code, summary, err := tui.Run(ctx, prompt, tasklist, tasksPath, *gateTimeoutFlag, session, repo)
+	info := runInfo(tasksPath, promptPath)
+	runLog, err := openLog(*logDirFlag, repo, info)
+	if err != nil {
+		_, _ = fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		return 1
+	}
+
+	defer closeLog(runLog)
+
+	code, summary, err := tui.Run(ctx, prompt, tasklist, tasksPath, *gateTimeoutFlag, session, repo, runLog.Record)
 	if err != nil {
 		_, _ = fmt.Fprintf(os.Stderr, "error: %v\nrun with --no-tui to use plain output\n", err)
 		return 1
@@ -177,6 +191,54 @@ func openRepo(tasksPath string) (*looper.Repo, error) {
 	return looper.OpenRepo(tasksPath)
 }
 
+// runInfo is what the run's record says about how it was started.
+func runInfo(tasksPath, promptPath string) runlog.Info {
+	permissions := "skip"
+	if *sandboxFlag != "" {
+		permissions = "sandbox"
+	}
+
+	ver := version.Version()
+	return runlog.Info{
+		Version:         ver,
+		TasksFile:       tasksPath,
+		PromptFile:      promptPath,
+		Permissions:     permissions,
+		SandboxSettings: *sandboxFlag,
+		GateTimeout:     *gateTimeoutFlag,
+		Commit:          *commitFlag,
+	}
+}
+
+// openLog starts the run's record under logDir (ADR-016). With no logDir it
+// returns nil, and gralph writes nothing but the task file. The run folder
+// is named before it is created so that repo, when there is one, can refuse
+// a folder git would commit without anything being left behind.
+func openLog(logDir string, repo *looper.Repo, info runlog.Info) (*runlog.Log, error) {
+	if logDir == "" {
+		return nil, nil
+	}
+
+	start := time.Now()
+	runDir := runlog.RunDir(logDir, start)
+	if err := repo.CheckLogDir(runDir); err != nil {
+		return nil, err
+	}
+
+	runLog, err := runlog.Open(runDir, info)
+	if err != nil {
+		return nil, fmt.Errorf("--log-dir: %w", err)
+	}
+
+	return runLog, nil
+}
+
+// closeLog drops Close's error on purpose: every line was already written
+// when Record returned, so a failed close can lose nothing.
+func closeLog(runLog *runlog.Log) {
+	_ = runLog.Close()
+}
+
 func checkVersion() {
 	if !*versionFlag {
 		return
@@ -219,6 +281,27 @@ func checkGateTimeout(v string) error {
 	}
 
 	return nil
+}
+
+// validateLogDir exits when --log-dir was passed to a run that cannot keep a
+// record; see checkLogDir.
+func validateLogDir(plain bool) {
+	if err := checkLogDir(*logDirFlag, plain, *dryRunFlag); err != nil {
+		fatal(err)
+	}
+}
+
+// checkLogDir refuses --log-dir in plain mode. The record is built from
+// events only the full-screen view's path produces, and a run that was asked
+// for a record must not quietly leave none (ADR-016). An empty value counts
+// as not passed. A dry run records nothing and ignores the flag, as it
+// ignores --prompt.
+func checkLogDir(logDir string, plain, dryRun bool) error {
+	if logDir == "" || dryRun || !plain {
+		return nil
+	}
+
+	return errors.New("--log-dir only works with the full-screen view")
 }
 
 // validateSessionFlags exits unless the run was told how far to trust its
