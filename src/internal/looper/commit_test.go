@@ -373,6 +373,37 @@ func TestRun_CommitLeavesStagedTaskFileOut(t *testing.T) {
 	assert.Equal(t, []string{"one.txt"}, headFiles(t, dir), "the task file must stay out of the commit even when staged")
 }
 
+// A git-ignored task file can never be staged, and git add refuses a
+// pathspec that names an ignored path, so it must get no exclude.
+func TestRun_CommitWithIgnoredTaskFile(t *testing.T) {
+	tests := []struct {
+		name     string
+		ignore   string
+		taskFile string
+	}{
+		{name: "directory pattern", ignore: "run/\n", taskFile: "run/tasks.yaml"},
+		{name: "pattern names the file", ignore: "tasks.yaml\n", taskFile: "tasks.yaml"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			useFakeClaude(t)
+			dir := initRepo(t)
+			writeFile(t, filepath.Join(dir, ".gitignore"), tt.ignore)
+			gitRun(t, dir, "add", ".gitignore")
+			gitRun(t, dir, "commit", "-q", "-m", "ignore task file")
+			tasksPath := filepath.Join(dir, filepath.FromSlash(tt.taskFile))
+			writeFile(t, tasksPath, "tasks: []\n")
+
+			require.NoError(t, Run(context.Background(), "prompt", gatedTask(workGate("one.txt")), tasksPath, "", bypass, openRepo(t, tasksPath), nil))
+
+			assert.Equal(t, []string{"First", "ignore task file", "init"}, subjects(t, dir))
+			assert.Equal(t, []string{"one.txt"}, headFiles(t, dir))
+			assert.Empty(t, gitRun(t, dir, "status", "--porcelain"))
+		})
+	}
+}
+
 func TestRun_CommitWithTaskFileOutsideTheTree(t *testing.T) {
 	useFakeClaude(t)
 	dir := initRepo(t)

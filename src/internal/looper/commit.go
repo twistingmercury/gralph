@@ -19,7 +19,9 @@ import (
 type Repo struct {
 	root string
 	// paths limits every git call to the whole work tree minus the task
-	// file, which gralph rewrites after each task and never commits.
+	// file, which gralph rewrites after each task and never commits. A
+	// git-ignored task file is not excluded: git add refuses a pathspec that
+	// names an ignored path, and the file is never staged anyway.
 	paths []string
 }
 
@@ -40,7 +42,7 @@ func OpenRepo(tasksFile string) (*Repo, error) {
 	}
 
 	r := &Repo{root: strings.TrimSpace(string(out)), paths: []string{"--", "."}}
-	if rel, ok := r.relative(tasksFile); ok {
+	if rel, ok := r.relative(tasksFile); ok && !r.ignored(rel) {
 		r.paths = append(r.paths, ":(exclude,literal)"+rel)
 	}
 
@@ -78,6 +80,18 @@ func (r *Repo) relative(path string) (string, bool) {
 	}
 
 	return rel, true
+}
+
+// ignored reports whether git ignores rel, a path relative to the root. A
+// tracked file that matches an ignore pattern is not ignored in this sense:
+// it can be staged, so it still needs its exclude. Any error, including the
+// exit 1 that means "not ignored", reads as false.
+func (r *Repo) ignored(rel string) bool {
+	cmd := exec.Command("git", "check-ignore", "-q", "--")
+	cmd.Args = append(cmd.Args, rel)
+	cmd.Dir = r.root
+
+	return cmd.Run() == nil
 }
 
 // git builds a git command over the Repo's paths, run from the root so the
