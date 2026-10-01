@@ -1,8 +1,8 @@
 # Gralph — Architectural Decisions
 
-> **Version**: v08
+> **Version**: v09
 > **Date**: 2026-09-30
-> **Notes**: Added ADR-014: sessions run in Claude Code's sandbox from a `--sandbox-settings` file; `--skip-permissions` is the explicit way to keep the old bypass.
+> **Notes**: Added ADR-015: with `--commit`, gralph commits each task itself after its gates pass; sessions no longer need a commit rule.
 
 [Back to Overview](00_overview.md) | [Back to Project README](../../README.md)
 
@@ -40,6 +40,7 @@ Each architectural decision is recorded as an ADR with the following structure:
 | ADR-012 | Bubble Tea v2 for the TUI, confined to its use | Accepted | 2026-09-25 |
 | ADR-013 | Gralph runs a task's gates after a session     | Accepted | 2026-09-30 |
 | ADR-014 | Sandboxed sessions; bypass only on request     | Accepted | 2026-09-30 |
+| ADR-015 | Gralph commits a completed task on request     | Accepted | 2026-09-30 |
 
 ## Decisions
 
@@ -545,6 +546,61 @@ _Negative:_
 - Gates still run unsandboxed
 - The merged JSON shows up in the process list as an argument; it holds paths and domains, not secrets, unless the user puts some there
 - Verified on Linux only; macOS and the TUI's stream-json argv were not part of the spike
+
+---
+
+### ADR-015: Gralph commits a completed task on request
+
+**Status:** Accepted
+
+**Context:**
+
+The shared prompt has told the session to commit its own work, "only after the task's verification passes". The session cannot keep that rule. The verification that counts is the task's gates (ADR-013), and gralph runs those after the session has exited. So a session commits first, a gate fails afterwards, and the history holds a commit for a task gralph marked `failed`; ADR-013 lists this among its costs.
+
+The rule is also gralph's business leaking into the session. A session needs its task and the project's rules. When a commit is allowed depends on gralph's order of work, which the session has no need to know.
+
+**Decision:**
+
+A new `--commit` flag makes gralph commit each task itself. Without the flag gralph never calls git, as before this ADR.
+
+- **Opt-in per run.** `--commit` is a boolean flag with no value and no default-on. There is no task-file key for it.
+- **Outside a repository the flag does nothing.** At startup gralph asks git whether its working directory is inside a work tree (`git rev-parse --show-toplevel`). If it is not, or git cannot be run, the run goes ahead with no check and no commits. Plain mode and `--dry-run` print `commit: not a git repository, nothing will be committed` to stdout; the full-screen view prints nothing. Gralph does not require a repository.
+- **Inside a repository the work tree must be clean at startup.** If `git status --porcelain` reports any change in the work tree other than the task file (modified, staged, or untracked and not ignored), gralph exits 1 with `error: --commit needs a clean work tree; commit, stash, or remove:` followed by the paths. This happens in every mode, after the task file is loaded and the failed-task refusal (ADR-006), and before the first session; in the TUI, after the setup screen and before the view opens. The check is what makes each commit hold exactly one task's work.
+- **When gralph commits.** The order for a task is session, gates, commit, save. The commit step runs only when the session reported `completed` (ADR-005) and every gate passed (ADR-013). A failed session or gate means no commit.
+- **What is committed.** Gralph stages every change in the work tree except the task file (`git add -A`, task file excluded) and commits it. Gralph cannot tell which files a session touched, and with a clean start it does not need to. Files changed by a gate are part of the commit.
+- **The message** is the task's `name`, passed to `git commit -m` as stored. There is no message field in the task file and the session supplies nothing.
+- **Nothing to commit is not a failure.** If nothing is staged, gralph makes no commit and the task is `completed`. It never creates an empty commit. This also covers a session that committed by itself: gralph does not police sessions.
+- **A failed commit fails the task.** If `git add` or `git commit` exits non-zero (a pre-commit hook rejects the change, no author is configured), the task is `failed` with `error` set to `commit failed: <exit error>`, the file is saved, and the run stops as for any failed task (ADR-003, ADR-006). Hooks always run; gralph never passes `--no-verify`.
+- **A failed task leaves its changes in the work tree.** Gralph never resets, stashes, or cleans. The next `--commit` run is refused by the clean-tree check until a person deals with the leftovers: discard or stash them and set the task to `pending`, or finish the work, commit it, and set the task to `completed`.
+- **Gralph never pushes** and sets no author: the commit is made with the user's own git configuration.
+- **Process handling matches a gate's** (ADR-013): git runs in its own process group with no stdin. Cancelling the context during the commit step leaves the task's state and the file untouched.
+- **Output.** Plain mode prints `commit: <name>` to stdout before committing, and git's output passes straight through. On the TUI path gralph reports an `Activity` event `→ commit <name>` and one `Activity` event per line of git's output. Both show only the name's first line. No new event kinds.
+- **`--dry-run`** with `--commit` runs the same startup check. In a clean repository it prints `commit: <work tree root>` before the final `<tasks path> is valid` line; a dirty tree exits 1 with the error above; outside a repository it prints the not-a-repository line.
+- **The stdin contract is unchanged.** The session is told nothing about `--commit`.
+- **The skill and its prompt template.** The template loses the "commit only after verification passes" rule. The skill asks whether the run will use `--commit`. If it will, the generated `prompt.md` tells the session not to commit and to leave its changes in the work tree; if not, it carries the project's own commit rules, as before.
+- **Keep the run's files out of git.** The README and the skill recommend adding the task file and the shared prompt (or the directory that holds them, and a sandbox settings file kept in the project) to the project's `.gitignore`. Ignored files never trip the clean-tree check and are never staged. Gralph does not edit `.gitignore` itself; when the skill writes the pair for a `--commit` run it tells the user which line to add. The task file is still left out of every commit whether or not it is ignored.
+
+Alternatives not taken: always committing (breaks projects that are not repositories or do not want gralph's commits); a per-task key (grows the task file for a choice that belongs to the run); a commit message field in the task file, or one supplied by the session in its result line (the name already reads as a subject, and the second puts commit knowledge back in the session); requiring a repository when `--commit` is passed (there is simply nothing to commit there); gralph discarding a failed task's changes (destroys the evidence, and gralph deleting work unasked); allowing a dirty tree on a rerun (mixes two attempts in one commit and needs gralph to remember which changes were leftovers).
+
+**Consequences:**
+
+_Positive:_
+
+- A commit now means gralph saw the session finish and every gate pass; a failed task leaves no commit behind
+- One commit per completed task, named after the task, with nothing else in it
+- The session needs no rule about when to commit, and the shared prompt no longer describes gralph's order of work
+- Runs without `--commit`, the stdin contract, and task files are unchanged
+
+_Negative:_
+
+- A run with `--commit` needs a clean work tree, so the prompt file, a sandbox settings file, and anything else kept in the repository must be committed or ignored first
+- After a failed task a person has to clean the work tree by hand before the next `--commit` run
+- A task file tracked by git is never committed by gralph and shows as modified until a person commits it
+- The commit message is only the task name; there is no body describing the change
+- Gralph runs git, and so the repository's hooks, outside the sandbox (ADR-014), like gates; a session can change a hook script that gralph then runs
+- The commit step has no time limit, unlike a gate; a hook that never exits hangs the run until it is stopped
+- A session can still commit by itself if its prompt does not forbid it; gralph does not detect that
+- Passing `--commit` outside a repository is easy to miss in the full-screen view, which prints no notice
 
 ---
 
