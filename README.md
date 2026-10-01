@@ -293,6 +293,10 @@ Claude Code's sandbox uses bubblewrap and socat on Linux and Seatbelt on macOS
 the sandbox can't start, the session exits non-zero and the task fails like any
 other. Gralph never falls back to running unsandboxed.
 
+Sandboxed runs have been tested on Linux only. macOS should work the same way,
+since gralph passes Claude the same flags and settings there, but it hasn't
+been tried.
+
 #### What the sandbox doesn't cover
 
 - **Gates.** Gralph runs those itself, with no sandbox.
