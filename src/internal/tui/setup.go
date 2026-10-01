@@ -32,11 +32,13 @@ type SetupModel struct {
 func NewSetup(tasksPath, promptPath string) SetupModel {
 	s := SetupModel{tasksPath: tasksPath, promptPath: promptPath}
 	if tasksPath == "" {
-		s.fields = append(s.fields, newSetupField("tasks file: ", true))
+		tasksField := newSetupField("tasks file: ", true)
+		s.fields = append(s.fields, tasksField)
 	}
 
 	if promptPath == "" {
-		s.fields = append(s.fields, newSetupField("prompt file: ", false))
+		promptField := newSetupField("prompt file: ", false)
+		s.fields = append(s.fields, promptField)
 	}
 
 	if len(s.fields) > 0 {
@@ -49,7 +51,8 @@ func NewSetup(tasksPath, promptPath string) SetupModel {
 // Setup runs the setup screen for the empty paths and returns its final
 // state. opts are extra program options, for tests.
 func Setup(tasksPath, promptPath string, opts ...tea.ProgramOption) (SetupModel, error) {
-	final, err := tea.NewProgram(NewSetup(tasksPath, promptPath), opts...).Run()
+	model := NewSetup(tasksPath, promptPath)
+	final, err := tea.NewProgram(model, opts...).Run()
 	if err != nil {
 		return SetupModel{}, err
 	}
@@ -121,7 +124,8 @@ func (s SetupModel) submit() (tea.Model, tea.Cmd) {
 func (s SetupModel) View() tea.View {
 	var b strings.Builder
 	for _, f := range s.fields {
-		b.WriteString(f.input.View())
+		inputLine := f.input.View()
+		b.WriteString(inputLine)
 		b.WriteByte('\n')
 		if f.err != "" {
 			b.WriteString("  ")
@@ -130,7 +134,8 @@ func (s SetupModel) View() tea.View {
 		}
 	}
 	b.WriteString("\nenter confirm · esc quit")
-	v := tea.NewView(b.String())
+	screen := b.String()
+	v := tea.NewView(screen)
 	v.AltScreen = true
 	return v
 }

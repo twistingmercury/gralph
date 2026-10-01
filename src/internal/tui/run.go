@@ -17,7 +17,9 @@ func Run(ctx context.Context, prompt string, tl *tasks.TaskList, tasksFile, gate
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	p := tea.NewProgram(New(tl, cancel), append([]tea.ProgramOption{tea.WithoutSignalHandler()}, opts...)...)
+	model := New(tl, cancel)
+	programOpts := append([]tea.ProgramOption{tea.WithoutSignalHandler()}, opts...)
+	p := tea.NewProgram(model, programOpts...)
 
 	loopDone, progDone := make(chan struct{}), make(chan struct{})
 	go func() {
