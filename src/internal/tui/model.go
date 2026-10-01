@@ -222,6 +222,9 @@ func (m Model) runDone(ev looper.Event) (tea.Model, tea.Cmd) {
 	m.status = m.doneStatus(ev.Err)
 	if ev.Err != nil {
 		m.exitCode = 1
+		// The run is over, so nothing is in progress; a task with no
+		// TaskFinished is still pending in the file.
+		m.resetInProgress()
 	}
 
 	m.legend.SetContent(m.status + " · " + legend)

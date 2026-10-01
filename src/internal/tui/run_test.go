@@ -2,11 +2,14 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -59,6 +62,12 @@ func startRun(t *testing.T, ctx context.Context, tasksPath string) (*io.PipeWrit
 // startRunIn is startRun for a run that commits into repo; nil means no git.
 func startRunIn(t *testing.T, ctx context.Context, tasksPath string, repo *looper.Repo) (*io.PipeWriter, <-chan runResult) {
 	t.Helper()
+	return startRunWith(t, ctx, tasksPath, repo, nil)
+}
+
+// startRunWith is startRunIn with an observe hook; nil means none.
+func startRunWith(t *testing.T, ctx context.Context, tasksPath string, repo *looper.Repo, observe func(looper.Event) error) (*io.PipeWriter, <-chan runResult) {
+	t.Helper()
 	t.Setenv("PATH", fakeClaudeDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	data, err := os.ReadFile(tasksPath)
 	require.NoError(t, err)
@@ -69,11 +78,24 @@ func startRunIn(t *testing.T, ctx context.Context, tasksPath string, repo *loope
 	t.Cleanup(func() { _ = w.Close() })
 	done := make(chan runResult, 1)
 	go func() {
-		code, summary, err := Run(ctx, "prompt", &tl, tasksPath, "", looper.BypassArgs(), repo,
+		code, summary, err := Run(ctx, "prompt", &tl, tasksPath, "", looper.BypassArgs(), repo, observe,
 			tea.WithInput(in), tea.WithOutput(io.Discard), tea.WithWindowSize(120, 30))
 		done <- runResult{code, summary, err}
 	}()
 	return w, done
+}
+
+// pressQUntilClosed keeps pressing q until the view closes: a q before
+// RunDone opens the stop prompt and the next one dismisses it. Closing w at
+// cleanup ends it.
+func pressQUntilClosed(w *io.PipeWriter) {
+	for {
+		if _, err := w.Write([]byte("q")); err != nil {
+			return
+		}
+
+		time.Sleep(50 * time.Millisecond)
+	}
 }
 
 func waitRun(t *testing.T, done <-chan runResult) runResult {
@@ -241,4 +263,63 @@ func TestRun_CommitsEachTaskIntoTheRepo(t *testing.T) {
 	out, err := exec.Command("git", "log", "--format=%s").Output()
 	require.NoError(t, err)
 	assert.Equal(t, "First\ninit\n", string(out))
+}
+
+// kindLog is an observe hook that keeps the kinds it saw; observe is called
+// from more than one goroutine.
+type kindLog struct {
+	mu    sync.Mutex
+	kinds []looper.EventKind
+}
+
+func (k *kindLog) observe(e looper.Event) error {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	k.kinds = append(k.kinds, e.Kind)
+	return nil
+}
+
+func (k *kindLog) snapshot() []looper.EventKind {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	return append([]looper.EventKind(nil), k.kinds...)
+}
+
+func TestRun_ObserveSeesTheWholeRun(t *testing.T) {
+	tasksPath := filepath.Join(t.TempDir(), "tasks.yaml")
+	require.NoError(t, os.WriteFile(tasksPath, []byte("tasks:\n  - {id: 1, name: First, prompt: p1}\n"), 0o600))
+
+	var seen kindLog
+	w, done := startRunWith(t, context.Background(), tasksPath, nil, seen.observe)
+	go pressQUntilClosed(w)
+
+	r := waitRun(t, done)
+	require.NoError(t, r.err)
+	assert.Equal(t, 0, r.code)
+	assert.Equal(t, "All tasks completed", r.summary)
+	want := []looper.EventKind{looper.TaskStarted, looper.Activity, looper.SessionFinished, looper.TaskFinished, looper.RunDone}
+	assert.Equal(t, want, seen.snapshot())
+}
+
+func TestRun_ObserveErrorStopsTheRun(t *testing.T) {
+	tasksPath := filepath.Join(t.TempDir(), "tasks.yaml")
+	tasksYAML := "tasks:\n  - {id: 1, name: First, prompt: p1, state: pending}\n"
+	require.NoError(t, os.WriteFile(tasksPath, []byte(tasksYAML), 0o600))
+
+	var calls atomic.Int32
+	failing := func(looper.Event) error {
+		calls.Add(1)
+		return errors.New("disk full")
+	}
+	w, done := startRunWith(t, context.Background(), tasksPath, nil, failing)
+	go pressQUntilClosed(w)
+
+	r := waitRun(t, done)
+	require.NoError(t, r.err)
+	assert.Equal(t, 1, r.code)
+	assert.Equal(t, "Run stopped: log: disk full", r.summary)
+	assert.Equal(t, int32(1), calls.Load(), "observe is not called again after it failed")
+	got, err := os.ReadFile(tasksPath)
+	require.NoError(t, err)
+	assert.Equal(t, tasksYAML, string(got), "the stopped task stays as it was")
 }

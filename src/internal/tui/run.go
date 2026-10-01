@@ -11,20 +11,22 @@ import (
 
 // Run runs the loop over tl inside the run view and returns the run's exit
 // code and one-line summary. ctx is the outside SIGINT/SIGTERM context.
-// sessionArgs and repo are as for looper.Run. opts are extra program options,
-// for tests.
-func Run(ctx context.Context, prompt string, tl *tasks.TaskList, tasksFile, gateTimeout string, sessionArgs []string, repo *looper.Repo, opts ...tea.ProgramOption) (exitCode int, summary string, err error) {
+// sessionArgs and repo are as for looper.Run. observe, when not nil, is
+// called with every event before the view gets it; its first error stops the
+// run. opts are extra program options, for tests.
+func Run(ctx context.Context, prompt string, tl *tasks.TaskList, tasksFile, gateTimeout string, sessionArgs []string, repo *looper.Repo, observe func(looper.Event) error, opts ...tea.ProgramOption) (exitCode int, summary string, err error) {
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	model := New(tl, cancel)
 	programOpts := append([]tea.ProgramOption{tea.WithoutSignalHandler()}, opts...)
 	p := tea.NewProgram(model, programOpts...)
+	fwd := &forwarder{observe: observe, send: p.Send, cancel: cancel}
 
 	loopDone, progDone := make(chan struct{}), make(chan struct{})
 	go func() {
 		defer close(loopDone)
-		_ = looper.Run(runCtx, prompt, tl, tasksFile, gateTimeout, sessionArgs, repo, func(e looper.Event) { p.Send(e) })
+		_ = looper.Run(runCtx, prompt, tl, tasksFile, gateTimeout, sessionArgs, repo, fwd.report)
 	}()
 	go forwardSignal(ctx, p, progDone)
 

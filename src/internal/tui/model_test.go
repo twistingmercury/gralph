@@ -463,3 +463,19 @@ func TestRenderTasks_FailureBannerNamesTask(t *testing.T) {
 	lines := strings.Split(m.taskPane.GetContent(), "\n")
 	assert.Equal(t, failureBanner.Render("✘ Task 1 failed: tests failed · press q to exit"), lines[0])
 }
+
+// A run can end with an error and no TaskFinished for the running task (a
+// log write error cancels it); the file still says pending, so the view must.
+func TestUpdate_RunDoneWithErrorShowsNoTaskInProgress(t *testing.T) {
+	tl := testTasks()
+	m := update(t, New(tl, func() {}), tea.WindowSizeMsg{Width: 120, Height: 30},
+		looper.Event{Kind: looper.TaskStarted, Task: tl.Tasks[0]})
+	require.Contains(t, render(m), row("▶ ", "1: First: in progress", inProgressState))
+
+	m = update(t, m, looper.Event{Kind: looper.RunDone, Err: errors.New("log: disk full")})
+
+	assert.Contains(t, render(m), row("  ", "1: First: pending", tasks.PendingState))
+	assert.NotContains(t, render(m), "in progress")
+	assert.Equal(t, "Run stopped: log: disk full", m.Summary())
+	assert.Equal(t, 1, m.ExitCode())
+}
