@@ -174,30 +174,36 @@ func TestVersionFlag(t *testing.T) {
 }
 
 // TestHelpFlag verifies that --help exits 0 (pflag exits 0 on ErrHelp) and
-// lists every documented flag. pflag writes usage to stderr.
+// lists every flag in the README's flag table. pflag writes usage to stderr.
 func TestHelpFlag(t *testing.T) {
 	t.Parallel()
 	result := runCLI(t, "--help")
 	assert.Equal(t, 0, result.exitCode, "stderr: %s", result.stderr)
-	for _, flag := range []string{"--prompt", "--tasks", "--dry-run", "--no-tui", "--install-skill", "--version", "--sandbox-settings", "--skip-permissions"} {
+	for _, flag := range []string{"--prompt", "--tasks", "--sandbox-settings", "--skip-permissions", "--gate-timeout", "--commit", "--dry-run", "--no-tui", "--install-skill", "--version"} {
 		assert.Contains(t, result.stderr, flag)
 	}
 }
 
-// TestMissingPrompt verifies that omitting --prompt exits non-zero.
+// TestMissingPrompt verifies that omitting --prompt exits 1 and names only
+// that flag. Usage follows the error and names every flag, so the error line
+// itself is matched.
 func TestMissingPrompt(t *testing.T) {
 	t.Parallel()
 	result := runCLI(t, "--tasks=/tmp/tasks.yaml")
-	require.NotEqual(t, 0, result.exitCode, "expected non-zero exit when --prompt is missing")
-	assert.Contains(t, result.stderr, "--prompt")
+	require.Equal(t, 1, result.exitCode, "stderr: %s", result.stderr)
+	assert.Contains(t, result.stderr, "error: required flag --prompt not set\n")
+	assert.NotContains(t, result.stderr, "required flag --tasks not set")
 }
 
-// TestMissingTasks verifies that omitting --tasks exits non-zero.
+// TestMissingTasks verifies that omitting --tasks exits 1 and names only that
+// flag. Usage follows the error and names every flag, so the error line
+// itself is matched.
 func TestMissingTasks(t *testing.T) {
 	t.Parallel()
 	result := runCLI(t, "--prompt=/tmp/prompt.md")
-	require.NotEqual(t, 0, result.exitCode, "expected non-zero exit when --tasks is missing")
-	assert.Contains(t, result.stderr, "--tasks")
+	require.Equal(t, 1, result.exitCode, "stderr: %s", result.stderr)
+	assert.Contains(t, result.stderr, "error: required flag --tasks not set\n")
+	assert.NotContains(t, result.stderr, "required flag --prompt not set")
 }
 
 // TestMissingBothRequiredFlags verifies that omitting both required flags exits non-zero.
@@ -210,16 +216,31 @@ func TestMissingBothRequiredFlags(t *testing.T) {
 	assert.Contains(t, result.stderr, "required flag --tasks not set")
 }
 
-// TestNonexistentFiles verifies that valid flags pointing to missing files exit non-zero
-// with an error naming the missing prompt/tasks file.
+// TestNonexistentFiles verifies that valid flags pointing to missing files
+// exit 1 with an error naming the missing file. The prompt loads first, so the
+// tasks case needs a prompt file that exists to reach the tasks error.
 func TestNonexistentFiles(t *testing.T) {
 	t.Parallel()
-	result := runCLI(t,
-		"--skip-permissions",
-		"--prompt=/nonexistent/prompt.md",
-		"--tasks=/nonexistent/tasks.yaml",
-	)
-	require.NotEqual(t, 0, result.exitCode, "expected non-zero exit when referenced files do not exist")
-	assert.Contains(t, result.stderr, "prompt file")
-	assert.Contains(t, result.stderr, "is not accessible")
+	dir := t.TempDir()
+	promptPath := writePrompt(t, dir, "Body.\n")
+	missingTasks := filepath.Join(dir, "missing.yaml")
+
+	tests := []struct {
+		name   string
+		prompt string
+		tasks  string
+		want   string
+	}{
+		{name: "prompt", prompt: "/nonexistent/prompt.md", tasks: "/nonexistent/tasks.yaml", want: `prompt file "/nonexistent/prompt.md" is not accessible`},
+		{name: "tasks", prompt: promptPath, tasks: missingTasks, want: fmt.Sprintf("tasks file %q is not accessible", missingTasks)},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			result := runCLI(t, "--skip-permissions", "--prompt="+tt.prompt, "--tasks="+tt.tasks)
+			require.Equal(t, 1, result.exitCode, "stderr: %s", result.stderr)
+			assert.Contains(t, result.stderr, tt.want)
+		})
+	}
 }

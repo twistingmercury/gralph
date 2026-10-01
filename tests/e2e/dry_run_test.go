@@ -102,9 +102,10 @@ func TestDryRun_IgnoresNonexistentPrompt(t *testing.T) {
 func TestDryRun_MissingTasksFlag(t *testing.T) {
 	t.Parallel()
 	result := runCLI(t, "--dry-run")
-	require.NotEqual(t, 0, result.exitCode, "expected non-zero exit when --tasks is missing")
-	assert.Contains(t, result.stderr, "--tasks")
-	assert.NotContains(t, result.stderr, "--prompt not set")
+	require.Equal(t, 1, result.exitCode, "stderr: %s", result.stderr)
+	// Usage follows the error and names every flag, so match the error line.
+	assert.Contains(t, result.stderr, "error: required flag --tasks not set\n")
+	assert.NotContains(t, result.stderr, "required flag --prompt not set")
 }
 
 func TestDryRun_ValidGatesAreNotRun(t *testing.T) {
