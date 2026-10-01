@@ -10,7 +10,7 @@ Gralph is a Go CLI that runs a "Ralph loop": for each open task it invokes `clau
 
 ```bash
 make local      # native build -> .bin/local/gralph (version ldflags from git tags)
-make test       # unit tests: go test -v ./cmd/... ./internal/... (run from src/)
+make test       # unit tests: go test ./cmd/... ./internal/... (run from src/)
 make analyze    # goimports -w (rewrites files), golangci-lint, govulncheck, gosec
 make build      # Docker release build (build/build.sh) — the only thing CI runs; also the only
                 # supported way to run the e2e suite (in a container, tests/docker-compose.yaml)
