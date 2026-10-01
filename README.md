@@ -398,15 +398,19 @@ prompt.md
 or ignore the directory you keep them in. A sandbox settings file kept in the
 project needs the same treatment.
 
-After a failed commit (git refused to commit), the changes are staged and the
-tree is dirty, so the next `--commit` run is refused. Either discard them
-(`git restore --staged --worktree .` and `git clean -f` for new files, or
+After a failed task, the tree is dirty with that task's leftovers, so the next
+`--commit` run is refused too. If it was the commit itself that failed, the
+leftovers are also staged. Either throw them away
+(`git restore --staged --worktree .` plus `git clean -f` for new files, or
 `git stash -u`) and set the task back to `pending`, or finish the work yourself,
 commit it, and set the task to `completed`.
 
 Outside a git repository `--commit` does nothing: the run goes ahead, and plain
 mode prints `commit: not a git repository, nothing will be committed`. The
-full-screen view doesn't mention it.
+full-screen view doesn't mention it. A repository git can't read is different:
+if git fails for any other reason (a broken `.git/config`, say), gralph exits 1
+with `error: --commit: git rev-parse: <git's message>` instead of running
+without commits.
 
 In plain mode gralph prints `commit: <name>` once something is staged, and git's
 output passes through. The full-screen view shows `→ commit <name>` in the Claude
