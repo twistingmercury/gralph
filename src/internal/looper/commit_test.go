@@ -402,9 +402,26 @@ func TestRun_NothingToCommitStillCompletes(t *testing.T) {
 	dir := initRepo(t)
 	tasksPath := taskFile(dir)
 	tl := gatedTask()
+	repo := openRepo(t, tasksPath)
 
-	require.NoError(t, Run(context.Background(), "prompt", tl, tasksPath, "", bypass, openRepo(t, tasksPath), nil))
+	origStdout := os.Stdout
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	os.Stdout = w
 
+	runErr := Run(context.Background(), "prompt", tl, tasksPath, "", bypass, repo, nil)
+
+	require.NoError(t, w.Close())
+	os.Stdout = origStdout
+	require.NoError(t, runErr)
+
+	var buf bytes.Buffer
+	_, err = buf.ReadFrom(r)
+	require.NoError(t, err)
+
+	// A commit line with no commit behind it would tell the user about a
+	// commit git never made.
+	assert.NotContains(t, buf.String(), "commit:", "nothing staged must announce nothing")
 	assert.Equal(t, []string{"init"}, subjects(t, dir), "no empty commit")
 	assert.Equal(t, tasks.CompletedState, readSavedTasks(t, tasksPath).Tasks[0].State)
 }
@@ -545,10 +562,11 @@ func TestRun_CommitOddTaskNames(t *testing.T) {
 		name        string
 		taskName    string
 		wantSubject string
+		wantMessage string
 		wantLine    string
 	}{
-		{name: "multi-line", taskName: "Subject line\n\nBody text", wantSubject: "Subject line", wantLine: "→ commit Subject line"},
-		{name: "leading dash", taskName: "--amend the widget", wantSubject: "--amend the widget", wantLine: "→ commit --amend the widget"},
+		{name: "multi-line", taskName: "Subject line\n\nBody text", wantSubject: "Subject line", wantMessage: "Subject line\n\nBody text", wantLine: "→ commit Subject line"},
+		{name: "leading dash", taskName: "--amend the widget", wantSubject: "--amend the widget", wantMessage: "--amend the widget", wantLine: "→ commit --amend the widget"},
 	}
 
 	for _, tt := range tests {
@@ -562,6 +580,11 @@ func TestRun_CommitOddTaskNames(t *testing.T) {
 			require.NoError(t, Run(context.Background(), "prompt", tl, tasksPath, "", bypass, openRepo(t, tasksPath), rec.report))
 
 			assert.Equal(t, []string{tt.wantSubject, "init"}, subjects(t, dir))
+
+			// The subject alone cannot tell a whole name from its first line:
+			// only the announced line is cut, the message keeps the body.
+			message := gitRun(t, dir, "log", "-1", "--format=%B")
+			assert.Equal(t, tt.wantMessage, strings.TrimRight(message, "\n"))
 			assert.Contains(t, activityLines(rec.snapshot()), tt.wantLine)
 		})
 	}
