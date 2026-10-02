@@ -183,16 +183,14 @@ func gateCmdField(g *tasks.Gate) *huh.Text {
 }
 
 // runGateForm makes Esc quit like ctrl+c, as everywhere else in the wizard,
-// and turns huh's abort into the wizard's cancel. A cancelled ctx (SIGINT or
-// SIGTERM) ends the form and counts as a cancel too.
+// and ends through formResult, so a cancelled ctx (SIGINT or SIGTERM) is a
+// cancel.
 func runGateForm(ctx context.Context, opts []tea.ProgramOption, fields ...huh.Field) error {
 	km := huh.NewDefaultKeyMap()
 	km.Quit.SetKeys("ctrl+c", "esc")
 	group := huh.NewGroup(fields...)
-	err := huh.NewForm(group).WithKeyMap(km).WithProgramOptions(opts...).RunWithContext(ctx)
-	if ctx.Err() != nil || errors.Is(err, huh.ErrUserAborted) {
-		return ErrCancelled
-	}
+	programOpts := formOptions(opts)
+	err := huh.NewForm(group).WithKeyMap(km).WithProgramOptions(programOpts...).RunWithContext(ctx)
 
-	return err
+	return formResult(ctx, err)
 }

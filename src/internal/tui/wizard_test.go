@@ -341,3 +341,26 @@ func TestNoteEscape(t *testing.T) {
 	escaped := noteEscape(`gralph -d 'it'\''s_a*run' x` + "`")
 	assert.Equal(t, `gralph -d 'it'\\''s\_a\*run' x\`+"`", escaped)
 }
+
+func TestFormResult(t *testing.T) {
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	other := errors.New("boom")
+	tests := []struct {
+		name string
+		ctx  context.Context
+		err  error
+		want error
+	}{
+		{"cancelled ctx, nil error", cancelled, nil, ErrCancelled},
+		{"cancelled ctx, timeout", cancelled, huh.ErrTimeout, ErrCancelled},
+		{"live ctx, user abort", context.Background(), huh.ErrUserAborted, ErrCancelled},
+		{"live ctx, nil error", context.Background(), nil, nil},
+		{"live ctx, other error", context.Background(), other, other},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, formResult(tt.ctx, tt.err))
+		})
+	}
+}

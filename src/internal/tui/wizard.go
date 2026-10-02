@@ -433,12 +433,30 @@ func wizardKeyMap() *huh.KeyMap {
 	return km
 }
 
-// runWizardForm turns huh's abort into the wizard's cancel. A cancelled ctx
-// ends the form with huh's timeout error, which is also a cancel.
+// runWizardForm turns the end of a form into the wizard's result; see
+// formResult.
 func runWizardForm(ctx context.Context, form *huh.Form, opts []tea.ProgramOption) error {
 	km := wizardKeyMap()
-	err := form.WithKeyMap(km).WithProgramOptions(opts...).RunWithContext(ctx)
-	if errors.Is(err, huh.ErrUserAborted) || (err != nil && ctx.Err() != nil) {
+	programOpts := formOptions(opts)
+	err := form.WithKeyMap(km).WithProgramOptions(programOpts...).RunWithContext(ctx)
+
+	return formResult(ctx, err)
+}
+
+// formOptions turns off Bubble Tea's own signal handler so gralph's signal
+// context is the only thing that stops a form. With both, SIGTERM made the
+// handler quit the form cleanly (nil error, nothing answered) while the
+// cancelled ctx raced it, and the handler could block forever and hang the
+// exit. slices.Concat copies, so the caller's backing array is never written.
+func formOptions(opts []tea.ProgramOption) []tea.ProgramOption {
+	return slices.Concat([]tea.ProgramOption{tea.WithoutSignalHandler()}, opts)
+}
+
+// formResult maps how a form ended to the wizard's result. A cancelled ctx is
+// a cancel whatever huh returned, nil included, because a form that ended
+// that way has no answers to carry on with.
+func formResult(ctx context.Context, err error) error {
+	if ctx.Err() != nil || errors.Is(err, huh.ErrUserAborted) {
 		return ErrCancelled
 	}
 
