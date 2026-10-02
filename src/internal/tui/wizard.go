@@ -1,8 +1,10 @@
 package tui
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -59,6 +61,7 @@ type wizard struct {
 	logging       bool
 	folder        string
 	sandbox       string
+	cwd           string
 }
 
 func newWizard(s Settings, g Given) *wizard {
@@ -103,24 +106,31 @@ const (
 
 // Wizard asks for what s leaves open, then shows the review screen. It writes
 // nothing: cmd/main saves an edited gate list after Start, so a cancel at any
-// point leaves the task file as it was.
-func Wizard(s Settings, g Given, opts ...tea.ProgramOption) (Settings, error) {
+// point leaves the task file as it was. A cancelled ctx quits like Esc, so a
+// signal reaches the wizard.
+func Wizard(ctx context.Context, s Settings, g Given, opts ...tea.ProgramOption) (Settings, error) {
 	w := newWizard(s, g)
+	cwd, err := os.Getwd()
+	if err != nil {
+		return Settings{}, err
+	}
+
+	w.cwd = cwd
 	if w.stepsOpen() {
 		form := w.stepsForm()
-		if err := runWizardForm(form, opts); err != nil {
+		if err := runWizardForm(ctx, form, opts); err != nil {
 			return Settings{}, err
 		}
 	}
 
 	w.fold()
 	if gatesOpen(w.s) {
-		if err := w.editGates(opts); err != nil {
+		if err := w.editGates(ctx, opts); err != nil {
 			return Settings{}, err
 		}
 	}
 
-	return w.review(opts)
+	return w.review(ctx, opts)
 }
 
 // stepsOpen leaves out the sandbox file and the custom limit, which open only
@@ -150,7 +160,9 @@ func (w *wizard) stepsForm() *huh.Form {
 }
 
 // folderField writes to its own variable because the picker stores a choice
-// before checkFolder sees it; only checkFolder moves a folder into w.s.
+// before checkFolder sees it; only checkFolder moves a folder into w.s. It
+// starts from the absolute working directory because the picker's Back on "."
+// stays on "." and could never leave the start folder.
 func (w *wizard) folderField() huh.Field {
 	return huh.NewFilePicker().
 		Title("Run folder").
@@ -158,22 +170,28 @@ func (w *wizard) folderField() huh.Field {
 		DirAllowed(true).
 		FileAllowed(false).
 		ShowHidden(true).
-		CurrentDirectory(".").
+		CurrentDirectory(w.cwd).
 		Picking(true).
-		Validate(w.checkFolder).
+		Validate(w.checkPickedFolder).
 		Value(&w.folder)
+}
+
+// checkPickedFolder hands checkFolder the folder relative to the working
+// directory, so Settings.Dir, the review, and <folder>/logs stay short.
+func (w *wizard) checkPickedFolder(dir string) error {
+	rel := relativeTo(w.cwd, dir)
+	return w.checkFolder(rel)
 }
 
 // permissionField starts on a placeholder that checkPermission refuses, so
 // Enter on a step the user never moved through chooses nothing (ADR-014).
 func (w *wizard) permissionField() huh.Field {
+	placeholder := huh.NewOption("Choose one", "")
+	sandbox := huh.NewOption("In Claude's sandbox, with a settings file", permSandbox)
+	skip := huh.NewOption("Skip permissions: no sandbox, no checks", permSkip)
 	return huh.NewSelect[string]().
 		Title("How should sessions run?").
-		Options(
-			huh.NewOption("Choose one", ""),
-			huh.NewOption("In Claude's sandbox, with a settings file", permSandbox),
-			huh.NewOption("Skip permissions: no sandbox, no checks", permSkip),
-		).
+		Options(placeholder, sandbox, skip).
 		Validate(checkPermission).
 		Value(&w.perm)
 }
@@ -183,11 +201,12 @@ func (w *wizard) permissionField() huh.Field {
 func (w *wizard) sandboxField() huh.Field {
 	return huh.NewFilePicker().
 		Title("Sandbox settings file").
+		Description("enter picks the highlighted file · → opens a folder · ← goes up").
 		AllowedTypes([]string{".json"}).
 		FileAllowed(true).
 		DirAllowed(false).
 		ShowHidden(true).
-		CurrentDirectory(".").
+		CurrentDirectory(w.cwd).
 		Picking(true).
 		Validate(checkSandboxFile).
 		Value(&w.sandbox)
@@ -217,12 +236,11 @@ func (w *wizard) loggingTitle() string {
 }
 
 func (w *wizard) timeoutField() huh.Field {
+	fallback := huh.NewOption("Default (each gate's own timeout, else 10m)", "")
+	custom := huh.NewOption("One limit for every gate", timeoutCustom)
 	return huh.NewSelect[string]().
 		Title("Gate time limit").
-		Options(
-			huh.NewOption("Default (each gate's own timeout, else 10m)", ""),
-			huh.NewOption("One limit for every gate", timeoutCustom),
-		).
+		Options(fallback, custom).
 		Value(&w.timeoutChoice)
 }
 
@@ -234,13 +252,14 @@ func (w *wizard) customTimeoutField() huh.Field {
 }
 
 // fold moves the answers kept outside w.s into it. The folder and the log
-// folder are already there, put in by their checks.
+// folder are already there, put in by their checks. The sandbox file is made
+// relative to the working directory so the review's command line stays short.
 func (w *wizard) fold() {
 	switch w.perm {
 	case permSkip:
 		w.s.SkipPermissions, w.s.SandboxSettings = true, ""
 	case permSandbox:
-		w.s.SkipPermissions, w.s.SandboxSettings = false, w.sandbox
+		w.s.SkipPermissions, w.s.SandboxSettings = false, relativeTo(w.cwd, w.sandbox)
 	}
 
 	if !w.g.Commit {
@@ -255,9 +274,9 @@ func (w *wizard) fold() {
 // editGates replaces the task list with an edited copy, leaving the caller's
 // untouched. An absent gates key counts as a change even when no gate was
 // added, so Done saves gates: [] and the file is not asked about again.
-func (w *wizard) editGates(opts []tea.ProgramOption) error {
+func (w *wizard) editGates(ctx context.Context, opts []tea.ProgramOption) error {
 	before := w.s.Tasks.GateList()
-	after, err := editGates(before, opts...)
+	after, err := editGates(ctx, before, opts...)
 	if err != nil {
 		return err
 	}
@@ -273,9 +292,9 @@ func (w *wizard) editGates(opts []tea.ProgramOption) error {
 	return nil
 }
 
-func (w *wizard) review(opts []tea.ProgramOption) (Settings, error) {
+func (w *wizard) review(ctx context.Context, opts []tea.ProgramOption) (Settings, error) {
 	for {
-		choice, err := w.askReview(opts)
+		choice, err := w.askReview(ctx, opts)
 		if err != nil {
 			return Settings{}, err
 		}
@@ -288,20 +307,21 @@ func (w *wizard) review(opts []tea.ProgramOption) (Settings, error) {
 			return Settings{}, ErrCancelled
 		}
 
-		if err := w.editGates(opts); err != nil {
+		if err := w.editGates(ctx, opts); err != nil {
 			return Settings{}, err
 		}
 	}
 }
 
-func (w *wizard) askReview(opts []tea.ProgramOption) (string, error) {
+func (w *wizard) askReview(ctx context.Context, opts []tea.ProgramOption) (string, error) {
 	text := reviewText(w.s)
 	escaped := noteEscape(text)
 	note := huh.NewNote().Title("Ready to run").Description(escaped)
 	choice := reviewStart
 	actions := huh.NewOptions(reviewStart, reviewEditGates, reviewCancel)
 	sel := huh.NewSelect[string]().Options(actions...).Value(&choice)
-	err := runGateForm(opts, note, sel)
+	form := huh.NewForm(huh.NewGroup(note, sel))
+	err := runWizardForm(ctx, form, opts)
 	return choice, err
 }
 
@@ -325,12 +345,23 @@ func reviewText(s Settings) string {
 	return strings.Join(lines, "\n")
 }
 
+// reviewFiles shows a -t or -p override next to the folder, because the
+// folder alone would hide that a file comes from elsewhere.
 func reviewFiles(s Settings) []string {
-	if s.Dir != "" {
-		return []string{"Folder: " + s.Dir}
+	if s.Dir == "" {
+		return []string{"Tasks: " + s.TasksPath, "Prompt: " + s.PromptPath}
 	}
 
-	return []string{"Tasks: " + s.TasksPath, "Prompt: " + s.PromptPath}
+	lines := []string{"Folder: " + s.Dir}
+	if s.TasksPath != filepath.Join(s.Dir, "tasks.yaml") {
+		lines = append(lines, "Tasks: "+s.TasksPath)
+	}
+
+	if s.PromptPath != filepath.Join(s.Dir, "prompt.md") {
+		lines = append(lines, "Prompt: "+s.PromptPath)
+	}
+
+	return lines
 }
 
 func permissionLabel(s Settings) string {
@@ -380,13 +411,34 @@ func noteEscape(s string) string {
 	return noteMarkup.Replace(s)
 }
 
-// runWizardForm makes Esc quit like ctrl+c, as in the gate editor, and turns
-// huh's abort into the wizard's cancel.
-func runWizardForm(form *huh.Form, opts []tea.ProgramOption) error {
+// relativeTo gives path relative to base, or path unchanged when no relative
+// form exists, so what the review shows and the command line carries stays
+// short.
+func relativeTo(base, path string) string {
+	rel, err := filepath.Rel(base, path)
+	if err != nil {
+		return path
+	}
+
+	return rel
+}
+
+// wizardKeyMap makes Esc quit like ctrl+c, as in the gate editor. The picker's
+// help line names what the keys do here: Esc quits setup, → opens a folder.
+func wizardKeyMap() *huh.KeyMap {
 	km := huh.NewDefaultKeyMap()
 	km.Quit.SetKeys("ctrl+c", "esc")
-	err := form.WithKeyMap(km).WithProgramOptions(opts...).Run()
-	if errors.Is(err, huh.ErrUserAborted) {
+	km.FilePicker.Close.SetHelp("esc", "quit setup")
+	km.FilePicker.Open.SetHelp("→", "open")
+	return km
+}
+
+// runWizardForm turns huh's abort into the wizard's cancel. A cancelled ctx
+// ends the form with huh's timeout error, which is also a cancel.
+func runWizardForm(ctx context.Context, form *huh.Form, opts []tea.ProgramOption) error {
+	km := wizardKeyMap()
+	err := form.WithKeyMap(km).WithProgramOptions(opts...).RunWithContext(ctx)
+	if errors.Is(err, huh.ErrUserAborted) || (err != nil && ctx.Err() != nil) {
 		return ErrCancelled
 	}
 

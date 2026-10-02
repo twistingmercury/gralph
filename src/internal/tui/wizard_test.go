@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"errors"
 	"io"
 	"os"
@@ -159,7 +160,9 @@ func TestWizard_CancelReturnsErrCancelled(t *testing.T) {
 	s := permissionsOnly(t)
 	before, err := os.ReadFile(s.TasksPath)
 	require.NoError(t, err)
-	wizard := func(opts ...tea.ProgramOption) (Settings, error) { return Wizard(s, allGiven, opts...) }
+	wizard := func(opts ...tea.ProgramOption) (Settings, error) {
+		return Wizard(context.Background(), s, allGiven, opts...)
+	}
 	w, done := startWizard(t, wizard)
 
 	_, err = io.WriteString(w, "\x1b")
@@ -172,10 +175,55 @@ func TestWizard_CancelReturnsErrCancelled(t *testing.T) {
 	assert.Equal(t, string(before), string(after), "a cancel changes nothing on disk")
 }
 
+func TestWizard_CancelledContextReturnsErrCancelled(t *testing.T) {
+	s := permissionsOnly(t)
+	before, err := os.ReadFile(s.TasksPath)
+	require.NoError(t, err)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	wizard := func(opts ...tea.ProgramOption) (Settings, error) { return Wizard(ctx, s, allGiven, opts...) }
+	_, done := startWizard(t, wizard)
+
+	r := waitWizard(t, done)
+	assert.True(t, errors.Is(r.err, ErrCancelled), "got %v", r.err)
+	after, err := os.ReadFile(s.TasksPath)
+	require.NoError(t, err)
+	assert.Equal(t, string(before), string(after), "a signal changes nothing on disk")
+}
+
+func TestRelativeTo(t *testing.T) {
+	cases := map[string]struct{ base, path, want string }{
+		"inside":          {"/work", "/work/runs/a", "runs/a"},
+		"the base itself": {"/work", "/work", "."},
+		"a sibling":       {"/work/a", "/work/b", "../b"},
+		"no base":         {"", "/work/a", "/work/a"},
+		"relative base":   {"work", "/work/a", "/work/a"},
+		"relative path":   {"/work", "runs/a", "runs/a"},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			got := relativeTo(tc.base, tc.path)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestWizardKeyMap_HelpMatchesKeys(t *testing.T) {
+	km := wizardKeyMap()
+	assert.Equal(t, "esc", km.FilePicker.Close.Help().Key)
+	assert.Equal(t, "quit setup", km.FilePicker.Close.Help().Desc)
+	assert.Equal(t, "→", km.FilePicker.Open.Help().Key)
+	assert.Equal(t, "open", km.FilePicker.Open.Help().Desc)
+	assert.Equal(t, []string{"ctrl+c", "esc"}, km.Quit.Keys(), "Esc and ctrl+c still quit")
+}
+
 func TestWizard_PermissionsPlaceholderChoosesNothing(t *testing.T) {
 	w := newWizard(permissionsOnly(t), allGiven)
 	form := w.stepsForm()
 	form.Init()
+	// Init queues this move past the hidden folder group; a program would run
+	// it, this driver does not.
+	form.NextGroup()
 
 	press(t, form, keyEnter)
 	assert.Equal(t, huh.StateNormal, form.State, "Enter on the placeholder must not move on")
@@ -216,7 +264,7 @@ func TestWizard_Fold(t *testing.T) {
 func reviewOf(s Settings) func(opts ...tea.ProgramOption) (Settings, error) {
 	return func(opts ...tea.ProgramOption) (Settings, error) {
 		w := newWizard(s, allGiven)
-		return w.review(opts)
+		return w.review(context.Background(), opts)
 	}
 }
 
@@ -272,6 +320,21 @@ func TestReviewText(t *testing.T) {
 	s.Tasks = &tasks.TaskList{}
 	text = reviewText(s)
 	assert.Contains(t, text, "Gates: no gates")
+}
+
+func TestReviewFiles(t *testing.T) {
+	s := Settings{Dir: "run", TasksPath: "run/tasks.yaml", PromptPath: "run/prompt.md"}
+	assert.Equal(t, []string{"Folder: run"}, reviewFiles(s))
+
+	s.TasksPath, s.PromptPath = "other/t.yaml", "other/p.md"
+	want := []string{"Folder: run", "Tasks: other/t.yaml", "Prompt: other/p.md"}
+	assert.Equal(t, want, reviewFiles(s), "an override must not hide behind the folder")
+
+	s.TasksPath = "run/tasks.yaml"
+	assert.Equal(t, []string{"Folder: run", "Prompt: other/p.md"}, reviewFiles(s))
+
+	s = Settings{TasksPath: "t.yaml", PromptPath: "p.md"}
+	assert.Equal(t, []string{"Tasks: t.yaml", "Prompt: p.md"}, reviewFiles(s))
 }
 
 func TestNoteEscape(t *testing.T) {
