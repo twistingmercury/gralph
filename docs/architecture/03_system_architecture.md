@@ -1,8 +1,8 @@
 # Gralph — System Architecture
 
-> **Version**: v20
+> **Version**: v21
 > **Date**: 2026-10-02
-> **Notes**: Review fixes for the wizard: `Wizard` and `editGates` take a context.Context first; pickers show paths relative to working directory; gate editor field is multi-line; the order in runTUI has repo and log-folder checks before saveGates; the review screen prints the command line to stdout before opening the view.
+> **Notes**: Documented `wizard_signal_linux_test.go` e2e test running under pseudo-terminal to pin signal handling of wizard cancellation; added note to Test Seam section about creack/pty test-only dependency.
 
 [Back to Overview](00_overview.md) | [Back to Project README](../../README.md)
 
@@ -305,7 +305,7 @@ graph TB
 
 ## Test Seam
 
-There is no injectable runner; `runLoop` execs inline. Both test suites (`internal/looper`, `tests/e2e`) build a fake `claude` into a temp dir, put it first on `PATH` for the gralph process only, and drive it with environment variables, because gralph passes fixed argv. `internal/tui` tests drive `Model` directly, or `tui.Run` and `tui.Wizard` with test program options; `NeedsWizard`, `CommandLine`, and each step's check are plain functions tested without a terminal. The e2e tests are black-box and have no terminal, so they always run plain mode.
+There is no injectable runner; `runLoop` execs inline. Both test suites (`internal/looper`, `tests/e2e`) build a fake `claude` into a temp dir, put it first on `PATH` for the gralph process only, and drive it with environment variables, because gralph passes fixed argv. `internal/tui` tests drive `Model` directly, or `tui.Run` and `tui.Wizard` with test program options; `NeedsWizard`, `CommandLine`, and each step's check are plain functions tested without a terminal. The e2e tests are black-box and have no terminal, so they always run plain mode. Exception: `wizard_signal_linux_test.go` runs the real gralph binary under a pseudo-terminal (using creack/pty, a test-only dependency) to verify that SIGTERM and SIGINT cancel the open wizard; the test driver must keep reading output or gralph blocks on exit.
 
 ## Data Flow
 

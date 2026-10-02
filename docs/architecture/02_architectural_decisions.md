@@ -1,8 +1,8 @@
 # Gralph — Architectural Decisions
 
-> **Version**: v19
+> **Version**: v20
 > **Date**: 2026-10-02
-> **Notes**: Review fixes for ADR-018 and ADR-019: pickers start from working directory with relative paths; the review screen lists Tasks and Prompt when overriding; Start prints the command line to stdout; the commit/log-folder checks run before gates are saved; the skill guides people to match gates with checks. ADR-019 amended about the skill's guidance role.
+> **Notes**: Added e2e test `wizard_signal_linux_test.go` running under pseudo-terminal to pin signal handling of wizard forms; amended ADR-018 negative consequence and cancelling description to document forms running with `tea.WithoutSignalHandler()` and signal context control.
 
 [Back to Overview](00_overview.md) | [Back to Project README](../../README.md)
 
@@ -778,7 +778,7 @@ Two additions: a `-d/--dir` flag that names a run folder, and a setup wizard in 
 - **Checked where they are asked.** Each step validates its answer with the same functions a run uses and keeps the user on the step with the error shown: the folder step loads both files (a missing file, a parse error, or a `failed` task, the last pointing at `gralph -d <folder> --dry-run` for the table); the sandbox picker loads the settings file; the commit step, on yes, opens the repository as a `--commit` run does (`looper.OpenRepo`), so a dirty work tree or a task file git does not ignore is refused there (ADR-015); the logging step refuses yes when the run commits (by flag or the commit step) and `<folder>/logs` is inside the work tree but not ignored by git (ADR-015, ADR-016); the timeout step parses the value with `time.ParseDuration` and requires it greater than zero.
 - **One source of truth.** The wizard's answers fill the same values the flags fill. After it closes, the existing startup checks run unchanged on those values; they never assume the wizard checked anything.
 - **The review screen.** Lists every choice, the gates (or "no gates"), and when `-t` or `-p` override the folder, also `Tasks:` and/or `Prompt:`. Then the command line that reproduces the run, such as `gralph -d .local/foo --sandbox-settings ~/sb.json --commit`. Gates are not on the command line; they are in the file. The choices are Start, Edit gates (back to the gates step), and Cancel.
-- **Nothing is written before Start.** On Start, the commit repository check (clean tree, task file ignored) and the log folder's git-ignore check run first, before the gates are saved to the task file. If both pass, gralph saves the task file with the new `gates:` list if changed, prints one unwrapped line to stdout (`Same run, no wizard: <command>`) before the full-screen view opens (so the command can be copied even when wrapped), and the run begins. Esc or ctrl+c anywhere prints `error: setup cancelled` and exits 1 with nothing written, the message the setup screen used.
+- **Nothing is written before Start.** On Start, the commit repository check (clean tree, task file ignored) and the log folder's git-ignore check run first, before the gates are saved to the task file. If both pass, gralph saves the task file with the new `gates:` list if changed, prints one unwrapped line to stdout (`Same run, no wizard: <command>`) before the full-screen view opens (so the command can be copied even when wrapped), and the run begins. The wizard's forms run without Bubble Tea's signal handler so gralph's signal context is the only path that stops them, avoiding a race where the two handlers could crash or hang the process. Esc or ctrl+c anywhere prints `error: setup cancelled` and exits 1 with nothing written, the message the setup screen used.
 - **Built with huh.** The wizard is a `charm.land/huh/v2` form inside `internal/tui`: `FilePicker` (with `DirAllowed`, `FileAllowed`, `ShowHidden`, `AllowedTypes`, `Validate`), `Select`, `Confirm`, `Input`, and `Note`, with groups hidden per run by `WithHideFunc`. huh v2 is built on the Bubble Tea v2 modules gralph already uses. It has no list editor, so the gates step is a short loop of small huh forms (add, edit, delete, done; each gate a command and an optional timeout). Which steps are open is a plain function of the flags and the task file, and the reproducing command line is a plain function of the answers, so both are tested without a terminal.
 
 **Corrected on acceptance:** the proposal opened the wizard when any step was open and had `--dry-run` show the folder and file steps. Planning found that the commit, logging, and timeout steps would then open it on every run without those flags, and that a dry run is always plain mode, so the wizard opens only for the folder, permissions, or gates step, and never on a dry run. The commit step's check was added to the list above.
@@ -800,7 +800,7 @@ _Negative:_
 
 - A new third-party dependency to track and scan
 - A run without `--commit` or `--log-dir` still shows those steps whenever the wizard opens for anything else; "No" is pre-selected, so each costs one Enter
-- The wizard has no e2e coverage (the suite has no terminal); it is covered by unit tests and checked by hand under a pty
+- One e2e test, `wizard_signal_linux_test.go`, runs the binary under a pseudo-terminal to pin that SIGTERM and SIGINT cancel the open wizard; the wizard's steps are otherwise covered by unit tests and checked by hand
 - Fixed names mean a folder holding two task files still needs `-t`
 
 ---
