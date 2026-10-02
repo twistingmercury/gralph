@@ -701,11 +701,11 @@ Each version gets a GitHub release with one archive per platform. A workflow the
 - **Started by hand, per tag.** `.github/workflows/release.yaml` has `workflow_dispatch` as its only trigger and one required input, `tag`. Pushing a tag starts nothing. The workflow file must be on the default branch (`develop`) for GitHub to offer the run.
 - **The tag must exist and look like a version.** The input must match `vMAJOR.MINOR.PATCH` (digits only) or the run fails before checkout. The input reaches the shell through an environment variable, never by being pasted into a script. The workflow checks out that tag with full history; a name that is not a tag fails the run. The workflow never creates, moves, or signs a tag.
 - **Same build as CI.** The workflow runs `build/build.sh` with `BUILD_VER` set to the tag, so a release passes the linters, scanners, unit tests, and e2e suite on the exact commit it ships. Before packaging, the workflow runs the linux/amd64 binary with `--version` and fails unless the output names the tag.
-- **`build/package.sh <version>` makes the archives.** It reads the four binaries from `.bin/` and writes to `.dist/` (git-ignored, emptied first):
+- **`build/package.sh` makes the archives.** It takes the version from `BUILD_VER`, the variable `build/build.sh` uses, and requires the same `vMAJOR.MINOR.PATCH` form. It reads the four binaries from `.bin/` and writes to `.dist/` (git-ignored; its own archives and `checksums.txt` from an earlier run are removed first, nothing else):
   - `gralph_<version>_<os>_<arch>.tar.gz` for `linux` and `darwin`, `amd64` and `arm64`. Each holds three files at its top level: `gralph` (executable), `howto.md`, and `LICENSE`.
   - `checksums.txt`: one SHA-256 line per archive in `sha256sum` format, so `sha256sum -c` (Linux) and `shasum -a 256 -c` (macOS) can check a download.
 
-  All four binaries are checked before anything is written: a missing one is an error, exit 1, and `.dist/` gets no files. The script takes no part in building: it can be run on any machine after `make build`.
+  The four binaries, the HOWTO, and the license are checked before anything is written: a missing one is an error, exit 1, and `.dist/` gets no files. The script takes no part in building: it can be run on any machine after `make build`.
 - **A draft release.** The last step runs `gh release create <tag> --draft --verify-tag --generate-notes` with everything in `.dist/` attached. The owner reads the draft and publishes it. A second run for a tag that already has a release fails; delete the draft to run again.
 - **Least permission.** The workflow's token gets `contents: write` and nothing else. The CI workflow is unchanged.
 - **Documented install.** `docs/howto.md` gains an "Installing gralph" section: download the archive for the machine, check it against `checksums.txt`, unpack, move `gralph` into `~/.local/bin`, run `gralph --install-skill`. The commands take the version from a `VERSION` variable the reader sets, because the archive names carry the version. The section says to add `~/.local/bin` to `PATH` when it is not already there, and how to upgrade (the same steps, then `gralph --install-skill` again, ADR-010). The README carries a short version that links there. The clone-and-make path stays in the README for development.
@@ -729,7 +729,7 @@ _Negative:_
 - The first run can only be tried on a tag that already holds `build/package.sh`, so the workflow is proven by its first real release
 - The macOS archives are untested; a download made with a browser is quarantined by Gatekeeper and needs `xattr -d com.apple.quarantine` or a `curl` download
 - The binaries are not signed; `checksums.txt` comes from the same release, so it catches a damaged download, not a tampered release
-- The tests for `build/package.sh` are not run by CI (`build/build.sh` has no place for them); they are run by hand
+- The tests for `build/package.sh` (BATS, in `tests/bats/`, with `bats-support` and `bats-assert` vendored beside them) are not run by CI (`build/build.sh` has no place for them); they are run by hand with `bats tests/bats`
 - No package manager knows about gralph; upgrading means downloading again
 
 ---
