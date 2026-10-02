@@ -1,8 +1,8 @@
 # Gralph — Requirements
 
-> **Version**: v11
+> **Version**: v12
 > **Date**: 2026-10-02
-> **Notes**: A `windows/amd64` binary can be built by hand but is untested and not released (ADR-007 amendment); Windows stays out of scope beyond that.
+> **Notes**: Install without Go through release archives (ADR-017); maturity moved from Emerging to Basic.
 
 [Back to Overview](00_overview.md) | [Back to Project README](../../README.md)
 
@@ -46,7 +46,7 @@ Claude Code users need a way to:
 
 ### Secondary Goals
 
-1. Be installable to GOBIN and usable from anywhere
+1. Be installable without Go, from a release archive (ADR-017), and usable from anywhere; `make local install` stays for development
 2. Show a run live in a full-screen view by default in a terminal, while plain mode (`--no-tui` or no terminal) stays unchanged for scripts and CI
 3. Support Docker-based release builds and CI testing
 4. Provide clear error messages when task files are invalid or tasks fail
@@ -102,7 +102,7 @@ Claude Code users need a way to:
 
 ### Business Constraints
 
-- **Emerging maturity** — CLI contract has changed between minor versions (e.g., v0.5.x to v0.6.0)
+- **Basic maturity** — Ready for real work and still evolving; planned changes are conveniences that leave existing behaviour alone, but a breaking change can still land before 1.0
 - **No CHANGELOG** — Versions are SemVer git tags only; no maintained changelog document
 - **Skill-driven task generation** — The gralph-docs-writer skill generates tasks.yaml + prompt.md; field rules must stay in sync with internal/tasks
 

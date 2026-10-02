@@ -14,6 +14,7 @@ make test       # unit tests: go test ./cmd/... ./internal/... (run from src/)
 make analyze    # goimports -w (rewrites files), golangci-lint, govulncheck, gosec
 make build      # Docker release build (build/build.sh) — the only thing CI runs; also the only
                 # supported way to run the e2e suite (in a container, tests/docker-compose.yaml)
+bats tests/bats # tests for build/package.sh; run by hand, CI does not run them
 ```
 
 Single tests:
@@ -34,6 +35,7 @@ Easy to get wrong:
 - Every e2e test that starts a real run passes `--skip-permissions` or `--sandbox-settings`; without one gralph exits 1 before claude starts. Neither fake `claude` enforces anything: they only record the argv.
 - The e2e suite has no terminal, so it cannot exercise `--log-dir` logging; it only pins that plain mode refuses the flag and a dry run ignores it. The record is covered by the unit tests in `internal/runlog`, `internal/looper`, and `internal/tui`.
 - Validate a task file without running anything: `.bin/local/gralph -t <tasks.yaml> --dry-run`.
+- `build/package.sh` reads `BUILD_VER` (required, `vMAJOR.MINOR.PATCH`) and packs what `make build` left in `.bin/` into `.dist/`. Its tests are BATS (`tests/bats/test-package.bats`); `tests/bats/test_helper/` is vendored `bats-support` and `bats-assert`, copied unchanged — do not edit or lint those files.
 
 ## Architecture
 
@@ -80,3 +82,4 @@ The Go module lives in `src/` (`go.mod` there); go commands run from `src/` or v
 - `docs/dependency_graph.md` lists every package in `src/` and every import between them, with what each edge uses. Update it in the same change that adds or removes a package or an import between packages.
 - `docs/howto.md` is the user guide: every flag, the task file, sandboxing, gates, `--commit`, `--log-dir`, and the full-screen view. A change to user-visible behaviour (a flag, an error message, output) updates it in the same change; the README keeps only a short summary that links there. The HOWTO is meant to ship next to the binary, so it must not link to any file in the repository.
 - PRs target `develop`. Versions are SemVer git tags; there is no CHANGELOG.
+- **Releases are started by hand (ADR-017).** `.github/workflows/release.yaml` is `workflow_dispatch` only: the owner pushes a signed tag, starts the workflow with it, and publishes the draft it leaves. Do not add a tag-push trigger, publish without a draft, add a Windows archive, an install script, or a package-manager formula without the owner asking. The archive names (`gralph_<version>_<os>_<arch>.tar.gz`) and contents (`gralph`, `howto.md`, `LICENSE`) are what `docs/howto.md` tells users to download; change the three together. The `VERSION=` examples in `README.md` and `docs/howto.md` name a real release; set them in the release's "bump version" commit.

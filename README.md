@@ -1,6 +1,6 @@
 # Gralph
 
-> **Maturity Level**: Emerging - under active development; the CLI contract has already changed between minor versions  
+> **Maturity Level**: Basic - ready for real work; a breaking change can still land before 1.0, and sandboxed runs are tested on Linux only  
 > **Version**: v0.9.6
 >
 > - **Emerging**: Prototype, not production-ready, expect breaking changes
@@ -16,11 +16,32 @@ context instead of one long session that drifts.
 
 ## Table of Contents
 
+- [Install](#install)
 - [Usage](#usage)
 - [How it works](#how-it-works)
 - [Key Considerations](#key-considerations)
 - [Development Considerations](#development-considerations)
 - [License](#license)
+
+## Install
+
+You don't need Go. Download the archive for your machine from the
+[releases page](https://github.com/twistingmercury/gralph/releases) and unpack
+`gralph` into `~/.local/bin`:
+
+```bash
+VERSION=v0.9.7   # the release you want
+OS=linux         # or darwin
+ARCH=amd64       # or arm64
+
+curl -fsSLO "https://github.com/twistingmercury/gralph/releases/download/${VERSION}/gralph_${VERSION}_${OS}_${ARCH}.tar.gz"
+mkdir -p ~/.local/bin
+tar -xzf "gralph_${VERSION}_${OS}_${ARCH}.tar.gz" -C ~/.local/bin gralph
+```
+
+The archive also holds the full guide, `howto.md`. Checking the download,
+fixing your `PATH`, macOS notes, and upgrading are in
+[Installing gralph](docs/howto.md#installing-gralph).
 
 ## Usage
 
@@ -117,11 +138,17 @@ image. It runs the linters, security scanners, and unit tests inside the image,
 cross-compiles into `.bin/<arch>/<os>/`, then runs the e2e suite in a
 container. If it passes locally, CI should pass too.
 
+Releases are made by hand: after a version tag is pushed, the owner starts the
+`Release` workflow with that tag. It runs the same `make build`, packs the
+binaries with [build/package.sh](build/package.sh), and leaves a draft release
+to publish.
+
 ### Testing
 
 ```bash
-make test      # unit tests: go test ./cmd/... ./internal/... (run from src/)
-make analyze   # goimports, golangci-lint, govulncheck, gosec (tools must be on PATH)
+make test         # unit tests: go test ./cmd/... ./internal/... (run from src/)
+make analyze      # goimports, golangci-lint, govulncheck, gosec (tools must be on PATH)
+bats tests/bats   # tests for build/package.sh (needs bats; not run by CI)
 ```
 
 One gotcha: the Go module is in `src/`. `go test ./...` from the repository root

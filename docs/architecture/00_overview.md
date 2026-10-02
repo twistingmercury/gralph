@@ -1,8 +1,8 @@
 # Gralph — Architecture Overview
 
-> **Version**: v11
+> **Version**: v12
 > **Date**: 2026-10-02
-> **Notes**: Unix only became built for Unix: a `windows/amd64` binary can be built by hand but is untested and not released (ADR-007 amendment).
+> **Notes**: Principle 13 added: releases are archives on a GitHub release, made by a workflow started by hand (ADR-017).
 
 [Back to Project README](../../README.md)
 
@@ -75,6 +75,7 @@ graph TB
 10. **Gralph commits, not the session** — With `--commit`, a commit is made only after the gates pass; a failed task is never committed.
 11. **Plain mode intact** — The full-screen TUI is the default in a terminal, but plain mode (`--no-tui` or no terminal) keeps the same argv, output, and exit codes. One loop serves both, through a `report` hook.
 12. **Docker-first CI** — Lint, gosec, govulncheck, unit tests, and e2e all run inside the build container; this is the only supported CI path.
+13. **Releases started by hand** — A version's archives (Linux and macOS, amd64 and arm64, each with the binary, the HOWTO, and the license) are built by a workflow the owner starts for an existing tag; it runs the same Docker-first build and leaves a draft release (ADR-017).
 
 ## Document Navigation
 
