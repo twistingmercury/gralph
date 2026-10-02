@@ -205,6 +205,24 @@ count_dist_files() {
     assert_equal "$(count_dist_files)" "2"
 }
 
+# A fake mv that always fails stands in for a full disk at the last step,
+# without relying on file permissions (this must pass as root).
+@test "package when moving the new files fails - keeps the earlier archives" {
+    local fake_bin="${TEST_DIR}/fake_bin"
+    mkdir -p "${fake_bin}" "${DIST_DIR}"
+    printf '#!/bin/sh\nexit 1\n' >"${fake_bin}/mv"
+    chmod 755 "${fake_bin}/mv"
+    printf "old\n" >"${DIST_DIR}/gralph_v0.0.1_linux_amd64.tar.gz"
+    printf "mine\n" >"${DIST_DIR}/notes.txt"
+
+    run env PATH="${fake_bin}:${PATH}" "${SCRIPT_PATH}"
+
+    assert_failure 1
+    assert_output --partial "ERROR:"
+    assert [ -f "${DIST_DIR}/gralph_v0.0.1_linux_amd64.tar.gz" ]
+    assert [ -f "${DIST_DIR}/notes.txt" ]
+}
+
 @test "package run twice - replaces an older version's archives and keeps other files" {
     mkdir -p "${DIST_DIR}"
     printf "old\n" >"${DIST_DIR}/gralph_v0.0.1_linux_amd64.tar.gz"
