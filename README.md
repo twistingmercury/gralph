@@ -70,8 +70,11 @@ Want the background? The idea behind gralph is in
 - **A failed task stops everything until you deal with it.** There's no retry.
   Fix whatever went wrong, set that task's `state` back to `pending` (or
   `completed`) by hand, and run again.
-- **Unix only.** Gralph runs on Linux, macOS, and the BSDs. Windows isn't
-  supported.
+- **Built for Unix.** Gralph runs on Linux, macOS, and the BSDs. There's no
+  Windows release. You can build one yourself by uncommenting the
+  `GOOS=windows` line in [build/Dockerfile](build/Dockerfile), but the Windows
+  version itself hasn't been directly exercised: treat it as untested (see the
+  HOWTO for the known issues).
 
 More on each of these in
 [Before you start](docs/howto.md#before-you-start) and

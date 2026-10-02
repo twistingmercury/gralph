@@ -1,8 +1,8 @@
 # Gralph — System Architecture
 
-> **Version**: v14
+> **Version**: v15
 > **Date**: 2026-10-02
-> **Notes**: Removed the "Next" link to the Deployment Architecture document, which was archived; this is now the last document in the set.
+> **Notes**: OS support row: a `windows/amd64` binary can be built by hand but is untested and not released (ADR-007 amendment).
 
 [Back to Overview](00_overview.md) | [Back to Project README](../../README.md)
 
@@ -170,7 +170,7 @@ graph TB
 
 | Characteristic      | Value                                                                                     |
 | ------------------- | ----------------------------------------------------------------------------------------- |
-| OS Support          | Unix only (Linux, macOS, BSDs)                                                            |
+| OS Support          | Linux, macOS, BSDs; `windows/amd64` builds by hand, untested (ADR-007)                    |
 | Signal Handling     | SIGINT, SIGTERM from context cancellation                                                 |
 | Process Control     | kill(-pgid, signal) to terminate group; SIGTERM then SIGKILL for git with 2s grace period |
 

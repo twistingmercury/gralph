@@ -29,8 +29,28 @@ You need the `claude` CLI on your `PATH`. Gralph calls it directly.
 Don't run gralph from inside a Claude session. It starts Claude itself, as a
 subprocess, so run it from a normal terminal.
 
-Gralph runs on Linux, macOS, and the BSDs. Windows isn't supported. Sandboxed
-runs need Linux or macOS; on the BSDs only `--skip-permissions` works.
+Gralph runs on Linux, macOS, and the BSDs. Sandboxed runs need Linux or macOS;
+on the BSDs only `--skip-permissions` works.
+
+There's no Windows release. If you want one, you can build it yourself: in
+gralph's source, `build/Dockerfile` has a commented-out `GOOS=windows` line;
+uncomment it and run `make build`, and you get `.bin/amd64/windows/gralph.exe`.
+But **the Windows version itself hasn't been directly exercised**. It compiles;
+nobody has run it. Going by the code, these are the known issues:
+
+- Only `--skip-permissions` works, since Claude Code's sandbox needs Linux or
+  macOS.
+- Gates run through `sh`, so `sh` has to be on your `PATH`.
+- Stopping a run stops only the process gralph started, not anything that
+  process started. A stopped Claude session, gate, or commit can leave
+  processes running, and a stopped git can leave its `index.lock` file behind.
+
+If you're on Windows, the better bet is the Linux binary inside WSL2, with
+Claude Code installed inside WSL2 as well. WSL2 is a real Linux, and Claude
+Code's sandbox supports it (it needs bubblewrap and socat there, like any
+Linux), so none of the issues above should apply. Gralph hasn't been tried on
+WSL2 either, though. WSL1 won't do for sandboxed runs: Claude Code's sandbox
+doesn't support it.
 
 If you plan to use the sandbox, your system needs the tools
 Claude's sandbox uses. On Linux, that's bubblewrap and socat (two packages you

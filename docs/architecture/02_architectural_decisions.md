@@ -1,8 +1,8 @@
 # Gralph — Architectural Decisions
 
-> **Version**: v13
-> **Date**: 2026-10-01
-> **Notes**: ADR-016 brought in line with what was built: how `run_finished` tells `failed` from `stopped`, a commit whose hash cannot be read, the ledger after a write error, the view after a run that ended with an error, and `RunDir` naming the run folder.
+> **Version**: v14
+> **Date**: 2026-10-02
+> **Notes**: ADR-007 amended: a `windows/amd64` binary can be built by hand (commented-out Dockerfile line, no-op process-tree functions) but is untested and not released.
 
 [Back to Overview](00_overview.md) | [Back to Project README](../../README.md)
 
@@ -257,6 +257,10 @@ _Positive:_
 _Negative:_
 
 - Cannot run on Windows; future contributors must not add Windows support back
+
+**Amendment (2026-10-02):**
+
+A `windows/amd64` binary can now be built, on the owner's request, but it is not released: its line in `build/Dockerfile` is commented out, and people who want it uncomment that line and build it themselves. It has never been run or tested, and nothing above changes on Unix. Off Unix, `process_tree_other.go` (`//go:build !unix`) replaces the process-group setup with no-ops, so cancelling kills only the direct child (its descendants keep running) and git gets no SIGTERM-first stop, which can leave `index.lock` behind. Sandboxed runs are unavailable there and gates still need `sh`. The split is by build constraint only; there are still no `runtime.GOOS` branches, and no Windows-specific features or tests.
 
 ---
 
