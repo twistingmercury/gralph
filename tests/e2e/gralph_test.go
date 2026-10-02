@@ -174,7 +174,7 @@ func TestVersionFlag(t *testing.T) {
 }
 
 // TestHelpFlag verifies that --help exits 0 (pflag exits 0 on ErrHelp) and
-// lists every flag in the README's flag table. pflag writes usage to stderr.
+// lists every flag in the HOWTO's flag table. pflag writes usage to stderr.
 func TestHelpFlag(t *testing.T) {
 	t.Parallel()
 	result := runCLI(t, "--help")
