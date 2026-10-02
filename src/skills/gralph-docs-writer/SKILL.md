@@ -33,11 +33,12 @@ task's `prompt`) and resets its `state` to `pending` by hand.
 
 With the `--commit` flag, Gralph also commits each task itself: once a task is
 `completed`, it commits what a plain `git add -A` would stage, with the task's
-`name` as the commit message. A failed task is not committed; its changes stay in the work tree for a person to sort
-out. For a `--commit` run the task file must be ignored by Git or kept outside
-the repository; Gralph refuses to start otherwise. The shared prompt file and
-any sandbox settings file should also be ignored or kept outside, so they do
-not show up as uncommitted changes. Without the flag, Gralph never touches Git.
+`name` as the commit message. A failed task is not committed; its changes stay
+in the work tree for a person to sort out. For a `--commit` run the task file
+must be ignored by Git or kept outside the repository; Gralph refuses to start
+otherwise. The shared prompt file and any sandbox settings file should also be
+ignored or kept outside, so they do not show up as uncommitted changes. Without
+the flag, Gralph never touches Git.
 
 A `tasks.yaml` that does not match the rules below is invalid and Gralph
 refuses to run it. There is no migration from other formats or older states.

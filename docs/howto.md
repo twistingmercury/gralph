@@ -536,8 +536,8 @@ A few things to know:
   gates, set `timeout` on them (or use `--gate-timeout` for the whole run).
 - Leaving the `gates` key out and writing `gates: []` aren't the same. With no
   key, the gates haven't been decided yet, and the full-screen view asks you
-  for them (see [Setup wizard](#setup-wizard)). `gates: []` means you've decided: no gates. Either way, a run with
-  no gates is fine.
+  for them (see [Setup wizard](#setup-wizard)). `gates: []` means you've
+  decided: no gates. Either way, a run with no gates is fine.
 - For a multi-line gate, error messages quote only the command's first line, so
   the reason stays readable.
 - Write gates that check instead of fix: `test -z "$(gofmt -l .)"`, not
@@ -764,27 +764,35 @@ still an error.
 
 Its steps, in order. Each is skipped when a flag already answers it:
 
-1. **Run folder.** A folder picker that starts in the current directory and
-   shows hidden folders, since run folders often live under `.local/`. It
-   picks folders only: the folder gives `tasks.yaml` and `prompt.md`, the same
-   as `-d`. If you passed one of `-t` or `-p`, that file wins and the folder
-   gives the other.
+1. **Run folder.** A folder picker that starts in your current working
+   directory (not limited to it) and shows hidden folders, since run folders
+   often live under `.local/`. The picker selects folders only. The folder
+   gives `tasks.yaml` and `prompt.md`, the same as `-d`; paths are shown
+   relative to the working directory when possible. If you passed one of `-t`
+   or `-p`, that file wins and the folder gives the other.
 2. **Permissions.** Run sessions in Claude's sandbox or skip permissions.
    Nothing is chosen for you: the step starts on `Choose one`, and pressing
    `enter` there just says `choose how sessions run`. Choosing the sandbox
-   then asks you to pick its settings file (`.json` files only).
+   then asks you to pick its settings file. The file picker starts in your
+   current working directory (not limited to it) and selects `.json` files
+   only; paths are shown relative to the working directory when possible.
 3. **Commit.** Whether to commit each completed task, like `--commit`. Starts
    on No.
 4. **Logging.** Whether to keep a record of the run in `<folder>/logs`, like
    `--log-dir <folder>/logs`. Starts on No. Skipped when there's no folder
-   (you passed both `-t` and `-p`).
+   (you passed both `-t` and `-p`). When you say yes and the run commits, the
+   step opens the repository, so it can also show the commit checks' errors
+   (uncommitted changes in the work tree, a task file git can see), not only
+   whether the logs folder would be committed.
 5. **Gate time limit.** Starts on Default (each gate's own `timeout`, else
    10m). Choose one limit for every gate and it asks for the value, like
    `--gate-timeout`.
 6. **Gates.** Only when the task file has no `gates:` key. A list of the gates
    with `Add a gate` and `Done` under it. Pick a gate to edit or delete it.
-   Each gate is a command and an optional timeout. `Done` with no gates
-   decides on none, and the file gets `gates: []`.
+   Each gate is a command (the field is multi-line, so a gate written over
+   several lines keeps them; `enter` moves on, `alt+enter` or `ctrl+j` starts a
+   new line) and an optional timeout. `Done` with no gates decides on none, and
+   the file gets `gates: []`.
 
 Commit, logging, and the time limit never open the wizard on their own. They
 come along when it opens for something else.
@@ -802,9 +810,9 @@ keeps you there with the problem shown until it's fixed:
   (see [Logging a run](#logging-a-run)).
 - The time limit must be a duration such as `90s` or `10m`.
 
-Keys: the arrow keys move, `→` opens a folder in the picker and `←` goes back
-up, and `enter` picks. `esc` or `ctrl+c` quits at any step with
-`error: setup cancelled` and exit 1.
+Keys: in the file and settings pickers, the arrow keys move, `→` opens a
+folder and `←` goes up one level, and `enter` picks the selection. `esc` or
+`ctrl+c` quits at any step with `error: setup cancelled` and exit 1.
 
 Last comes the review screen. It lists every choice and the gates (or "no
 gates"), then the command line that starts the same run without the wizard,
@@ -814,18 +822,25 @@ such as:
 gralph -d .local/widgets --sandbox-settings sandbox.json --commit
 ```
 
-Copy it for next time. Gates aren't on it, because they're in the task file.
-A path with spaces or shell characters comes out in single quotes, so the line
-pastes as is. Then choose:
+When you passed `-t` or `-p` to override the folder, the review screen also
+lists `Tasks:` and/or `Prompt:` with the paths you gave. Copy the command line
+for next time. Gates aren't on it, because they're in the task file. A path
+with spaces or shell characters comes out in single quotes, so the line pastes
+as is. Then choose:
 
 - **Start** saves the gates to the task file, if you changed them, and starts
-  the run.
+  the run. Before the full-screen view opens, gralph prints one unwrapped line
+  to stdout: `Same run, no wizard: <command>`, so the command can be copied
+  even when the review screen wraps it.
 - **Edit gates** goes back to the gate list.
-- **Cancel** quits with `error: setup cancelled` and exit 1.
+- **Cancel** quits with `error: setup cancelled` and exit 1. A SIGINT or SIGTERM
+  while the wizard is open cancels it the same way.
 
-Nothing is written before Start: cancel anywhere and the task file is exactly
-as it was. After Start, gralph runs the same startup checks on the wizard's
-answers that it runs on flags.
+Nothing is written to the task file before Start: the commit repository check
+(clean tree, task file ignored) and the log folder's git-ignore check run after
+the wizard, before the gates are saved. Cancel anywhere and the task file is
+exactly as it was. After Start, gralph runs the same startup checks on the
+wizard's answers that it runs on flags.
 
 As in plain mode, a task file you passed by flag that has a `failed` task
 prints the task table and exits 1 before the wizard or the view opens.
