@@ -10,6 +10,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/twistingmercury/gralph/internal/looper"
 	"github.com/twistingmercury/gralph/internal/runlog"
+	"github.com/twistingmercury/gralph/internal/tasks"
+	"github.com/twistingmercury/gralph/internal/tui"
 )
 
 const validTasksYAML = "tasks:\n  - id: 1\n    name: first\n    prompt: do it\n"
@@ -39,7 +41,7 @@ func TestSessionArgs(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := sessionArgs(tt.file, tt.skip, tt.dryRun)
+			got, err := sessionArgs(tt.file, tt.skip, tt.dryRun, false)
 			if tt.wantErr != "" {
 				require.ErrorContains(t, err, tt.wantErr)
 				return
@@ -49,6 +51,38 @@ func TestSessionArgs(t *testing.T) {
 			assert.Equal(t, tt.want, got)
 		})
 	}
+}
+
+func TestSessionArgs_WizardLeavesTheChoiceOpen(t *testing.T) {
+	args, err := sessionArgs("", false, false, true)
+	require.NoError(t, err, "the full-screen view asks instead of failing")
+	assert.Nil(t, args)
+
+	_, err = sessionArgs("", false, false, false)
+	assert.EqualError(t, err, "pass --sandbox-settings <path>, or --skip-permissions to run without a sandbox")
+}
+
+func TestSaveGates_OnlyWhenEdited(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "tasks.yaml")
+	original := "# a comment SaveTasks would drop\ntasks:\n  - id: 1\n    name: First\n    prompt: do it\n"
+	require.NoError(t, os.WriteFile(path, []byte(original), 0o600))
+	tl, err := looper.LoadTasks(path)
+	require.NoError(t, err)
+
+	gates := []tasks.Gate{{Cmd: "make test"}}
+	edited := *tl
+	edited.Gates = &gates
+
+	require.NoError(t, saveGates(tui.Settings{TasksPath: path, Tasks: &edited, GatesEdited: false}))
+	unchanged, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.Equal(t, original, string(unchanged), "no edit, no write")
+
+	require.NoError(t, saveGates(tui.Settings{TasksPath: path, Tasks: &edited, GatesEdited: true}))
+	saved, err := looper.LoadTasks(path)
+	require.NoError(t, err)
+	require.NotNil(t, saved.Gates)
+	assert.Equal(t, gates, *saved.Gates)
 }
 
 func TestLoadGiven_BothEmpty(t *testing.T) {

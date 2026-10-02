@@ -52,7 +52,7 @@ func main() {
 	}
 
 	validateLogDir(plain)
-	session := validateSessionFlags()
+	session := validateSessionFlags(plain)
 
 	if err := skillinstall.Check(); err != nil {
 		fatal(err)
@@ -70,7 +70,7 @@ func main() {
 	defer stop()
 
 	if !plain {
-		exitCode := runTUI(ctx, session)
+		exitCode := runTUI(ctx)
 		os.Exit(exitCode)
 	}
 
@@ -92,48 +92,126 @@ func isPlain(dryRun, noTUI, stdinTTY, stdoutTTY bool) bool {
 	return dryRun || noTUI || !stdinTTY || !stdoutTTY
 }
 
-// runTUI loads the given prompt and tasks like looper.Start, asks for any
-// missing path on the setup screen, runs the loop in the full-screen view,
-// prints its summary, and returns the exit code. session is the claude flags
-// from validateSessionFlags. With --log-dir it opens the run's record and has
-// the view's events written to it.
-func runTUI(ctx context.Context, session []string) int {
-	tasksPath, promptPath := *tasksFlag, *promptFlag
-
-	prompt, tasklist, err := loadGiven(tasksPath, promptPath)
+// runTUI loads what the flags name, opens the setup wizard when the files,
+// the permission choice, or the gate list are still open, runs the loop in
+// the full-screen view, prints its summary, and returns the exit code. With
+// --log-dir it opens the run's record and has the view's events written to
+// it.
+func runTUI(ctx context.Context) int {
+	s, err := settingsFromFlags()
 	if err != nil {
 		_, _ = fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 1
 	}
 
-	if promptPath == "" || tasksPath == "" {
-		s, err := tui.Setup(tasksPath, promptPath)
-		if err != nil {
-			_, _ = fmt.Fprintf(os.Stderr, "error: %v\nrun with --no-tui to use plain output\n", err)
-			return 1
-		}
-
-		if s.Cancelled() {
-			_, _ = fmt.Fprintln(os.Stderr, "error: setup cancelled")
-			return 1
-		}
-
-		if tasksPath == "" {
-			tasksPath, tasklist = s.TasksPath(), s.Tasks()
-		}
-
-		if promptPath == "" {
-			prompt, promptPath = s.Prompt(), s.PromptPath()
-		}
+	s, err = askWizard(s)
+	if errors.Is(err, tui.ErrCancelled) {
+		_, _ = fmt.Fprintln(os.Stderr, "error: setup cancelled")
+		return 1
 	}
 
-	repo, err := openRepo(tasksPath)
+	if err != nil {
+		_, _ = fmt.Fprintf(os.Stderr, "error: %v\nrun with --no-tui to use plain output\n", err)
+		return 1
+	}
+
+	applySettings(s)
+	session, err := recheck()
 	if err != nil {
 		_, _ = fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 1
 	}
 
-	info := runInfo(tasksPath, promptPath)
+	if err := saveGates(s); err != nil {
+		_, _ = fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		return 1
+	}
+
+	return runView(ctx, s, session)
+}
+
+// settingsFromFlags is the run as the flags and the files they name give it,
+// before the wizard fills any gap.
+func settingsFromFlags() (tui.Settings, error) {
+	prompt, tasklist, err := loadGiven(*tasksFlag, *promptFlag)
+	if err != nil {
+		return tui.Settings{}, err
+	}
+
+	return tui.Settings{
+		Dir:             *dirFlag,
+		TasksPath:       *tasksFlag,
+		PromptPath:      *promptFlag,
+		Prompt:          prompt,
+		Tasks:           tasklist,
+		SandboxSettings: *sandboxFlag,
+		SkipPermissions: *skipPermsFlag,
+		Commit:          *commitFlag,
+		LogDir:          *logDirFlag,
+		GateTimeout:     *gateTimeoutFlag,
+	}, nil
+}
+
+// askWizard opens the wizard only for a gap a run cannot start without; the
+// optional steps ride along and never open it alone. Given is read from the
+// command line because a flag set to its zero value still answers its step.
+func askWizard(s tui.Settings) (tui.Settings, error) {
+	if !tui.NeedsWizard(s) {
+		return s, nil
+	}
+
+	changed := pflag.CommandLine.Changed
+	given := tui.Given{Commit: changed("commit"), LogDir: changed("log-dir"), GateTimeout: changed("gate-timeout")}
+	return tui.Wizard(s, given)
+}
+
+// applySettings puts the answers where the flags live, so the rest of the run
+// reads one set of values however each was given.
+func applySettings(s tui.Settings) {
+	*tasksFlag, *promptFlag = s.TasksPath, s.PromptPath
+	*sandboxFlag, *skipPermsFlag = s.SandboxSettings, s.SkipPermissions
+	*commitFlag, *logDirFlag, *gateTimeoutFlag = s.Commit, s.LogDir, s.GateTimeout
+}
+
+// recheck runs main's startup checks again, in main's order, on the values
+// the run will use. The wizard checks its answers as they are given, but its
+// answers are never trusted in place of the checks a flag gets.
+func recheck() ([]string, error) {
+	var err error
+	if *gateTimeoutFlag != "" {
+		err = checkGateTimeout(*gateTimeoutFlag)
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	if err := checkLogDir(*logDirFlag, false, false); err != nil {
+		return nil, err
+	}
+
+	return sessionArgs(*sandboxFlag, *skipPermsFlag, false, false)
+}
+
+// saveGates writes the task file only when the wizard changed its gates, and
+// only once Start was chosen, so a cancel anywhere leaves the file as it was.
+func saveGates(s tui.Settings) error {
+	if !s.GatesEdited {
+		return nil
+	}
+
+	return tasks.SaveTasks(s.TasksPath, *s.Tasks)
+}
+
+// runView runs the loop in the full-screen view with the settings checked.
+func runView(ctx context.Context, s tui.Settings, session []string) int {
+	repo, err := openRepo(s.TasksPath)
+	if err != nil {
+		_, _ = fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		return 1
+	}
+
+	info := runInfo(s.TasksPath, s.PromptPath)
 	runLog, err := openLog(*logDirFlag, repo, info)
 	if err != nil {
 		_, _ = fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -142,7 +220,7 @@ func runTUI(ctx context.Context, session []string) int {
 
 	defer closeLog(runLog)
 
-	code, summary, err := tui.Run(ctx, prompt, tasklist, tasksPath, *gateTimeoutFlag, session, repo, runLog.Record)
+	code, summary, err := tui.Run(ctx, s.Prompt, s.Tasks, s.TasksPath, *gateTimeoutFlag, session, repo, runLog.Record)
 	if err != nil {
 		_, _ = fmt.Fprintf(os.Stderr, "error: %v\nrun with --no-tui to use plain output\n", err)
 		return 1
@@ -153,7 +231,7 @@ func runTUI(ctx context.Context, session []string) int {
 }
 
 // loadGiven loads the prompt and tasks whose paths were passed by flag; an
-// empty path is left for the setup screen. The prompt loads first so a bad
+// empty path is left for the wizard. The prompt loads first so a bad
 // prompt fails before any failed-tasks table is printed. ErrFailedTasks is
 // returned bare because its table is the explanation; any other error is
 // wrapped like looper.Start's.
@@ -353,9 +431,9 @@ func checkLogDir(logDir string, plain, dryRun bool) error {
 }
 
 // validateSessionFlags exits unless the run was told how far to trust its
-// sessions; see sessionArgs.
-func validateSessionFlags() []string {
-	args, err := sessionArgs(*sandboxFlag, *skipPermsFlag, *dryRunFlag)
+// sessions, or the full-screen view will ask; see sessionArgs.
+func validateSessionFlags(plain bool) []string {
+	args, err := sessionArgs(*sandboxFlag, *skipPermsFlag, *dryRunFlag, !plain)
 	if err != nil {
 		fatal(err)
 	}
@@ -366,8 +444,10 @@ func validateSessionFlags() []string {
 // sessionArgs returns the claude flags that set what a session may do. A run
 // must choose a sandbox or ask by name to go without one (ADR-014): there is
 // no default, so nobody runs unsandboxed by accident. A dry run starts no
-// session and needs neither, but its sandbox file is still checked.
-func sessionArgs(sandboxFile string, skip, dryRun bool) ([]string, error) {
+// session and needs neither, but its sandbox file is still checked. In the
+// full-screen view the wizard asks instead, and this runs again, strict, on
+// its answer.
+func sessionArgs(sandboxFile string, skip, dryRun, wizard bool) ([]string, error) {
 	if sandboxFile != "" && skip {
 		return nil, errors.New("--sandbox-settings and --skip-permissions cannot be used together")
 	}
@@ -380,7 +460,7 @@ func sessionArgs(sandboxFile string, skip, dryRun bool) ([]string, error) {
 		return looper.BypassArgs(), nil
 	}
 
-	if dryRun {
+	if dryRun || wizard {
 		return nil, nil
 	}
 
