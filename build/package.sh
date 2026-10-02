@@ -14,12 +14,21 @@ readonly PLATFORMS="linux/amd64 linux/arm64 darwin/amd64 darwin/arm64"
 readonly VERSION_PATTERN='^v[0-9]+\.[0-9]+\.[0-9]+$'
 
 STAGE_DIR=""
+STAGE_OUT_DIR=""
 
 validate_args() {
     if [ -z "${BUILD_VER:-}" ]; then
         printf "ERROR: BUILD_VER is required, for example BUILD_VER=v1.2.3\n" >&2
         return 1
     fi
+
+    # grep matches per line, so a value with a newline must be refused first.
+    case "${BUILD_VER}" in
+        *[!v0-9.]*)
+            printf "ERROR: BUILD_VER must look like v1.2.3, got: %s\n" "${BUILD_VER}" >&2
+            return 1
+            ;;
+    esac
 
     if ! printf "%s" "${BUILD_VER}" | grep -Eq "${VERSION_PATTERN}"; then
         printf "ERROR: BUILD_VER must look like v1.2.3, got: %s\n" "${BUILD_VER}" >&2
@@ -81,11 +90,53 @@ check_inputs() {
     return 0
 }
 
-# Only this script's own files are removed, so a wrong DIST_DIR cannot cost
-# anything else.
-clear_dist() {
-    mkdir -p "${DIST_DIR}"
-    rm -f "${DIST_DIR}"/gralph_*.tar.gz "${DIST_DIR}/checksums.txt"
+make_stage_dir() {
+    if ! STAGE_DIR="$(mktemp -d 2>/dev/null || mktemp -d -t 'gralph-package')"; then
+        printf "ERROR: could not create a staging directory\n" >&2
+        return 1
+    fi
+
+    # Everything is built here first, so a failure cannot touch DIST_DIR.
+    STAGE_OUT_DIR="${STAGE_DIR}/out"
+    if ! mkdir -p "${STAGE_OUT_DIR}"; then
+        printf "ERROR: could not create %s\n" "${STAGE_OUT_DIR}" >&2
+        return 1
+    fi
+
+    return 0
+}
+
+stage_files() {
+    local platform="${1}"
+    local stage="${2}"
+    local binary
+
+    binary="$(binary_path "${platform}")"
+    if ! mkdir -p "${stage}"; then
+        printf "ERROR: could not create %s\n" "${stage}" >&2
+        return 1
+    fi
+
+    if ! cp "${binary}" "${stage}/gralph"; then
+        printf "ERROR: could not copy %s\n" "${binary}" >&2
+        return 1
+    fi
+
+    if ! chmod 755 "${stage}/gralph"; then
+        printf "ERROR: could not make %s/gralph executable\n" "${stage}" >&2
+        return 1
+    fi
+
+    if ! cp "${HOWTO_FILE}" "${stage}/howto.md"; then
+        printf "ERROR: could not copy %s\n" "${HOWTO_FILE}" >&2
+        return 1
+    fi
+
+    if ! cp "${LICENSE_FILE}" "${stage}/LICENSE"; then
+        printf "ERROR: could not copy %s\n" "${LICENSE_FILE}" >&2
+        return 1
+    fi
+
     return 0
 }
 
@@ -94,16 +145,17 @@ package_platform() {
     local os="${platform%/*}"
     local arch="${platform#*/}"
     local stage="${STAGE_DIR}/${os}_${arch}"
-    local archive="${DIST_DIR}/gralph_${BUILD_VER}_${os}_${arch}.tar.gz"
-    local binary
+    local archive="${STAGE_OUT_DIR}/gralph_${BUILD_VER}_${os}_${arch}.tar.gz"
 
-    binary="$(binary_path "${platform}")"
-    mkdir -p "${stage}"
-    cp "${binary}" "${stage}/gralph"
-    chmod 755 "${stage}/gralph"
-    cp "${HOWTO_FILE}" "${stage}/howto.md"
-    cp "${LICENSE_FILE}" "${stage}/LICENSE"
-    tar -czf "${archive}" -C "${stage}" gralph howto.md LICENSE
+    if ! stage_files "${platform}" "${stage}"; then
+        return 1
+    fi
+
+    if ! tar -czf "${archive}" -C "${stage}" gralph howto.md LICENSE; then
+        printf "ERROR: could not write %s\n" "${archive}" >&2
+        return 1
+    fi
+
     return 0
 }
 
@@ -124,17 +176,41 @@ package_all() {
 sha256_lines() {
     if command -v sha256sum >/dev/null 2>&1; then
         sha256sum "$@"
-        return 0
+        return
     fi
 
     shasum -a 256 "$@"
+}
+
+# Runs inside the output folder so checksums.txt holds bare file names, which
+# is what `sha256sum -c` needs next to the downloads.
+write_checksums() {
+    if ! (cd "${STAGE_OUT_DIR}" && sha256_lines gralph_"${BUILD_VER}"_*.tar.gz >checksums.txt); then
+        printf "ERROR: could not write %s/checksums.txt\n" "${STAGE_OUT_DIR}" >&2
+        return 1
+    fi
+
     return 0
 }
 
-# Runs inside DIST_DIR so checksums.txt holds bare file names, which is what
-# `sha256sum -c` needs next to the downloads.
-write_checksums() {
-    (cd "${DIST_DIR}" && sha256_lines gralph_"${BUILD_VER}"_*.tar.gz >checksums.txt)
+# Only this script's own files are removed, so a wrong DIST_DIR cannot cost
+# anything else. This runs last, once every new file is known to exist.
+publish() {
+    if ! mkdir -p "${DIST_DIR}"; then
+        printf "ERROR: could not create %s\n" "${DIST_DIR}" >&2
+        return 1
+    fi
+
+    if ! rm -f "${DIST_DIR}"/gralph_*.tar.gz "${DIST_DIR}/checksums.txt"; then
+        printf "ERROR: could not remove old files from %s\n" "${DIST_DIR}" >&2
+        return 1
+    fi
+
+    if ! mv "${STAGE_OUT_DIR}"/gralph_*.tar.gz "${STAGE_OUT_DIR}/checksums.txt" "${DIST_DIR}/"; then
+        printf "ERROR: could not move the new files into %s\n" "${DIST_DIR}" >&2
+        return 1
+    fi
+
     return 0
 }
 
@@ -147,10 +223,8 @@ main() {
         return 1
     fi
 
-    STAGE_DIR="$(mktemp -d 2>/dev/null || mktemp -d -t 'gralph-package')"
     trap cleanup EXIT
-
-    if ! clear_dist; then
+    if ! make_stage_dir; then
         return 1
     fi
 
@@ -159,7 +233,10 @@ main() {
     fi
 
     if ! write_checksums; then
-        printf "ERROR: could not write %s/checksums.txt\n" "${DIST_DIR}" >&2
+        return 1
+    fi
+
+    if ! publish; then
         return 1
     fi
 

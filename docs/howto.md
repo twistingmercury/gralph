@@ -87,26 +87,33 @@ curl -fsSLO "${BASE}/gralph_${VERSION}_${OS}_${ARCH}.tar.gz"
 curl -fsSLO "${BASE}/checksums.txt"
 
 sha256sum -c --ignore-missing checksums.txt
-
-tar -xzf "gralph_${VERSION}_${OS}_${ARCH}.tar.gz"
-mkdir -p ~/.local/bin
-mv gralph ~/.local/bin/
-
-gralph --version
-gralph --install-skill
 ```
 
 Not sure which `ARCH` you have? `uname -m` prints `x86_64` for `amd64`, and
 `arm64` or `aarch64` for `arm64`.
 
-On macOS there's no `sha256sum`. Use this line for the check instead:
+On macOS there's no `sha256sum`. Use this as the last line instead:
 
 ```bash
 shasum -a 256 -c --ignore-missing checksums.txt
 ```
 
 The check should print the archive's name followed by `OK`. If it doesn't,
-the download is damaged: delete it and download again.
+stop here: the download is damaged, so delete it and download again.
+
+Then, in the same terminal, put `gralph` in place:
+
+```bash
+mkdir -p ~/.local/bin
+tar -xzf "gralph_${VERSION}_${OS}_${ARCH}.tar.gz" -C ~/.local/bin gralph
+
+gralph --version
+gralph --install-skill
+```
+
+That unpacks only `gralph`, straight into `~/.local/bin`. This guide and the
+license are in the archive too, if you want a copy: `tar -xzf` the archive
+with `howto.md LICENSE` on the end in place of `gralph`.
 
 If `gralph --version` says "command not found", `~/.local/bin` isn't on your
 `PATH`. Add it with the line for your shell, then open a new terminal:
@@ -126,7 +133,9 @@ xattr -d com.apple.quarantine ~/.local/bin/gralph
 
 To upgrade, do the same steps with the new version. Don't skip
 `gralph --install-skill`: gralph won't start a run while the installed skill
-comes from a different version.
+comes from a different version. If `gralph --version` still prints the old
+version, an older copy sits earlier on your `PATH` (`~/go/bin/gralph`, if you
+once built from source). `which gralph` shows which one runs; remove it.
 
 If you'd rather build gralph yourself, get the source and run
 `make local install`. That needs Go and make.

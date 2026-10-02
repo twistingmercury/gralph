@@ -26,8 +26,8 @@ context instead of one long session that drifts.
 ## Install
 
 You don't need Go. Download the archive for your machine from the
-[releases page](https://github.com/twistingmercury/gralph/releases), unpack it,
-and put `gralph` on your `PATH`:
+[releases page](https://github.com/twistingmercury/gralph/releases) and unpack
+`gralph` into `~/.local/bin`:
 
 ```bash
 VERSION=v0.9.7   # the release you want
@@ -35,8 +35,8 @@ OS=linux         # or darwin
 ARCH=amd64       # or arm64
 
 curl -fsSLO "https://github.com/twistingmercury/gralph/releases/download/${VERSION}/gralph_${VERSION}_${OS}_${ARCH}.tar.gz"
-tar -xzf "gralph_${VERSION}_${OS}_${ARCH}.tar.gz"
-mkdir -p ~/.local/bin && mv gralph ~/.local/bin/
+mkdir -p ~/.local/bin
+tar -xzf "gralph_${VERSION}_${OS}_${ARCH}.tar.gz" -C ~/.local/bin gralph
 ```
 
 The archive also holds the full guide, `howto.md`. Checking the download,

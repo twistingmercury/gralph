@@ -167,6 +167,44 @@ count_dist_files() {
     assert_output --partial "ERROR: missing file: ${TEST_DIR}/LICENSE"
 }
 
+@test "package with DIST_DIR a regular file - fails and leaves the file alone" {
+    printf "not a folder\n" >"${TEST_DIR}/dist_file"
+
+    run env DIST_DIR="${TEST_DIR}/dist_file" "${SCRIPT_PATH}"
+
+    assert_failure 1
+    assert_output --partial "ERROR:"
+    run cat "${TEST_DIR}/dist_file"
+    assert_output "not a folder"
+}
+
+@test "package with a newline in the version - fails and writes nothing" {
+    run env BUILD_VER=$'v1.2.3\nx' "${SCRIPT_PATH}"
+
+    assert_failure 1
+    assert_output --partial "ERROR: BUILD_VER must look like v1.2.3"
+    assert [ ! -e "${DIST_DIR}" ]
+}
+
+# A fake tar that always fails stands in for any packaging error after the
+# input check, without relying on file permissions (this must pass as root).
+@test "package failing while archiving - fails and leaves an existing DIST_DIR as it was" {
+    local fake_bin="${TEST_DIR}/fake_bin"
+    mkdir -p "${fake_bin}" "${DIST_DIR}"
+    printf '#!/bin/sh\nexit 1\n' >"${fake_bin}/tar"
+    chmod 755 "${fake_bin}/tar"
+    printf "old\n" >"${DIST_DIR}/gralph_v0.0.1_linux_amd64.tar.gz"
+    printf "mine\n" >"${DIST_DIR}/notes.txt"
+
+    run env PATH="${fake_bin}:${PATH}" "${SCRIPT_PATH}"
+
+    assert_failure 1
+    assert_output --partial "ERROR:"
+    assert [ -f "${DIST_DIR}/gralph_v0.0.1_linux_amd64.tar.gz" ]
+    assert [ -f "${DIST_DIR}/notes.txt" ]
+    assert_equal "$(count_dist_files)" "2"
+}
+
 @test "package run twice - replaces an older version's archives and keeps other files" {
     mkdir -p "${DIST_DIR}"
     printf "old\n" >"${DIST_DIR}/gralph_v0.0.1_linux_amd64.tar.gz"
