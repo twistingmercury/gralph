@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"slices"
@@ -64,10 +65,10 @@ func checkGateTimeoutField(s string) error {
 // editGates edits a copy of gates and returns it on Done. It starts from a
 // non-nil list so Done on an empty one saves gates: [], a decision, rather
 // than leaving the key absent.
-func editGates(gates []tasks.Gate, opts ...tea.ProgramOption) ([]tasks.Gate, error) {
+func editGates(ctx context.Context, gates []tasks.Gate, opts ...tea.ProgramOption) ([]tasks.Gate, error) {
 	list := append([]tasks.Gate{}, gates...)
 	for {
-		choice, err := pickGate(list, opts)
+		choice, err := pickGate(ctx, list, opts)
 		if err != nil {
 			return nil, err
 		}
@@ -76,16 +77,16 @@ func editGates(gates []tasks.Gate, opts ...tea.ProgramOption) ([]tasks.Gate, err
 			return list, nil
 		}
 
-		list, err = applyGateChoice(list, choice, opts)
+		list, err = applyGateChoice(ctx, list, choice, opts)
 		if err != nil {
 			return nil, err
 		}
 	}
 }
 
-func applyGateChoice(list []tasks.Gate, choice int, opts []tea.ProgramOption) ([]tasks.Gate, error) {
+func applyGateChoice(ctx context.Context, list []tasks.Gate, choice int, opts []tea.ProgramOption) ([]tasks.Gate, error) {
 	if choice == gateAdd {
-		g, err := askGate(tasks.Gate{}, opts)
+		g, err := askGate(ctx, tasks.Gate{}, opts)
 		if err != nil {
 			return nil, err
 		}
@@ -93,10 +94,10 @@ func applyGateChoice(list []tasks.Gate, choice int, opts []tea.ProgramOption) ([
 		return addGate(list, g), nil
 	}
 
-	return changeGate(list, choice, opts)
+	return changeGate(ctx, list, choice, opts)
 }
 
-func pickGate(list []tasks.Gate, opts []tea.ProgramOption) (int, error) {
+func pickGate(ctx context.Context, list []tasks.Gate, opts []tea.ProgramOption) (int, error) {
 	options := make([]huh.Option[int], 0, len(list)+2)
 	for i, g := range list {
 		label := gateLabel(g)
@@ -119,7 +120,7 @@ func pickGate(list []tasks.Gate, opts []tea.ProgramOption) (int, error) {
 		Description(description).
 		Options(options...).
 		Value(&choice)
-	err := runGateForm(opts, sel)
+	err := runGateFormCtx(ctx, opts, sel)
 	return choice, err
 }
 
@@ -134,21 +135,21 @@ func gateLabel(g tasks.Gate) string {
 	return fmt.Sprintf("%s (%s)", cmd, timeout)
 }
 
-func changeGate(list []tasks.Gate, i int, opts []tea.ProgramOption) ([]tasks.Gate, error) {
+func changeGate(ctx context.Context, list []tasks.Gate, i int, opts []tea.ProgramOption) ([]tasks.Gate, error) {
 	action := gateBack
 	actions := huh.NewOptions(gateEdit, gateDelete, gateBack)
 	sel := huh.NewSelect[string]().
 		Title(list[i].Cmd).
 		Options(actions...).
 		Value(&action)
-	err := runGateForm(opts, sel)
+	err := runGateFormCtx(ctx, opts, sel)
 	if err != nil {
 		return nil, err
 	}
 
 	switch action {
 	case gateEdit:
-		return editOneGate(list, i, opts)
+		return editOneGate(ctx, list, i, opts)
 	case gateDelete:
 		return deleteGate(list, i), nil
 	default:
@@ -156,8 +157,8 @@ func changeGate(list []tasks.Gate, i int, opts []tea.ProgramOption) ([]tasks.Gat
 	}
 }
 
-func editOneGate(list []tasks.Gate, i int, opts []tea.ProgramOption) ([]tasks.Gate, error) {
-	g, err := askGate(list[i], opts)
+func editOneGate(ctx context.Context, list []tasks.Gate, i int, opts []tea.ProgramOption) ([]tasks.Gate, error) {
+	g, err := askGate(ctx, list[i], opts)
 	if err != nil {
 		return nil, err
 	}
@@ -165,24 +166,37 @@ func editOneGate(list []tasks.Gate, i int, opts []tea.ProgramOption) ([]tasks.Ga
 	return replaceGate(list, i, g), nil
 }
 
-func askGate(g tasks.Gate, opts []tea.ProgramOption) (tasks.Gate, error) {
-	cmd := huh.NewInput().Title("Command").Validate(checkGateCmd).Value(&g.Cmd)
+func askGate(ctx context.Context, g tasks.Gate, opts []tea.ProgramOption) (tasks.Gate, error) {
+	cmd := gateCmdField(&g)
 	timeout := huh.NewInput().
 		Title("Timeout (optional, such as 90s or 10m)").
 		Validate(checkGateTimeoutField).
 		Value(&g.Timeout)
-	err := runGateForm(opts, cmd, timeout)
+	err := runGateFormCtx(ctx, opts, cmd, timeout)
 	return g, err
 }
 
-// runGateForm makes Esc quit like ctrl+c, as everywhere else in the wizard,
-// and turns huh's abort into the wizard's cancel.
+// gateCmdField is a text area, not an input, because the input replaces
+// newlines with spaces and would flatten a multi-line gate (ADR-013) on edit.
+func gateCmdField(g *tasks.Gate) *huh.Text {
+	return huh.NewText().Title("Command").Validate(checkGateCmd).Value(&g.Cmd)
+}
+
+// runGateForm is for wizard.go's own screens, which have no signal context
+// to pass yet.
 func runGateForm(opts []tea.ProgramOption, fields ...huh.Field) error {
+	return runGateFormCtx(context.Background(), opts, fields...)
+}
+
+// runGateFormCtx makes Esc quit like ctrl+c, as everywhere else in the wizard,
+// and turns huh's abort into the wizard's cancel. A cancelled ctx (SIGINT or
+// SIGTERM) ends the form and counts as a cancel too.
+func runGateFormCtx(ctx context.Context, opts []tea.ProgramOption, fields ...huh.Field) error {
 	km := huh.NewDefaultKeyMap()
 	km.Quit.SetKeys("ctrl+c", "esc")
 	group := huh.NewGroup(fields...)
-	err := huh.NewForm(group).WithKeyMap(km).WithProgramOptions(opts...).Run()
-	if errors.Is(err, huh.ErrUserAborted) {
+	err := huh.NewForm(group).WithKeyMap(km).WithProgramOptions(opts...).RunWithContext(ctx)
+	if ctx.Err() != nil || errors.Is(err, huh.ErrUserAborted) {
 		return ErrCancelled
 	}
 

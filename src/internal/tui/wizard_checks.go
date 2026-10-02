@@ -40,7 +40,8 @@ func (w *wizard) checkFolder(dir string) error {
 
 	tl, err := looper.LoadTasks(tasksPath)
 	if errors.Is(err, looper.ErrFailedTasks) {
-		return fmt.Errorf("%s has failed tasks; run gralph -d %s --dry-run to see them", tasksPath, dir)
+		quoted := shellQuote(dir)
+		return fmt.Errorf("%s has failed tasks; run gralph -d %s --dry-run to see them", tasksPath, quoted)
 	}
 
 	if err != nil {

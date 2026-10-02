@@ -1,9 +1,11 @@
 package tui
 
 import (
+	"os/exec"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestCommandLine(t *testing.T) {
@@ -32,11 +34,51 @@ func TestCommandLine(t *testing.T) {
 			s:    Settings{Dir: "my runs/it's", TasksPath: "my runs/it's/tasks.yaml", PromptPath: "my runs/it's/prompt.md", SkipPermissions: true},
 			want: `gralph -d 'my runs/it'\''s' --skip-permissions`,
 		},
+		"leading tilde is quoted": {
+			s:    Settings{Dir: "~old", TasksPath: "~old/tasks.yaml", PromptPath: "~old/prompt.md", SkipPermissions: true},
+			want: "gralph -d '~old' --skip-permissions",
+		},
+		"leading equals is quoted": {
+			s:    Settings{Dir: "=x", TasksPath: "=x/tasks.yaml", PromptPath: "=x/prompt.md", SkipPermissions: true},
+			want: "gralph -d '=x' --skip-permissions",
+		},
+		"tilde and equals inside a word stay bare": {
+			s:    Settings{Dir: "a~b=c", TasksPath: "a~b=c/tasks.yaml", PromptPath: "a~b=c/prompt.md", SkipPermissions: true},
+			want: "gralph -d a~b=c --skip-permissions",
+		},
+		"space is quoted": {
+			s:    Settings{Dir: "my runs", TasksPath: "my runs/tasks.yaml", PromptPath: "my runs/prompt.md", SkipPermissions: true},
+			want: "gralph -d 'my runs' --skip-permissions",
+		},
+		"single quote is quoted": {
+			s:    Settings{Dir: "it's", TasksPath: "it's/tasks.yaml", PromptPath: "it's/prompt.md", SkipPermissions: true},
+			want: `gralph -d 'it'\''s' --skip-permissions`,
+		},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			got := CommandLine(tc.s)
 			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+// zsh is the shell whose expansions the quoting must beat, so the test asks
+// it rather than trusting a reading of its rules.
+func TestShellQuote_ZshReadsItBack(t *testing.T) {
+	zsh, err := exec.LookPath("zsh")
+	if err != nil {
+		t.Skip("zsh is not on PATH")
+	}
+
+	words := []string{"=x", "~old", "~", "a~b=c", "my runs/it's", "plain/dir", "=", "a b", "$HOME", "x;y"}
+	for _, word := range words {
+		t.Run(word, func(t *testing.T) {
+			quoted := shellQuote(word)
+			script := "print -r -- " + quoted
+			out, err := exec.Command(zsh, "-fc", script).Output()
+			require.NoError(t, err)
+			assert.Equal(t, word+"\n", string(out))
 		})
 	}
 }

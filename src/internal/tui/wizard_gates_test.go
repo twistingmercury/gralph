@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"errors"
 	"io"
 	"testing"
@@ -65,11 +66,16 @@ type editResult struct {
 // pipe's writer and a channel with its result.
 func startEditGates(t *testing.T, gates []tasks.Gate) (*io.PipeWriter, <-chan editResult) {
 	t.Helper()
+	return startEditGatesCtx(t, context.Background(), gates)
+}
+
+func startEditGatesCtx(t *testing.T, ctx context.Context, gates []tasks.Gate) (*io.PipeWriter, <-chan editResult) {
+	t.Helper()
 	in, w := io.Pipe()
 	t.Cleanup(func() { _ = w.Close() })
 	done := make(chan editResult, 1)
 	go func() {
-		got, err := editGates(gates, tea.WithInput(in), tea.WithOutput(io.Discard), tea.WithWindowSize(80, 24))
+		got, err := editGates(ctx, gates, tea.WithInput(in), tea.WithOutput(io.Discard), tea.WithWindowSize(80, 24))
 		done <- editResult{got, err}
 	}()
 	return w, done
@@ -120,4 +126,37 @@ func TestEditGates_DoneKeepsGivenList(t *testing.T) {
 	r := waitEditGates(t, done)
 	require.NoError(t, r.err)
 	assert.Equal(t, given, r.gates)
+}
+
+func TestEditGates_CancelledContextCancels(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	_, done := startEditGatesCtx(t, ctx, nil)
+
+	cancel()
+
+	r := waitEditGates(t, done)
+	assert.True(t, errors.Is(r.err, ErrCancelled), "got %v", r.err)
+}
+
+func TestEditGates_AlreadyCancelledContextCancels(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, done := startEditGatesCtx(t, ctx, nil)
+
+	r := waitEditGates(t, done)
+	assert.True(t, errors.Is(r.err, ErrCancelled), "got %v", r.err)
+}
+
+// A multi-line gate must come out of the edit form as it went in, so editing
+// only the timeout does not flatten the command. The value is written back
+// when the field loses focus, which is where a single-line input flattens it.
+func TestGateCmdField_KeepsNewlines(t *testing.T) {
+	g := tasks.Gate{Cmd: "cd x\nmake test", Timeout: "5m"}
+	field := gateCmdField(&g)
+
+	field.Focus()
+	field.Blur()
+
+	assert.Equal(t, "cd x\nmake test", g.Cmd)
+	assert.Equal(t, "5m", g.Timeout)
 }

@@ -28,7 +28,8 @@ type Settings struct {
 }
 
 // safeWord matches what zsh and bash read as one plain word, so only paths
-// that need quoting get it.
+// that need quoting get it. ~ and = are safe only past the first character;
+// see shellQuote.
 var safeWord = regexp.MustCompile(`^[A-Za-z0-9_./~:=@%+-]+$`)
 
 // CommandLine is the command that starts the same run with no wizard, shown on
@@ -86,8 +87,11 @@ func appendPaths(parts []string, s Settings) []string {
 	return parts
 }
 
+// A leading ~ is a home or named-directory lookup and a leading = is zsh's
+// EQUALS expansion, so a word starting with either is quoted.
 func shellQuote(s string) string {
-	if safeWord.MatchString(s) {
+	leadsExpansion := strings.HasPrefix(s, "~") || strings.HasPrefix(s, "=")
+	if safeWord.MatchString(s) && !leadsExpansion {
 		return s
 	}
 
