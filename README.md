@@ -1,7 +1,7 @@
 # Gralph
 
 > **Maturity Level**: Basic - ready for real work; a breaking change can still land before 1.0, and sandboxed runs are tested on Linux only  
-> **Version**: v0.9.6
+> **Version**: v0.9.7
 >
 > - **Emerging**: Prototype, not production-ready, expect breaking changes
 > - **Basic**: Production-ready but actively evolving, expect minor version changes
