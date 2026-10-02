@@ -757,8 +757,8 @@ Two additions: a `-d/--dir` flag that names a run folder, and a setup wizard in 
   | ------------ | ----------------------------------------------------------------------- | ------------------------------------------------------------- |
   | Folder       | A folder, browsed with a picker; a lone missing file gets a file picker | `-d`, or both `-t` and `-p`                                   |
   | Permissions  | Sandbox or skip permissions, nothing pre-selected; sandbox picks a JSON | `--sandbox-settings` or `--skip-permissions`                  |
-  | Commit       | Yes or no                                                               | `--commit`                                                    |
-  | Logging      | Yes or no; yes means `<folder>/logs`                                    | `--log-dir`, or no folder                                     |
+  | Commit       | Yes or no, "No" pre-selected (the same as no flag)                      | `--commit`                                                    |
+  | Logging      | Yes or no, "No" pre-selected; yes means `<folder>/logs`                 | `--log-dir`, or no folder                                     |
   | Gate timeout | "Default (each gate's own timeout, else 10m)", pre-selected, or a value | `--gate-timeout`                                              |
   | Gates        | The file's shared gate list (ADR-019): add, edit, delete                | The task file has a top-level `gates:` key, even an empty one |
 
@@ -786,7 +786,7 @@ _Positive:_
 _Negative:_
 
 - A new third-party dependency to track and scan
-- A boolean flag cannot say "no", so a run without `--commit` shows the commit step every time the wizard opens for anything else
+- A run without `--commit` or `--log-dir` still shows those steps whenever the wizard opens for anything else; "No" is pre-selected, so each costs one Enter
 - The wizard has no e2e coverage (the suite has no terminal); it is covered by unit tests and checked by hand under a pty
 - Fixed names mean a folder holding two task files still needs `-t`
 
