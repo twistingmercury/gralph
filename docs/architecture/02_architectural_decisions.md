@@ -755,7 +755,7 @@ Two additions: a `-d/--dir` flag that names a run folder, and a setup wizard in 
 
   | Step         | Asks                                                                    | Hidden when                                                   |
   | ------------ | ----------------------------------------------------------------------- | ------------------------------------------------------------- |
-  | Folder       | A folder, browsed with a picker; a lone missing file gets a file picker | `-d`, or both `-t` and `-p`                                   |
+  | Folder       | A folder, browsed with a picker; a lone `-t` or `-p` overrides its file | `-d`, or both `-t` and `-p`                                   |
   | Permissions  | Sandbox or skip permissions, nothing pre-selected; sandbox picks a JSON | `--sandbox-settings` or `--skip-permissions`                  |
   | Commit       | Yes or no, "No" pre-selected (the same as no flag)                      | `--commit`                                                    |
   | Logging      | Yes or no, "No" pre-selected; yes means `<folder>/logs`                 | `--log-dir`, or no folder                                     |
@@ -763,7 +763,7 @@ Two additions: a `-d/--dir` flag that names a run folder, and a setup wizard in 
   | Gates        | The file's shared gate list (ADR-019): add, edit, delete                | The task file has a top-level `gates:` key, even an empty one |
 
   `--dry-run` shows only the folder and file steps.
-- **Pickers.** The folder picker starts in the current directory and shows hidden entries, because run folders usually live under `.local/`. It selects folders only. The sandbox picker selects `.json` files.
+- **Pickers.** The folder picker starts in the current directory and shows hidden entries, because run folders usually live under `.local/`. It selects folders only: with just one of `-t` or `-p` passed, the user still picks a folder, which supplies the other file. There is no picker for the task or prompt file. The sandbox picker selects `.json` files.
 - **Checked where they are asked.** Each step validates its answer with the same functions a run uses and keeps the user on the step with the error shown: the folder step loads both files (a missing file, a parse error, or a `failed` task, the last pointing at `gralph -d <folder> --dry-run` for the table); the sandbox picker loads the settings file; the logging step refuses yes when a repository is open and `<folder>/logs` is inside its work tree but not ignored by git (ADR-015, ADR-016); the timeout step parses the value with `time.ParseDuration` and requires it greater than zero.
 - **One source of truth.** The wizard's answers fill the same values the flags fill. After it closes, the existing startup checks run unchanged on those values; they never assume the wizard checked anything.
 - **The review screen.** Lists every choice, the gates (or "no gates"), and the command line that reproduces the run, such as `gralph -d .local/foo --sandbox-settings ~/sb.json --commit`. Gates are not on the command line; they are in the file. The choices are Start, Edit gates (back to the gates step), and Cancel.
@@ -847,7 +847,7 @@ _Negative:_
 
 ADR-019 goes first: the wizard's gates step needs the top-level list. Then `-d`, then the wizard. The breaking task-file change suggests v0.10.0; the owner picks the version at release.
 
-A later change may fold the shared prompt into `tasks.yaml`. The run folder survives it: `-d` would then name a folder holding `tasks.yaml` and `logs/`, and the wizard still starts by picking it. Nothing in either ADR depends on there being two files.
+A later change may fold the shared prompt into `tasks.yaml` and then deprecate `-t` and `-p`. The run folder survives it: `-d` would then name a folder holding `tasks.yaml` and `logs/`, and the wizard still starts by picking it. Nothing in either ADR depends on there being two files, and the wizard has no code that serves only `-t` or `-p`: they stay in this round as overrides, which is path resolution alone.
 
 ---
 
