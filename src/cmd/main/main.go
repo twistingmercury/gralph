@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -104,7 +105,8 @@ func runTUI(ctx context.Context) int {
 		return 1
 	}
 
-	s, err = askWizard(s)
+	wizardOpens := tui.NeedsWizard(s)
+	s, err = askWizard(ctx, s)
 	if errors.Is(err, tui.ErrCancelled) {
 		_, _ = fmt.Fprintln(os.Stderr, "error: setup cancelled")
 		return 1
@@ -115,6 +117,10 @@ func runTUI(ctx context.Context) int {
 		return 1
 	}
 
+	if wizardOpens {
+		printCommandLine(os.Stdout, s)
+	}
+
 	applySettings(s)
 	session, err := recheck()
 	if err != nil {
@@ -122,12 +128,14 @@ func runTUI(ctx context.Context) int {
 		return 1
 	}
 
-	if err := saveGates(s); err != nil {
-		_, _ = fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		return 1
-	}
-
 	return runView(ctx, s, session)
+}
+
+// printCommandLine leaves the review screen's command on one unwrapped line in
+// the normal screen's scrollback, where it pastes as a single command.
+func printCommandLine(w io.Writer, s tui.Settings) {
+	cmd := tui.CommandLine(s)
+	_, _ = fmt.Fprintf(w, "Same run, no wizard: %s\n", cmd)
 }
 
 // settingsFromFlags is the run as the flags and the files they name give it,
@@ -155,14 +163,14 @@ func settingsFromFlags() (tui.Settings, error) {
 // askWizard opens the wizard only for a gap a run cannot start without; the
 // optional steps ride along and never open it alone. Given is read from the
 // command line because a flag set to its zero value still answers its step.
-func askWizard(s tui.Settings) (tui.Settings, error) {
+func askWizard(ctx context.Context, s tui.Settings) (tui.Settings, error) {
 	if !tui.NeedsWizard(s) {
 		return s, nil
 	}
 
 	changed := pflag.CommandLine.Changed
 	given := tui.Given{Commit: changed("commit"), LogDir: changed("log-dir"), GateTimeout: changed("gate-timeout")}
-	return tui.Wizard(s, given)
+	return tui.Wizard(ctx, s, given)
 }
 
 // applySettings puts the answers where the flags live, so the rest of the run
@@ -203,16 +211,38 @@ func saveGates(s tui.Settings) error {
 	return tasks.SaveTasks(s.TasksPath, *s.Tasks)
 }
 
+// prepareRun runs every check that can refuse the run, and only then saves
+// the wizard's gates, so a refused run leaves the task file as it was. It
+// returns the repository and the run's log folder; the folder is "" without
+// --log-dir.
+func prepareRun(s tui.Settings) (*looper.Repo, string, error) {
+	repo, err := openRepo(s.TasksPath)
+	if err != nil {
+		return nil, "", err
+	}
+
+	runDir, err := checkLog(*logDirFlag, repo)
+	if err != nil {
+		return nil, "", err
+	}
+
+	if err := saveGates(s); err != nil {
+		return nil, "", err
+	}
+
+	return repo, runDir, nil
+}
+
 // runView runs the loop in the full-screen view with the settings checked.
 func runView(ctx context.Context, s tui.Settings, session []string) int {
-	repo, err := openRepo(s.TasksPath)
+	repo, runDir, err := prepareRun(s)
 	if err != nil {
 		_, _ = fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 1
 	}
 
 	info := runInfo(s.TasksPath, s.PromptPath)
-	runLog, err := openLog(*logDirFlag, repo, info)
+	runLog, err := openLog(runDir, info)
 	if err != nil {
 		_, _ = fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 1
@@ -291,19 +321,28 @@ func runInfo(tasksPath, promptPath string) runlog.Info {
 	}
 }
 
-// openLog starts the run's record under logDir (ADR-016). With no logDir it
-// returns nil, and gralph writes nothing but the task file. The run folder
-// is named before it is created so that repo, when there is one, can refuse
-// a folder git would commit without anything being left behind.
-func openLog(logDir string, repo *looper.Repo, info runlog.Info) (*runlog.Log, error) {
+// checkLog names the run's folder under logDir and has repo, when there is
+// one, refuse a folder git would commit (ADR-016). Nothing is created, so a
+// refusal leaves nothing behind. With no logDir there is no folder: "".
+func checkLog(logDir string, repo *looper.Repo) (string, error) {
 	if logDir == "" {
-		return nil, nil
+		return "", nil
 	}
 
 	start := time.Now()
 	runDir := runlog.RunDir(logDir, start)
 	if err := repo.CheckLogDir(runDir); err != nil {
-		return nil, err
+		return "", err
+	}
+
+	return runDir, nil
+}
+
+// openLog starts the run's record in runDir (ADR-016). With no runDir it
+// returns nil, and gralph writes nothing but the task file.
+func openLog(runDir string, info runlog.Info) (*runlog.Log, error) {
+	if runDir == "" {
+		return nil, nil
 	}
 
 	runLog, err := runlog.Open(runDir, info)

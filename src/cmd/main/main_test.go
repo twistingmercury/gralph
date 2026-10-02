@@ -1,10 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -254,7 +257,7 @@ func TestResolveDir(t *testing.T) {
 }
 
 func TestOpenLog_NotPassedOpensNothing(t *testing.T) {
-	runLog, err := openLog("", nil, runlog.Info{})
+	runLog, err := openLog("", runlog.Info{})
 
 	require.NoError(t, err)
 	assert.Nil(t, runLog)
@@ -263,7 +266,7 @@ func TestOpenLog_NotPassedOpensNothing(t *testing.T) {
 func TestOpenLog_CreatesOneRunFolderWithALedger(t *testing.T) {
 	logDir := filepath.Join(t.TempDir(), "logs")
 
-	runLog, err := openLog(logDir, nil, runlog.Info{Version: "dev", Permissions: "skip"})
+	runLog, err := openLog(runlog.RunDir(logDir, time.Now()), runlog.Info{Version: "dev", Permissions: "skip"})
 	require.NoError(t, err)
 	require.NotNil(t, runLog)
 	require.NoError(t, runLog.Close())
@@ -282,10 +285,108 @@ func TestOpenLog_PathThatCannotBeADirectory(t *testing.T) {
 	require.NoError(t, os.WriteFile(file, nil, 0o600))
 
 	for _, logDir := range []string{file, filepath.Join(file, "logs")} {
-		runLog, err := openLog(logDir, nil, runlog.Info{})
+		runLog, err := openLog(runlog.RunDir(logDir, time.Now()), runlog.Info{})
 
 		require.Error(t, err, logDir)
 		assert.True(t, strings.HasPrefix(err.Error(), "--log-dir: "), err.Error())
 		assert.Nil(t, runLog)
 	}
+}
+
+// setFlags sets the flag variables the way applySettings does and puts them
+// back afterwards, because they are package state.
+func setFlags(t *testing.T, sandbox string, skip, commit bool, logDir, gateTimeout string) {
+	t.Helper()
+	oldSandbox, oldSkip, oldCommit, oldLogDir, oldTimeout := *sandboxFlag, *skipPermsFlag, *commitFlag, *logDirFlag, *gateTimeoutFlag
+	t.Cleanup(func() {
+		*sandboxFlag, *skipPermsFlag, *commitFlag, *logDirFlag, *gateTimeoutFlag = oldSandbox, oldSkip, oldCommit, oldLogDir, oldTimeout
+	})
+
+	*sandboxFlag, *skipPermsFlag, *commitFlag, *logDirFlag, *gateTimeoutFlag = sandbox, skip, commit, logDir, gateTimeout
+}
+
+func TestRecheck_RefusesABadWizardAnswer(t *testing.T) {
+	tests := []struct {
+		name        string
+		sandbox     string
+		skip        bool
+		gateTimeout string
+		wantErr     string
+	}{
+		{name: "neither sandbox nor skip", wantErr: "pass --sandbox-settings <path>, or --skip-permissions to run without a sandbox"},
+		{name: "both", sandbox: "settings.json", skip: true, wantErr: "--sandbox-settings and --skip-permissions cannot be used together"},
+		{name: "bad gate timeout", skip: true, gateTimeout: "30", wantErr: "--gate-timeout: must be a duration string such as 90s or 10m"},
+		{name: "valid", skip: true, gateTimeout: "2m"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			setFlags(t, tt.sandbox, tt.skip, false, "", tt.gateTimeout)
+
+			session, err := recheck()
+			if tt.wantErr != "" {
+				require.EqualError(t, err, tt.wantErr)
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, []string{"--dangerously-skip-permissions"}, session)
+		})
+	}
+}
+
+func TestPrintCommandLine(t *testing.T) {
+	var out bytes.Buffer
+
+	printCommandLine(&out, tui.Settings{TasksPath: "f/tasks.yaml", PromptPath: "f/prompt.md", SkipPermissions: true})
+
+	want := "Same run, no wizard: gralph -t f/tasks.yaml -p f/prompt.md --skip-permissions\n"
+	assert.Equal(t, want, out.String())
+}
+
+// gitIn runs git in dir; the caller has already kept the user's own git
+// setup out with t.Setenv.
+func gitIn(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	require.NoError(t, err, "git %v: %s", args, out)
+}
+
+// A refused run must leave the task file as it was: the gates the wizard
+// edited are saved only after every check that can refuse the run has passed.
+func TestPrepareRun_RefusedRunLeavesTheTaskFileAlone(t *testing.T) {
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	t.Setenv("GIT_AUTHOR_NAME", "Test")
+	t.Setenv("GIT_AUTHOR_EMAIL", "test@example.com")
+	t.Setenv("GIT_COMMITTER_NAME", "Test")
+	t.Setenv("GIT_COMMITTER_EMAIL", "test@example.com")
+	t.Setenv("GIT_CEILING_DIRECTORIES", filepath.Dir(dir))
+	t.Chdir(dir)
+	gitIn(t, dir, "init", "-q")
+	require.NoError(t, os.Mkdir(filepath.Join(dir, "f"), 0o750))
+	path := filepath.Join("f", "tasks.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(validTasksYAML), 0o600))
+	gitIn(t, dir, "add", path)
+	gitIn(t, dir, "commit", "-q", "-m", "init")
+	before, err := os.ReadFile(path)
+	require.NoError(t, err)
+
+	tl, err := looper.LoadTasks(path)
+	require.NoError(t, err)
+	gates := []tasks.Gate{{Cmd: "make test"}}
+	tl.Gates = &gates
+	setFlags(t, "", true, true, "", "")
+
+	repo, runDir, err := prepareRun(tui.Settings{TasksPath: path, Tasks: tl, GatesEdited: true})
+
+	require.EqualError(t, err, "--commit needs the task file ignored by git or outside the repository: f/tasks.yaml")
+	assert.Nil(t, repo)
+	assert.Empty(t, runDir)
+	after, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.Equal(t, string(before), string(after))
 }
