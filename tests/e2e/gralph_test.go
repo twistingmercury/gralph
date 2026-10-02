@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -171,6 +172,8 @@ func TestVersionFlag(t *testing.T) {
 	result := runCLI(t, "--version")
 	assert.Equal(t, 0, result.exitCode, "stderr: %s", result.stderr)
 	assert.True(t, strings.HasPrefix(result.stdout, "gralph version:"), "stdout: %s", result.stdout)
+	wantOS := fmt.Sprintf("os: %s/%s\n", runtime.GOOS, runtime.GOARCH)
+	assert.Contains(t, result.stdout, wantOS)
 }
 
 // TestHelpFlag verifies that --help exits 0 (pflag exits 0 on ErrHelp) and

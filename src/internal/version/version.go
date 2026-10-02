@@ -2,6 +2,7 @@ package version
 
 import (
 	"fmt"
+	"runtime"
 )
 
 var (
@@ -16,5 +17,5 @@ func Version() string {
 }
 
 func Print() {
-	fmt.Printf("gralph version: %s\ndate: %s\ncommit: %s\n", version, buildDate, gitCommit)
+	fmt.Printf("gralph version: %s\ndate: %s\ncommit: %s\nos: %s/%s\n", version, buildDate, gitCommit, runtime.GOOS, runtime.GOARCH)
 }
