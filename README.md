@@ -40,6 +40,9 @@ is no default.
 **The full guide is [docs/howto.md](docs/howto.md)**: the task file, sandbox
 settings, gates, `--commit`, `--log-dir`, the full-screen view, and every flag.
 
+Got a question or an idea? Ask in
+[Discussions](https://github.com/twistingmercury/gralph/discussions).
+
 ## How it works
 
 For each task, gralph glues the shared prompt and the task together and hands

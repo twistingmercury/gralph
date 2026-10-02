@@ -618,6 +618,9 @@ shows any problem right under the field. `esc` or `ctrl+c` quits with
   `Run stopped by signal`, and exits 1. Once the run has ended, it just closes
   the view.
 
+Still stuck, or got a question or an idea? Ask in
+[Discussions](https://github.com/twistingmercury/gralph/discussions).
+
 ## Flag reference
 
 ```bash
