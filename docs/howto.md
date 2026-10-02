@@ -26,6 +26,12 @@ context instead of one long session that drifts.
 
 You need the `claude` CLI on your `PATH`. Gralph calls it directly.
 
+Two more tools are needed only if you use the feature that calls them:
+
+- `sh`, if your task file has [gates](#gates). Gralph runs each gate through
+  it.
+- `git`, if you pass `--commit` (see [Committing tasks](#committing-tasks)).
+
 Don't run gralph from inside a Claude session. It starts Claude itself, as a
 subprocess, so run it from a normal terminal.
 
