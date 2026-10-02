@@ -120,7 +120,7 @@ func pickGate(ctx context.Context, list []tasks.Gate, opts []tea.ProgramOption) 
 		Description(description).
 		Options(options...).
 		Value(&choice)
-	err := runGateFormCtx(ctx, opts, sel)
+	err := runGateForm(ctx, opts, sel)
 	return choice, err
 }
 
@@ -142,7 +142,7 @@ func changeGate(ctx context.Context, list []tasks.Gate, i int, opts []tea.Progra
 		Title(list[i].Cmd).
 		Options(actions...).
 		Value(&action)
-	err := runGateFormCtx(ctx, opts, sel)
+	err := runGateForm(ctx, opts, sel)
 	if err != nil {
 		return nil, err
 	}
@@ -172,7 +172,7 @@ func askGate(ctx context.Context, g tasks.Gate, opts []tea.ProgramOption) (tasks
 		Title("Timeout (optional, such as 90s or 10m)").
 		Validate(checkGateTimeoutField).
 		Value(&g.Timeout)
-	err := runGateFormCtx(ctx, opts, cmd, timeout)
+	err := runGateForm(ctx, opts, cmd, timeout)
 	return g, err
 }
 
@@ -182,16 +182,10 @@ func gateCmdField(g *tasks.Gate) *huh.Text {
 	return huh.NewText().Title("Command").Validate(checkGateCmd).Value(&g.Cmd)
 }
 
-// runGateForm is for wizard.go's own screens, which have no signal context
-// to pass yet.
-func runGateForm(opts []tea.ProgramOption, fields ...huh.Field) error {
-	return runGateFormCtx(context.Background(), opts, fields...)
-}
-
-// runGateFormCtx makes Esc quit like ctrl+c, as everywhere else in the wizard,
+// runGateForm makes Esc quit like ctrl+c, as everywhere else in the wizard,
 // and turns huh's abort into the wizard's cancel. A cancelled ctx (SIGINT or
 // SIGTERM) ends the form and counts as a cancel too.
-func runGateFormCtx(ctx context.Context, opts []tea.ProgramOption, fields ...huh.Field) error {
+func runGateForm(ctx context.Context, opts []tea.ProgramOption, fields ...huh.Field) error {
 	km := huh.NewDefaultKeyMap()
 	km.Quit.SetKeys("ctrl+c", "esc")
 	group := huh.NewGroup(fields...)
