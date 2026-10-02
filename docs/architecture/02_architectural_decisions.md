@@ -1,8 +1,8 @@
 # Gralph — Architectural Decisions
 
-> **Version**: v13
-> **Date**: 2026-10-01
-> **Notes**: ADR-016 brought in line with what was built: how `run_finished` tells `failed` from `stopped`, a commit whose hash cannot be read, the ledger after a write error, the view after a run that ended with an error, and `RunDir` naming the run folder.
+> **Version**: v14
+> **Date**: 2026-10-02
+> **Notes**: ADR-007 amended: a `windows/amd64` binary can be built by hand (commented-out Dockerfile line, no-op process-tree functions) but is untested and not released.
 
 [Back to Overview](00_overview.md) | [Back to Project README](../../README.md)
 
@@ -257,6 +257,10 @@ _Positive:_
 _Negative:_
 
 - Cannot run on Windows; future contributors must not add Windows support back
+
+**Amendment (2026-10-02):**
+
+A `windows/amd64` binary can now be built, on the owner's request, but it is not released: its line in `build/Dockerfile` is commented out, and people who want it uncomment that line and build it themselves. It has never been run or tested, and nothing above changes on Unix. Off Unix, `process_tree_other.go` (`//go:build !unix`) replaces the process-group setup with no-ops, so cancelling kills only the direct child (its descendants keep running) and git gets no SIGTERM-first stop, which can leave `index.lock` behind. Sandboxed runs are unavailable there and gates still need `sh`. The split is by build constraint only; there are still no `runtime.GOOS` branches, and no Windows-specific features or tests.
 
 ---
 
@@ -589,7 +593,7 @@ A new `--commit` flag makes gralph commit each task itself. Without the flag gra
 - **`--dry-run`** with `--commit` runs the same startup check. In a clean repository it prints `commit: <work tree root>` before the final `<tasks path> is valid` line; a dirty tree exits 1 with the error above; outside a repository it prints the not-a-repository line.
 - **The stdin contract is unchanged.** The session is told nothing about `--commit`.
 - **The skill and its prompt template.** The template loses the "commit only after verification passes" rule. The skill asks whether the run will use `--commit`. If it will, the generated `prompt.md` tells the session not to commit and to leave its changes in the work tree; if not, it carries the project's own commit rules, as before.
-- **Keep the run's files out of git.** The task file must be ignored or outside the repository (above). The README and the skill recommend the same for the shared prompt and a sandbox settings file kept in the project: add them, or the directory that holds them, to the project's `.gitignore`. Ignored files never trip the clean-tree check and are never staged. Gralph does not edit `.gitignore` itself; when the skill writes the pair for a `--commit` run it tells the user which line to add.
+- **Keep the run's files out of git.** The task file must be ignored or outside the repository (above). The HOWTO and the skill recommend the same for the shared prompt and a sandbox settings file kept in the project: add them, or the directory that holds them, to the project's `.gitignore`. Ignored files never trip the clean-tree check and are never staged. Gralph does not edit `.gitignore` itself; when the skill writes the pair for a `--commit` run it tells the user which line to add.
 
 Alternatives not taken: always committing (breaks projects that are not repositories or do not want gralph's commits); a per-task key (grows the task file for a choice that belongs to the run); a commit message field in the task file, or one supplied by the session in its result line (the name already reads as a subject, and the second puts commit knowledge back in the session); requiring a repository when `--commit` is passed (there is simply nothing to commit there); passing git an exclude pathspec for the task file (the first implementation did: `git add` rejects a pathspec that names an ignored path, the answer can change mid-run, a symlinked task file slips past it, and a path list on `git commit` holds the index lock for the whole hook run; a plain `git add -A` plus an ignore rule has none of these problems); gralph discarding a failed task's changes (destroys the evidence, and gralph deleting work unasked); allowing a dirty tree on a rerun (mixes two attempts in one commit and needs gralph to remember which changes were leftovers).
 
@@ -635,21 +639,22 @@ A new `--log-dir <path>` flag makes gralph write a record of the run. Without th
 
 - **Opt-in per run.** `--log-dir` takes the directory to write under. There is no default location and no task-file key. An empty `--log-dir=` counts as not passed.
 - **Full-screen view only.** With `--no-tui`, or when stdin or stdout is not a terminal, a run given `--log-dir` exits 1 with `error: --log-dir only works with the full-screen view` before anything loads or runs. `--dry-run` ignores the flag completely, as it ignores `--prompt`: no check, no output line, nothing created.
-- **One folder per run.** At startup gralph creates `<log-dir>` if needed and, inside it, a folder named after the run's start time in local time, `YYYYMMDDTHHMMSS` (for example `20261001T140211`). Folders are created with mode `0700` and files with `0600`: the record holds Claude's text and whatever a gate or git printed. If the run folder already exists, or anything cannot be created, gralph exits 1 with an error starting `--log-dir: ` after the setup screen and before the view opens or any session starts. Gralph never rotates or deletes old run folders.
+- **One folder per run.** At startup gralph creates `<log-dir>` if needed and, inside it, a folder named after the run's start time in local time, `YYYYMMDDTHHMMSS` (for example `20261001T140211`). Folders are created with mode `0700` and files with `0600`: the record holds Claude's text and whatever a gate or git printed. If the run folder already exists, or anything cannot be created, gralph exits 1 with an error starting `--log-dir:` after the setup screen and before the view opens or any session starts. Gralph never rotates or deletes old run folders.
 - **With `--commit`, git must not see the logs.** When a repository is open (ADR-015) and the run folder is inside its work tree, the folder must be ignored by git; otherwise gralph exits 1 with `error: --commit needs the log directory ignored by git or outside the repository: <path>`. The check is made on the run folder's path before it is created, after the task-file and clean-tree checks. `git add -A` takes no exclusions, so an ignore rule is the only thing keeping a log out of a task's commit. Without `--commit`, or outside a repository, there is no check.
 - **The ledger, `run.jsonl`.** One JSON object per line, written as each thing happens. Every line has `time` (RFC 3339, local time with its UTC offset, like `2026-10-01T14:02:11-04:00`) and `event`:
 
-  | `event`            | Other fields                                                                                                                                  |
-  | ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------- |
+  | `event`            | Other fields                                                                                                                                                          |
+  | ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
   | `run_started`      | `version`, `tasks_file`, `prompt_file`, `permissions` (`sandbox` or `skip`), `sandbox_settings` (the path, when given), `gate_timeout` (when passed), `commit` (bool) |
-  | `task_started`     | `task` (the id), `name`                                                                                                                       |
-  | `session_finished` | `task`, `state`, `error` (when not empty), `duration`                                                                                         |
-  | `gate_finished`    | `task`, `cmd` (first line), `result` (`passed`, `failed`, or `timed_out`), `timeout`, `duration`                                              |
-  | `committed`        | `task`, `hash`                                                                                                                                |
-  | `task_finished`    | `task`, `state`, `error` (when not empty), `duration`                                                                                         |
-  | `run_finished`     | `result` (`completed`, `failed`, or `stopped`), `error` (when not empty), `duration`                                                          |
+  | `task_started`     | `task` (the id), `name`                                                                                                                                               |
+  | `session_finished` | `task`, `state`, `error` (when not empty), `duration`                                                                                                                 |
+  | `gate_finished`    | `task`, `cmd` (first line), `result` (`passed`, `failed`, or `timed_out`), `timeout`, `duration`                                                                      |
+  | `committed`        | `task`, `hash`                                                                                                                                                        |
+  | `task_finished`    | `task`, `state`, `error` (when not empty), `duration`                                                                                                                 |
+  | `run_finished`     | `result` (`completed`, `failed`, or `stopped`), `error` (when not empty), `duration`                                                                                  |
 
   Durations are strings as Go prints them (`41.2s`). A task skipped because it is already `completed` writes no line. `committed` is written only when a commit was made; nothing staged writes nothing. A stopped run writes `run_finished` with `stopped` and no `task_finished` for the task that was running, which matches the task file: that task stays as it was. `run_finished` says `failed` when the last `task_finished` was a failed task, and `stopped` when the run ended with any other error: the looper's error does not say which it was, but a stopped task never gets a `task_finished`. The ledger does not tell a stop by the user from a stop by signal. The sandbox settings file's path is recorded, never its contents.
+
 - **The detail files, `task-<id>.log`.** One plain-text file per task that ran, holding every `Activity` line reported for that task, in order, each prefixed with its local time as `HH:MM:SS`: Claude's text, the `→ <tool> <target>` lines, stderr, each `→ gate` line and the gate's output, the `→ commit` line and git's output. It is what the Claude activity pane showed. The raw stream-json is not kept.
 - **New looper events.** On the stream path only, the looper reports three more event kinds: `SessionFinished` (the session's outcome and duration), `GateFinished` (the gate, its timeout, its error, where nil means passed, and its duration), and `Committed` (the new commit's hash, read with one `git rev-parse HEAD` after a successful commit; if the hash cannot be read the event is not sent and the task stays `completed`, because the commit is already made and a lookup for the record must not change the task's outcome). `TaskFinished` and `RunDone` gain a duration. The looper measures the durations, being the only part that knows when a step began. The view ignores the new kinds, so the screen is unchanged, and the plain path reports nothing, as before.
 - **A separate package writes the files.** `internal/runlog` turns events into the ledger and detail lines: `RunDir` names the run folder, so that `cmd/main` can have the repository check that path before anything exists; `Open` creates the folder and writes `run_started`, `Record` handles one event, `Close` closes the files. It imports `looper` for the event type; `looper` and `tui` do not import it. `cmd/main` opens the log and hands `Record` to `tui.Run` as an optional `observe func(looper.Event) error`, called for every event before the view gets it. The ledger is written with `encoding/json`; there is no new dependency.

@@ -47,7 +47,7 @@ func gitIn(t *testing.T, dir string, args ...string) string {
 }
 
 // commitRepo is a git repository with one commit that ignores run/, where
-// the prompt and task file live, as the README recommends.
+// the prompt and task file live, as the HOWTO recommends.
 type commitRepo struct {
 	dir        string
 	promptPath string

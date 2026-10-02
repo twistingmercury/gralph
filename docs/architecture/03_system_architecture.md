@@ -1,8 +1,8 @@
 # Gralph — System Architecture
 
-> **Version**: v13
-> **Date**: 2026-10-01
-> **Notes**: Run Log Writer brought in line with the code: `RunDir` and `Open(runDir, info)`, `os.Root`, nil-safe methods, how `run_finished` picks its result; the `forwarder` in the TUI; the view after a run that ended with an error; `Committed` skipped when the hash cannot be read.
+> **Version**: v15
+> **Date**: 2026-10-02
+> **Notes**: OS support row: a `windows/amd64` binary can be built by hand but is untested and not released (ADR-007 amendment).
 
 [Back to Overview](00_overview.md) | [Back to Project README](../../README.md)
 
@@ -62,6 +62,7 @@ graph TB
 ### CLI Entrypoint (cmd/main)
 
 **Responsibilities:**
+
 - Parse command-line flags (--prompt, --tasks, --sandbox-settings, --skip-permissions, --dry-run, --no-tui, --gate-timeout, --commit, --log-dir, --install-skill, --version)
 - Validate `--gate-timeout` (if set) before any load or run; bad value exits 1
 - Choose the mode: plain when `--dry-run`, `--no-tui`, or stdin or stdout is not a terminal (`github.com/charmbracelet/x/term`); otherwise the TUI
@@ -74,16 +75,17 @@ graph TB
 
 **Key Characteristics:**
 
-| Characteristic      | Value                                   |
-| ------------------- | --------------------------------------- |
-| Language            | Go 1.27.1+                              |
+| Characteristic      | Value                                                   |
+| ------------------- | ------------------------------------------------------- |
+| Language            | Go 1.27.1+                                              |
 | Responsibilities    | Argument parsing, mode selection, signal setup, routing |
-| Error Handling      | Print to stderr, exit 1 on any error    |
-| State Management    | Stateless; passes context to looper     |
+| Error Handling      | Print to stderr, exit 1 on any error                    |
+| State Management    | Stateless; passes context to looper                     |
 
 ### Terminal UI (internal/tui)
 
 **Responsibilities:**
+
 - `Setup`/`SetupModel`: the path-entry screen; one text field per missing `--tasks`/`--prompt` path, each validated on Enter with `looper.LoadTasks` or `looper.LoadPrompt`, errors shown under the field; Esc or ctrl+c cancels (exit 1)
 - `Run`: derives a cancellable context from `cmd/main`'s signal context, runs `looper.Run` in a goroutine with a `report` hook that calls `program.Send`, and returns the exit code and summary when the view closes. When given an `observe func(looper.Event) error` (nil without `--log-dir`), the hook calls it with each event first; on its first error `Run` cancels the run and puts that error in the final `RunDone`, so the status reads `Run stopped: log: <error>`. The hook is a `forwarder` (`forward.go`); after `observe`'s first error it never calls it again, so the record ends there
 - `Model`: the run view (alt screen, relaid out on resize) with three titled panes (title bars rendered above the viewports so they stay put while scrolling): Current task (`<id>: <name>` and prompt), Task progress (`<icon> <id>: <name>: <state>` per task, colored by state, under a one-line outcome banner once the run ends), Claude activity (the current task's activity, cleared on each `TaskStarted`, following the newest line unless scrolled up), and a key legend that also carries the confirm prompt and final status
@@ -92,17 +94,18 @@ graph TB
 
 **Key Characteristics:**
 
-| Characteristic      | Value                                                       |
-| ------------------- | ----------------------------------------------------------- |
-| Libraries           | Bubble Tea v2, bubbles v2 (viewport, textinput), lipgloss v2 (ADR-012) |
-| Imported by         | `cmd/main` only; `looper` and `tasks` never import it or Bubble Tea |
+| Characteristic      | Value                                                                                                                                                     |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Libraries           | Bubble Tea v2, bubbles v2 (viewport, textinput), lipgloss v2 (ADR-012)                                                                                    |
+| Imported by         | `cmd/main` only; `looper` and `tasks` never import it or Bubble Tea                                                                                       |
 | Input from looper   | `looper.Event` messages: `TaskStarted`, `Activity`, `TaskFinished`, `RunDone`; `SessionFinished`, `GateFinished`, and `Committed` are ignored by the view |
-| Signal Handling     | Bubble Tea's own handler is off (`tea.WithoutSignalHandler`) |
-| Exit code           | 0 only when every task completed; 1 on a failed task or a stop |
+| Signal Handling     | Bubble Tea's own handler is off (`tea.WithoutSignalHandler`)                                                                                              |
+| Exit code           | 0 only when every task completed; 1 on a failed task or a stop                                                                                            |
 
 ### Looper (internal/looper)
 
 **Responsibilities:**
+
 - Load and validate prompt file (`LoadPrompt`: must exist, readable, non-empty after trimming)
 - Load and parse task file via `tasks.ParseTasks` (`LoadTasks`)
 - Check preconditions (`LoadTasks` returns the list plus `ErrFailedTasks` if any task is `failed`; `LoadTasksReport` then prints the failed-task notice and table, and `Start` refuses to run)
@@ -121,18 +124,19 @@ graph TB
 
 **Key Characteristics:**
 
-| Characteristic      | Value                                   |
-| ------------------- | --------------------------------------- |
-| Language            | Go 1.27.1+                              |
+| Characteristic      | Value                                                                                                                                                                                                                                                                                                                             |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Language            | Go 1.27.1+                                                                                                                                                                                                                                                                                                                        |
 | Core Function       | `Run(ctx, prompt, tl, tasksFile, gateTimeout, sessionArgs, repo, report)` runs the loop; `Start(ctx, promptFile, tasksFile, gateTimeout, sessionArgs, commit)` is plain mode's load + `Run(..., repo, nil)` where `repo` comes from `repoFor`; `DryRun(w, tasksFile, gateTimeout, sandboxFile, commit)` validates without running |
-| Scaling Model       | Sequential tasks; on the TUI path stdout and stderr are read concurrently, so `report` may be called from more than one goroutine |
-| Communication       | Reads files, spawns subprocess, reads stdout (plain text or stream-json) |
-| UI dependency       | None; never imports `internal/tui` or Bubble Tea |
-| State Persistence   | Calls `tasks.SaveTasks` after each run  |
+| Scaling Model       | Sequential tasks; on the TUI path stdout and stderr are read concurrently, so `report` may be called from more than one goroutine                                                                                                                                                                                                 |
+| Communication       | Reads files, spawns subprocess, reads stdout (plain text or stream-json)                                                                                                                                                                                                                                                          |
+| UI dependency       | None; never imports `internal/tui` or Bubble Tea                                                                                                                                                                                                                                                                                  |
+| State Persistence   | Calls `tasks.SaveTasks` after each run                                                                                                                                                                                                                                                                                            |
 
 ### Task Parser (internal/tasks)
 
 **Responsibilities:**
+
 - Unmarshal YAML without custom tags (rejects non-core tags)
 - Validate each task element in sequence:
   - `id`: required, positive int16, unique
@@ -156,6 +160,7 @@ graph TB
 ### Process Tree Manager (internal/looper/process_tree_unix.go)
 
 **Responsibilities:**
+
 - Configure spawned claude and gate processes to run in their own process group (Setpgid)
 - On signal (SIGINT, SIGTERM), kill the entire process group
 - For git commits (when `--commit` is set), send SIGTERM first (`stopProcessTree`), wait up to 2 seconds (`gitStopGrace`), then SIGKILL only if still alive, so git can clean up its `index.lock` file
@@ -163,15 +168,16 @@ graph TB
 
 **Key Characteristics:**
 
-| Characteristic      | Value                                       |
-| ------------------- | ------------------------------------------- |
-| OS Support          | Unix only (Linux, macOS, BSDs)              |
-| Signal Handling     | SIGINT, SIGTERM from context cancellation   |
+| Characteristic      | Value                                                                                     |
+| ------------------- | ----------------------------------------------------------------------------------------- |
+| OS Support          | Linux, macOS, BSDs; `windows/amd64` builds by hand, untested (ADR-007)                    |
+| Signal Handling     | SIGINT, SIGTERM from context cancellation                                                 |
 | Process Control     | kill(-pgid, signal) to terminate group; SIGTERM then SIGKILL for git with 2s grace period |
 
 ### Stream Parser (internal/looper/stream.go)
 
 **Responsibilities:**
+
 - Read claude's stream-json stdout line by line with no length limit (`bufio.Reader`, not a 64 KiB `bufio.Scanner`), and drain stdout and stderr to EOF before `cmd.Wait`
 - `parseStreamLine`: `assistant` events become activity lines (`text` blocks one line per non-blank line; `tool_use` blocks `→ <Name> <target>`, where target is the Bash command, the Read/Edit/Write file path, or the Grep/Glob pattern, cut to one line); the `result` event's `result` text is kept for the outcome; other event types and undecodable lines are ignored
 
@@ -186,6 +192,7 @@ graph TB
 ### Result Parser (internal/looper/result.go)
 
 **Responsibilities:**
+
 - Extract last non-blank, non-fence line from claude's stdout (plain) or from the stream's `result` event text (TUI)
 - Parse as JSON with `state` and `error` fields
 - Determine task outcome: completed if exit 0 + JSON `state: "completed"`, otherwise failed
@@ -193,16 +200,17 @@ graph TB
 
 **Key Characteristics:**
 
-| Characteristic      | Value                                   |
-| ------------------- | --------------------------------------- |
+| Characteristic      | Value                                                               |
+| ------------------- | ------------------------------------------------------------------- |
 | Input               | Claude's stdout (plain) or `result` event text (TUI), and exit code |
-| Output              | (state, error message) tuple            |
-| Fence Handling      | Skips lines matching ^\`\`\`             |
-| JSON Parsing        | encoding/json; no custom unmarshallers  |
+| Output              | (state, error message) tuple                                        |
+| Fence Handling      | Skips lines matching ^\`\`\`                                        |
+| JSON Parsing        | encoding/json; no custom unmarshallers                              |
 
 ### Gate Runner (internal/looper/gates.go)
 
 **Responsibilities:**
+
 - `runGates` runs after `finishTask` returns `completed`, on both task paths, before the state is saved (ADR-013); it is skipped when the task has no gates or the session failed
 - Run the task's gates in file order, one at a time, each as `sh -c <cmd>` in gralph's working directory, with no stdin, in its own process group (`configureProcessTree`). The call carries the one owner-approved `// #nosec G204` (ADR-013)
 - Stop at the first gate that exits non-zero or cannot be started: the task becomes `failed` with error `gate "<cmd>" failed: <exit error>` (or `gate "<cmd>" timed out after <timeout>` when it hit its limit; `<cmd>` is the command's first line), and later gates do not run
@@ -212,17 +220,18 @@ graph TB
 
 **Key Characteristics:**
 
-| Characteristic      | Value                                   |
-| ------------------- | --------------------------------------- |
+| Characteristic      | Value                                                                                                                       |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------- |
 | Input               | The task's `Gates` (`[]tasks.Gate`, each with `Cmd` string and optional `Timeout` string, parsed as a duration at run time) |
-| Output              | Nothing on success; the failed gate's error message; or a cancellation error |
-| Judged by           | Exit code only; output is shown, never parsed |
-| Seen by Claude      | Never; gates are not part of the stdin prompt |
-| Timeout / retry     | Always a timeout: `--gate-timeout` if passed, else the gate's `timeout`, else 10m. No retry |
+| Output              | Nothing on success; the failed gate's error message; or a cancellation error                                                |
+| Judged by           | Exit code only; output is shown, never parsed                                                                               |
+| Seen by Claude      | Never; gates are not part of the stdin prompt                                                                               |
+| Timeout / retry     | Always a timeout: `--gate-timeout` if passed, else the gate's `timeout`, else 10m. No retry                                 |
 
 ### Committer (internal/looper/commit.go)
 
 **Responsibilities:**
+
 - `findRoot` finds the git work tree root via `git rev-parse --show-toplevel`, or returns `""` and no error if outside one or git is not installed; any other git failure is an error, so a broken repository is caught before any session
 - `checkTaskFile` refuses a task file unless it is git-ignored or outside the repository (checked with `git check-ignore -q`); gralph exits 1 with `error: --commit needs the task file ignored by git or outside the repository: <path>` at startup
 - `checkClean` refuses a work tree with any uncommitted changes (via `git status --porcelain`); gralph exits 1 with `error: --commit needs a clean work tree; commit, stash, or remove:` and the files at startup, before the view opens or the first session
@@ -237,18 +246,19 @@ graph TB
 
 **Key Characteristics:**
 
-| Characteristic      | Value                                   |
-| ------------------- | --------------------------------------- |
-| Input               | A `*Repo`, the task                     |
+| Characteristic      | Value                                                   |
+| ------------------- | ------------------------------------------------------- |
+| Input               | A `*Repo`, the task                                     |
 | Output              | Completed (and committed), or failed with error message |
-| Judged by           | Exit code only; git output is shown    |
-| Seen by Claude      | Never                                   |
-| Sandbox Coverage    | None; git runs unsandboxed with hooks |
-| Cancellation        | SIGTERM first, SIGKILL after 2 seconds |
+| Judged by           | Exit code only; git output is shown                     |
+| Seen by Claude      | Never                                                   |
+| Sandbox Coverage    | None; git runs unsandboxed with hooks                   |
+| Cancellation        | SIGTERM first, SIGKILL after 2 seconds                  |
 
 ### Run Log Writer (internal/runlog)
 
 **Responsibilities:**
+
 - Exists only for `--log-dir` (ADR-016); without the flag it is never called and gralph writes nothing but the task file
 - `RunDir(logDir, start)`: name the run folder, `<logDir>/<YYYYMMDDTHHMMSS>` (local start time). It is separate from `Open` so `cmd/main` can have the repository check the path (`(*Repo).CheckLogDir`) before anything is created
 - `Open(runDir, info)`: create the log directory if needed and then the run folder (folders `0700`, files `0600`; an existing run folder is an error), open the folder as an `os.Root` so every file is confined to it, create `run.jsonl`, and write the `run_started` line from `info` (version, task and prompt file paths, permission mode, sandbox settings path, gate timeout, commit)
@@ -260,14 +270,14 @@ graph TB
 
 **Key Characteristics:**
 
-| Characteristic      | Value                                   |
-| ------------------- | --------------------------------------- |
-| Imported by         | `cmd/main` only                         |
-| Imports             | `internal/looper` (the event type), `internal/tasks`; standard library only (`encoding/json`) |
-| Input               | `looper.Event`s, in the order `tui.Run` receives them |
+| Characteristic      | Value                                                                                                          |
+| ------------------- | -------------------------------------------------------------------------------------------------------------- |
+| Imported by         | `cmd/main` only                                                                                                |
+| Imports             | `internal/looper` (the event type), `internal/tasks`; standard library only (`encoding/json`)                  |
+| Input               | `looper.Event`s, in the order `tui.Run` receives them                                                          |
 | Output              | `run.jsonl` (one JSON object per line, each with `time` and `event`) and one `task-<id>.log` per task that ran |
-| Used in             | TUI mode only; plain mode and `--dry-run` never open a log |
-| Error Handling      | `Open` errors exit 1 before the view opens (`--log-dir: ...`); a `Record` error stops the run |
+| Used in             | TUI mode only; plain mode and `--dry-run` never open a log                                                     |
+| Error Handling      | `Open` errors exit 1 before the view opens (`--log-dir: ...`); a `Record` error stops the run                  |
 
 ## Data Flow
 
@@ -388,20 +398,20 @@ sequenceDiagram
 
 ## Component Interactions
 
-| From        | To              | Protocol                         | Purpose                                    | Data Format        |
-| ----------- | --------------- | -------------------------------- | ------------------------------------------ | ------------------ |
-| CLI         | Looper          | Direct function call             | Plain start or dry-run; load paths for the TUI | Go function args |
-| CLI         | TUI             | Direct function call             | Setup screen and run view                  | Go function args   |
-| TUI         | Looper          | `Run` with `report` hook         | Run the loop, receive progress             | `looper.Event`     |
-| Looper      | Filesystem      | os.ReadFile, os.WriteFile        | Load inputs, persist state                 | Text files (YAML); the sandbox settings file (JSON, read only) |
-| Looper      | TaskParser      | ParseTasks, SaveTasks functions  | Parse and serialize task lists             | YAML bytes         |
-| Looper      | Claude          | os/exec.Cmd, stdin/stdout/stderr | Invoke Claude session                      | Text (prompt)      |
-| Claude      | Looper          | stdout, exit code                | Return output and completion status        | Plain: text ending in a JSON result line; TUI: stream-json events, the `result` event's text ending in it |
-| Looper      | Gate commands   | os/exec.Cmd (`sh -c`), exit code | Check a completed task independently       | Shell command text; output shown, not parsed |
-| Looper      | Git             | os/exec.Cmd, stdin/stdout/stderr | Commit completed task's changes            | Shell commands (git add -A, git commit -m); output shown, not parsed |
-| TUI         | RunLog          | `observe` hook (`Record`)        | Hand each event to the log before the view | `looper.Event`     |
-| RunLog      | Filesystem      | os.Mkdir, os.OpenFile, appends   | Write the ledger and detail files          | JSON lines (`run.jsonl`); text (`task-<id>.log`) |
-| Looper      | ProcessManager  | Setpgid, kill(-pgid)             | Configure and control subprocess lifecycle | Unix signals       |
+| From        | To              | Protocol                         | Purpose                                        | Data Format                                                                                               |
+| ----------- | --------------- | -------------------------------- | ---------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| CLI         | Looper          | Direct function call             | Plain start or dry-run; load paths for the TUI | Go function args                                                                                          |
+| CLI         | TUI             | Direct function call             | Setup screen and run view                      | Go function args                                                                                          |
+| TUI         | Looper          | `Run` with `report` hook         | Run the loop, receive progress                 | `looper.Event`                                                                                            |
+| Looper      | Filesystem      | os.ReadFile, os.WriteFile        | Load inputs, persist state                     | Text files (YAML); the sandbox settings file (JSON, read only)                                            |
+| Looper      | TaskParser      | ParseTasks, SaveTasks functions  | Parse and serialize task lists                 | YAML bytes                                                                                                |
+| Looper      | Claude          | os/exec.Cmd, stdin/stdout/stderr | Invoke Claude session                          | Text (prompt)                                                                                             |
+| Claude      | Looper          | stdout, exit code                | Return output and completion status            | Plain: text ending in a JSON result line; TUI: stream-json events, the `result` event's text ending in it |
+| Looper      | Gate commands   | os/exec.Cmd (`sh -c`), exit code | Check a completed task independently           | Shell command text; output shown, not parsed                                                              |
+| Looper      | Git             | os/exec.Cmd, stdin/stdout/stderr | Commit completed task's changes                | Shell commands (git add -A, git commit -m); output shown, not parsed                                      |
+| TUI         | RunLog          | `observe` hook (`Record`)        | Hand each event to the log before the view     | `looper.Event`                                                                                            |
+| RunLog      | Filesystem      | os.Mkdir, os.OpenFile, appends   | Write the ledger and detail files              | JSON lines (`run.jsonl`); text (`task-<id>.log`)                                                          |
+| Looper      | ProcessManager  | Setpgid, kill(-pgid)             | Configure and control subprocess lifecycle     | Unix signals                                                                                              |
 
 ## Boundary Definitions
 
@@ -434,16 +444,16 @@ graph LR
 
 **Boundary Rules:**
 
-| Boundary                              | What Crosses        | Rules                                                      |
-| ------------------------------------- | ------------------- | ---------------------------------------------------------- |
-| Gralph → Filesystem (read)            | Prompt, task files  | Files must be readable; content is not sanitized           |
-| Gralph → Filesystem (read)            | Sandbox settings file | Read once at startup, never written; must be a JSON object; three sandbox keys forced, the rest passed through |
-| Gralph ← Filesystem (write)           | Task state          | Atomic writes; temp-file + rename ensures consistency      |
-| Gralph ← Filesystem (write)           | Run log (`--log-dir`) | Written only when asked, only in the TUI; a new folder per run, `0700`, files `0600`; holds what sessions, gates, and git printed; with `--commit`, must be git-ignored or outside the work tree; never read back, rotated, or deleted |
-| Gralph → Claude (subprocess)          | Combined prompt     | Passed on stdin; argv is `--print`, then `--output-format stream-json --verbose` in the TUI, then the session flags: `--permission-mode acceptEdits --settings <merged JSON>` (`--sandbox-settings`) or `--dangerously-skip-permissions` (`--skip-permissions`) |
-| Gralph → Gate command (subprocess)    | `cmd` text from tasks.yaml | Run as `sh -c <cmd>` in gralph's working directory, unsandboxed; only the exit code is used |
-| Gralph → Git (subprocess)             | `add -A` and `commit -m <task name>` | Run from the work tree root with no path list (the task file is git-ignored or outside the tree), unsandboxed, with repository hooks running; only the exit code is used; gralph never pushes, resets, stashes, or bypasses hooks |
-| Claude → Gralph (subprocess output)   | Stdout, stderr, exit code | Parsed for JSON result line; plain mode passes all other output through, the TUI shows it as activity only |
+| Boundary                              | What Crosses                         | Rules                                                                                                                                                                                                                                                           |
+| ------------------------------------- | ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Gralph → Filesystem (read)            | Prompt, task files                   | Files must be readable; content is not sanitized                                                                                                                                                                                                                |
+| Gralph → Filesystem (read)            | Sandbox settings file                | Read once at startup, never written; must be a JSON object; three sandbox keys forced, the rest passed through                                                                                                                                                  |
+| Gralph ← Filesystem (write)           | Task state                           | Atomic writes; temp-file + rename ensures consistency                                                                                                                                                                                                           |
+| Gralph ← Filesystem (write)           | Run log (`--log-dir`)                | Written only when asked, only in the TUI; a new folder per run, `0700`, files `0600`; holds what sessions, gates, and git printed; with `--commit`, must be git-ignored or outside the work tree; never read back, rotated, or deleted                          |
+| Gralph → Claude (subprocess)          | Combined prompt                      | Passed on stdin; argv is `--print`, then `--output-format stream-json --verbose` in the TUI, then the session flags: `--permission-mode acceptEdits --settings <merged JSON>` (`--sandbox-settings`) or `--dangerously-skip-permissions` (`--skip-permissions`) |
+| Gralph → Gate command (subprocess)    | `cmd` text from tasks.yaml           | Run as `sh -c <cmd>` in gralph's working directory, unsandboxed; only the exit code is used                                                                                                                                                                     |
+| Gralph → Git (subprocess)             | `add -A` and `commit -m <task name>` | Run from the work tree root with no path list (the task file is git-ignored or outside the tree), unsandboxed, with repository hooks running; only the exit code is used; gralph never pushes, resets, stashes, or bypasses hooks                               |
+| Claude → Gralph (subprocess output)   | Stdout, stderr, exit code            | Parsed for JSON result line; plain mode passes all other output through, the TUI shows it as activity only                                                                                                                                                      |
 
 ### Process Boundary: Gralph Process Group
 
@@ -472,5 +482,3 @@ graph TB
 - Git commits are the exception: the group is sent SIGTERM first, checked and waited up to 2 seconds, then SIGKILL only if still alive, so git can remove its `index.lock` lock file gracefully
 - In the TUI the terminal is raw, so a keyboard Ctrl-C is a key, not a signal: `q` or ctrl+c opens a `[y/N]` confirm, and only `y` cancels the run ("Run stopped by user"). An outside SIGINT/SIGTERM cancels at once with no confirm ("Run stopped by signal"). Either stop kills the process group, shows the running task as `pending`, leaves the file untouched, and exits 1
 - This ensures no orphaned claude processes if gralph is killed unexpectedly
-
-**Next:** [Deployment Architecture](05_deployment_architecture.md)

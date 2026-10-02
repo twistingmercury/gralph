@@ -1,8 +1,8 @@
 # Gralph — Requirements
 
-> **Version**: v10
-> **Date**: 2026-10-01
-> **Notes**: Added run logging on request (`--log-dir`, ADR-016): problem statement, secondary goal, non-goals, and success criterion.
+> **Version**: v11
+> **Date**: 2026-10-02
+> **Notes**: A `windows/amd64` binary can be built by hand but is untested and not released (ADR-007 amendment); Windows stays out of scope beyond that.
 
 [Back to Overview](00_overview.md) | [Back to Project README](../../README.md)
 
@@ -19,6 +19,7 @@
 Complex software tasks often require a sequence of steps that depend on prior work. When orchestrating AI-assisted workflows, executing each step in a fresh session (with no context from prior steps) ensures determinism but requires careful prompt engineering and state tracking.
 
 Claude Code users need a way to:
+
 - Define a sequence of related tasks
 - Run each in a fresh Claude session with a shared prompt
 - Track which tasks completed, which failed
@@ -56,7 +57,7 @@ Claude Code users need a way to:
 - Automatic retry or fallback logic; users must fix failed tasks and reset state manually
 - Multi-session context sharing (each task is independent)
 - Agent abstraction layer; Claude Code is the only runtime
-- Windows support
+- Windows support beyond an untested, build-it-yourself `windows/amd64` binary
 - Configuration files or environment variable override of task/prompt paths
 - A TUI for `--dry-run`; it always prints plain text
 - Writing the TUI's `in progress` state to tasks.yaml
@@ -72,27 +73,27 @@ Claude Code users need a way to:
 
 ## Success Criteria
 
-| Criterion                               | Target                                 | Measurement Method                              |
-| --------------------------------------- | -------------------------------------- | ----------------------------------------------- |
-| Task file validation                    | Whole file rejected on any invalid     | Unit tests and e2e tests verify rejection       |
-| State persistence                       | Atomic writes, no partial state       | E2E tests verify file state after each run      |
-| Failed task blocking                    | Gralph refuses to run with any failed | E2E test attempts run with failed task, expect exit 1 |
-| Dry-run accuracy                        | Task summary table matches actual run | Dry-run e2e tests compare output format         |
-| Gate enforcement                        | Completed only when every gate exits zero; gates skipped when the session failed | Unit and e2e tests run real shell commands as passing and failing gates |
-| Session permissions                     | Sandboxed argv with the three forced keys, or the bypass flag; neither or both flags exits 1 | Unit tests on the merged settings; e2e tests assert the recorded argv and the flag errors |
-| Session independence                    | Each task has only its prompt + task  | Golden test asserts combined-prompt format      |
-| Exit code correctness                   | Zero only when all tasks complete     | E2E test matrix covers pass/fail/cancel cases   |
-| Signal handling                         | SIGINT/SIGTERM kills claude group    | Process tree test verifies Setpgid and signal   |
-| Commit on request                       | One commit per completed task, named after it; none for a failed task; a dirty tree refuses to start | Unit and e2e tests run real git in temporary repositories |
-| Run logging on request                  | With `--log-dir`, one folder per run holding the ledger and a detail file per task; nothing written without it; plain mode with the flag exits 1 | Unit tests feed events to `internal/runlog` and assert the files; e2e tests pin the plain-mode refusal and that `--dry-run` ignores the flag |
-| Unix-only behavior                      | No Windows build, no runtime fallback | Build pipeline has no Windows target            |
+| Criterion              | Target                                                                                                                                           | Measurement Method                                                                                                                           |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| Task file validation   | Whole file rejected on any invalid                                                                                                               | Unit tests and e2e tests verify rejection                                                                                                    |
+| State persistence      | Atomic writes, no partial state                                                                                                                  | E2E tests verify file state after each run                                                                                                   |
+| Failed task blocking   | Gralph refuses to run with any failed                                                                                                            | E2E test attempts run with failed task, expect exit 1                                                                                        |
+| Dry-run accuracy       | Task summary table matches actual run                                                                                                            | Dry-run e2e tests compare output format                                                                                                      |
+| Gate enforcement       | Completed only when every gate exits zero; gates skipped when the session failed                                                                 | Unit and e2e tests run real shell commands as passing and failing gates                                                                      |
+| Session permissions    | Sandboxed argv with the three forced keys, or the bypass flag; neither or both flags exits 1                                                     | Unit tests on the merged settings; e2e tests assert the recorded argv and the flag errors                                                    |
+| Session independence   | Each task has only its prompt + task                                                                                                             | Golden test asserts combined-prompt format                                                                                                   |
+| Exit code correctness  | Zero only when all tasks complete                                                                                                                | E2E test matrix covers pass/fail/cancel cases                                                                                                |
+| Signal handling        | SIGINT/SIGTERM kills claude group                                                                                                                | Process tree test verifies Setpgid and signal                                                                                                |
+| Commit on request      | One commit per completed task, named after it; none for a failed task; a dirty tree refuses to start                                             | Unit and e2e tests run real git in temporary repositories                                                                                    |
+| Run logging on request | With `--log-dir`, one folder per run holding the ledger and a detail file per task; nothing written without it; plain mode with the flag exits 1 | Unit tests feed events to `internal/runlog` and assert the files; e2e tests pin the plain-mode refusal and that `--dry-run` ignores the flag |
+| Unix-only behavior     | No Windows release; no `runtime.GOOS` branches                                                                                                   | The Windows build line in `build/Dockerfile` is commented out                                                                                |
 
 ## Constraints
 
 ### Technical Constraints
 
 - **Go 1.27.1 or later** — Project uses modern Go features (range over int, etc.)
-- **Unix process API** — Depends on Setpgid and process groups; Windows not supported
+- **Unix process API** — Depends on Setpgid and process groups; the Windows build replaces them with no-ops and is untested
 - **Single-file YAML task input** — No migration from other formats; tasks.yaml must be valid on the first parse
 - **No injectable runner** — Both test suites use a fake `claude` on PATH to drive the looper; runLoop execs inline
 - **Prompt passed via stdin** — Claude is invoked as `claude --print` plus the session flags, with the prompt on stdin: `--permission-mode acceptEdits --settings <merged JSON>` for `--sandbox-settings`, or `--dangerously-skip-permissions` for `--skip-permissions`. The TUI path adds `--output-format stream-json --verbose` right after `--print`; plain mode's output stays as it is

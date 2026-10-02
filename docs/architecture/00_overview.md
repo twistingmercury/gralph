@@ -1,8 +1,8 @@
 # Gralph — Architecture Overview
 
-> **Version**: v09
-> **Date**: 2026-10-01
-> **Notes**: Added run logging on request (`--log-dir`, ADR-016): the Run Log Writer component and a note on the full-screen view.
+> **Version**: v11
+> **Date**: 2026-10-02
+> **Notes**: Unix only became built for Unix: a `windows/amd64` binary can be built by hand but is untested and not released (ADR-007 amendment).
 
 [Back to Project README](../../README.md)
 
@@ -18,7 +18,7 @@
 
 Gralph is a Go CLI that automates "Ralph loops": structured, multi-step AI workflows where a shared prompt is combined with sequential tasks and executed in fresh Claude sessions. Each task runs independently, with state tracked atomically in a YAML file. A failed task blocks the run until manually addressed, ensuring intentional intervention.
 
-Gralph was built specifically for Claude Code (`claude.ai/code`); an agent-agnostic runtime was prototyped and rolled back. The CLI is Unix-only and designed for use by developers and automation scripts.
+Gralph was built specifically for Claude Code (`claude.ai/code`); an agent-agnostic runtime was prototyped and rolled back. The CLI is built for Unix and designed for use by developers and automation scripts.
 
 ## Core Concept
 
@@ -48,18 +48,18 @@ graph TB
 
 ## System Model
 
-| Component          | Description                                                                         |
-| ------------------ | ----------------------------------------------------------------------------------- |
-| CLI Entrypoint     | Parses flags, picks plain or TUI mode, routes to Start/DryRun or the TUI            |
-| Terminal UI        | Setup screen for missing paths; run view fed live by looper events (`internal/tui`) |
+| Component          | Description                                                                                                                                   |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| CLI Entrypoint     | Parses flags, picks plain or TUI mode, routes to Start/DryRun or the TUI                                                                      |
+| Terminal UI        | Setup screen for missing paths; run view fed live by looper events (`internal/tui`)                                                           |
 | Looper             | Orchestrates the loop: loads files, checks preconditions, runs tasks sequentially; plain or stream-json task path chosen by the `report` hook |
-| Task Parser        | Strict YAML validation: rejects any invalid element, whole file fails at parse time |
-| Process Manager    | Spawns claude subprocess in its own process group; kills group on SIGINT/SIGTERM   |
-| State Persistence  | Atomic task state writes via temp-file + rename; YAML rewritten on every change    |
-| Result Interpreter | Parses JSON result line from claude output; missing/invalid line = failed          |
-| Gate Runner        | After a `completed` session, runs the task's `gates` commands with `sh -c`; any non-zero exit = failed |
-| Committer          | With `--commit`, commits a completed task's changes after its gates; requires a clean work tree at startup |
-| Run Log Writer     | With `--log-dir` (TUI only), writes a JSON-lines ledger and a detail file per task from the looper's events (`internal/runlog`) |
+| Task Parser        | Strict YAML validation: rejects any invalid element, whole file fails at parse time                                                           |
+| Process Manager    | Spawns claude subprocess in its own process group; kills group on SIGINT/SIGTERM                                                              |
+| State Persistence  | Atomic task state writes via temp-file + rename; YAML rewritten on every change                                                               |
+| Result Interpreter | Parses JSON result line from claude output; missing/invalid line = failed                                                                     |
+| Gate Runner        | After a `completed` session, runs the task's `gates` commands with `sh -c`; any non-zero exit = failed                                        |
+| Committer          | With `--commit`, commits a completed task's changes after its gates; requires a clean work tree at startup                                    |
+| Run Log Writer     | With `--log-dir` (TUI only), writes a JSON-lines ledger and a detail file per task from the looper's events (`internal/runlog`)               |
 
 ## Key Principles
 
@@ -70,7 +70,7 @@ graph TB
 5. **Outcome from JSON, not exit code** — Result determined by parsing the final non-blank JSON line; missing/invalid line is always failed, never a fallback to exit code.
 6. **Gates confirm a completed task** — A session's `completed` is then checked by gralph itself: the task's `gates` commands run in order and every one must exit zero. Claude is never sent the gates.
 7. **Failed task blocks** — A failed task must be manually reset (state changed to pending or completed) before the next run. Gralph refuses to start with any failed task present.
-8. **Unix only** — Linux, macOS, BSDs. Windows support was removed deliberately and will not be reintroduced.
+8. **Built for Unix** — Linux, macOS, BSDs. There is no Windows release; a `windows/amd64` binary can be built by hand, but it has never been run or tested (ADR-007).
 9. **Sandboxed unless asked otherwise by name** — A run must pass `--sandbox-settings <path>` (sessions run in Claude Code's sandbox) or `--skip-permissions` (no sandbox, the user's responsibility). There is no default and no fallback to an unsandboxed run.
 10. **Gralph commits, not the session** — With `--commit`, a commit is made only after the gates pass; a failed task is never committed.
 11. **Plain mode intact** — The full-screen TUI is the default in a terminal, but plain mode (`--no-tui` or no terminal) keeps the same argv, output, and exit codes. One loop serves both, through a `report` hook.
@@ -80,10 +80,9 @@ graph TB
 
 | #   | Document                                                    | Description                           | Status  |
 | --- | ----------------------------------------------------------- | ------------------------------------- | ------- |
-| 00  | [Overview](00_overview.md)                              | This document                         | Current |
-| 01  | [Requirements](01_requirements.md)                      | Problem statement, goals, constraints | Active  |
-| 02  | [Architectural Decisions](02_architectural_decisions.md) | ADR log                               | Active  |
-| 03  | [System Architecture](03_system_architecture.md)        | Components, data flow, boundaries     | Active  |
-| 05  | [Deployment Architecture](05_deployment_architecture.md) | Deployment, infrastructure, scaling   | Active  |
+| 00  | [Overview](00_overview.md)                                  | This document                         | Current |
+| 01  | [Requirements](01_requirements.md)                          | Problem statement, goals, constraints | Active  |
+| 02  | [Architectural Decisions](02_architectural_decisions.md)    | ADR log                               | Active  |
+| 03  | [System Architecture](03_system_architecture.md)            | Components, data flow, boundaries     | Active  |
 
 **Next:** [Requirements](01_requirements.md)

@@ -27,6 +27,9 @@ RUN CGO_ENABLED=0 GOARCH=amd64 GOOS=darwin go build --ldflags "${LD_FLAGS}" -o /
 RUN CGO_ENABLED=0 GOARCH=arm64 GOOS=darwin go build --ldflags "${LD_FLAGS}" -o /.bin/arm64/darwin/gralph ./cmd/main
 RUN CGO_ENABLED=0 GOARCH=amd64 GOOS=linux go build --ldflags "${LD_FLAGS}" -o /.bin/amd64/linux/gralph ./cmd/main
 RUN CGO_ENABLED=0 GOARCH=arm64 GOOS=linux go build --ldflags "${LD_FLAGS}" -o /.bin/arm64/linux/gralph ./cmd/main
+# Windows is not part of the release: the binary compiles but has never been run
+# or tested (ADR-007). Uncomment to build it yourself.
+# RUN CGO_ENABLED=0 GOARCH=amd64 GOOS=windows go build --ldflags "${LD_FLAGS}" -o /.bin/amd64/windows/gralph.exe ./cmd/main
 
 
 #---------------------------------------------------------------------
