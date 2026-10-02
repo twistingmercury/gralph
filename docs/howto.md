@@ -112,8 +112,13 @@ gralph --install-skill
 ```
 
 That unpacks only `gralph`, straight into `~/.local/bin`. This guide and the
-license are in the archive too, if you want a copy: `tar -xzf` the archive
-with `howto.md LICENSE` on the end in place of `gralph`.
+license are in the archive too. If you want a copy, unpack them into a folder
+of their own:
+
+```bash
+mkdir -p ~/.local/share/gralph
+tar -xzf "gralph_${VERSION}_${OS}_${ARCH}.tar.gz" -C ~/.local/share/gralph howto.md LICENSE
+```
 
 If `gralph --version` says "command not found", `~/.local/bin` isn't on your
 `PATH`. Add it with the line for your shell, then open a new terminal:

@@ -193,21 +193,59 @@ write_checksums() {
     return 0
 }
 
-# Only this script's own files are removed, so a wrong DIST_DIR cannot cost
-# anything else. This runs last, once every new file is known to exist.
+# Removes one archive left by an earlier version; the current version's files
+# were just moved in and stay.
+remove_if_other_version() {
+    local archive="${1}"
+    local archive_name="${archive##*/}"
+
+    # An unmatched glob arrives as the literal pattern, which is not a file.
+    if [ ! -f "${archive}" ]; then
+        return 0
+    fi
+
+    case "${archive_name}" in
+        gralph_"${BUILD_VER}"_*)
+            return 0
+            ;;
+    esac
+
+    if ! rm -f "${archive}"; then
+        printf "ERROR: could not remove old archive %s\n" "${archive}" >&2
+        return 1
+    fi
+
+    return 0
+}
+
+# Only this script's own archives are removed, so a wrong DIST_DIR cannot cost
+# anything else.
+remove_other_versions() {
+    local archive
+
+    for archive in "${DIST_DIR}"/gralph_*.tar.gz; do
+        if ! remove_if_other_version "${archive}"; then
+            return 1
+        fi
+    done
+
+    return 0
+}
+
+# Old files go last, once the new ones are in place, so a failed move (a full
+# disk, say) loses nothing. A file with the same name is replaced by the move.
 publish() {
     if ! mkdir -p "${DIST_DIR}"; then
         printf "ERROR: could not create %s\n" "${DIST_DIR}" >&2
         return 1
     fi
 
-    if ! rm -f "${DIST_DIR}"/gralph_*.tar.gz "${DIST_DIR}/checksums.txt"; then
-        printf "ERROR: could not remove old files from %s\n" "${DIST_DIR}" >&2
+    if ! mv "${STAGE_OUT_DIR}"/gralph_*.tar.gz "${STAGE_OUT_DIR}/checksums.txt" "${DIST_DIR}/"; then
+        printf "ERROR: could not move the new files into %s\n" "${DIST_DIR}" >&2
         return 1
     fi
 
-    if ! mv "${STAGE_OUT_DIR}"/gralph_*.tar.gz "${STAGE_OUT_DIR}/checksums.txt" "${DIST_DIR}/"; then
-        printf "ERROR: could not move the new files into %s\n" "${DIST_DIR}" >&2
+    if ! remove_other_versions; then
         return 1
     fi
 
