@@ -81,9 +81,16 @@ in place when authorized.
    full-screen view.
 6. Put scope, steps, the project's own checks (tests, linters, the build),
    task-specific verification, and completion criteria inside each task's
-   prompt. Preserve project-specific instructions. YAML comments are not durable task instructions: they never
-   reach the session. Gralph rewrites the task file with every state change,
-   so comments and custom formatting are not preserved.
+   prompt. Preserve project-specific instructions. YAML comments are not
+   durable task instructions: they never reach the session. Gralph rewrites
+   the task file with every state change, so comments and custom formatting
+   are not preserved. Every verification command must be one the session can
+   run. The session runs under Claude Code's permissions and, with
+   `--sandbox-settings`, inside its sandbox: a command that sets a variable
+   inline (`VAR=value cmd`) can be refused, and Docker, other users' files,
+   and hosts outside the sandbox's network list are out of reach. Give the
+   session an equivalent it can run. A check it cannot run belongs only in the
+   run's gates, which Gralph runs itself; tell the user to add it there.
 7. Write `prompt.md` from the prompt template. Replace every `GENERATE_*` token
    with project content and actual paths: full build/test commands and the
    project's commit policy, since the session sees only this prompt and one
@@ -123,6 +130,13 @@ Split a larger change into a sequence of such steps, each passing the project's
 own checks on its own. When one step would break those checks until another
 lands, put the prerequisite step first (for example, update test fixtures
 before the change that needs them).
+
+Check each task against every check the run will apply, not only its own
+tests: the project's own checks and any gates the user sets for the run. A
+task can be complete and tested and still fail one because of where it sits in
+the sequence: code that nothing calls until a later task fails an unused-code
+linter, and a fixture change can break a suite another task fixes. Reorder or
+merge tasks so each one leaves every check passing.
 
 Honor project policies for source commits unless the run uses `--commit`, where
 Gralph does the committing, and never instruct the session to edit or commit
