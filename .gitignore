@@ -29,6 +29,7 @@ code-reviews/
 scratch.md
 *.backup
 *.pdf
+.superpowers/
 
 # Secrets and environment
 *.env
