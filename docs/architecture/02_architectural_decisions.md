@@ -1,8 +1,8 @@
 # Gralph — Architectural Decisions
 
-> **Version**: v15
+> **Version**: v16
 > **Date**: 2026-10-02
-> **Notes**: ADR-017 added: release archives on a GitHub release, built by a workflow that is started by hand.
+> **Notes**: ADR-018 (a run folder and a setup wizard) and ADR-019 (one gate list per task file) proposed, with their build order.
 
 [Back to Overview](00_overview.md) | [Back to Project README](../../README.md)
 
@@ -17,7 +17,7 @@
 Each architectural decision is recorded as an ADR with the following structure:
 
 - **Title**: Short descriptive name for the decision
-- **Status**: Accepted
+- **Status**: Proposed (designed, not built) or Accepted
 - **Context**: The situation, forces at play, and why a decision is needed
 - **Decision**: What was decided and the rationale
 - **Consequences**: Both positive outcomes and trade-offs accepted
@@ -43,6 +43,8 @@ Each architectural decision is recorded as an ADR with the following structure:
 | ADR-015 | Gralph commits a completed task on request                    | Accepted | 2026-09-30 |
 | ADR-016 | Gralph logs a run on request                                  | Accepted | 2026-10-01 |
 | ADR-017 | Release archives, built by a workflow started by hand         | Accepted | 2026-10-02 |
+| ADR-018 | A run folder and a setup wizard                               | Proposed | 2026-10-02 |
+| ADR-019 | One gate list per task file                                   | Proposed | 2026-10-02 |
 
 ## Decisions
 
@@ -731,6 +733,121 @@ _Negative:_
 - The binaries are not signed; `checksums.txt` comes from the same release, so it catches a damaged download, not a tampered release
 - The tests for `build/package.sh` (BATS, in `tests/bats/`, with `bats-support` and `bats-assert` vendored beside them) are not run by CI (`build/build.sh` has no place for them); they are run by hand with `bats tests/bats`
 - No package manager knows about gralph; upgrading means downloading again
+
+---
+
+### ADR-018: A run folder and a setup wizard
+
+**Status:** Proposed
+
+**Context:**
+
+A full run names every input on the command line: `gralph -p .local/feat/prompt.md -t .local/feat/tasks.yaml --sandbox-settings ~/sandbox.json --commit --log-dir .local/feat/logs --gate-timeout 5m`. Most of it repeats from run to run, and the two files almost always sit together in one folder, under the names the gralph-docs-writer skill gives them. The full-screen view's setup screen (ADR-011) asks only for a missing `--tasks` or `--prompt` path, typed by hand, and a missing permission flag (ADR-014) is still an error. A user who starts `gralph` with no arguments cannot get to a run without knowing the flags.
+
+**Decision:**
+
+Two additions: a `-d/--dir` flag that names a run folder, and a setup wizard in the full-screen view that asks for whatever the flags and the task file leave open, then shows a review screen before the run starts.
+
+- **The run folder.** `-d/--dir <folder>` means `<folder>/tasks.yaml` and `<folder>/prompt.md`. The names are fixed; `-t` and `-p` override either file, so `-d foo -t foo/tasks-v2.yaml` works and every command line that works today keeps working. A file the folder lacks and no flag supplies is an error in plain mode, `--dir: no tasks.yaml in <folder>` (or `prompt.md`), exit 1. In plain mode `-d` is shorthand for `-t`/`-p` and changes nothing else. `-d` is resolved into the two paths before any other startup check, so the fixed order after it (`--gate-timeout`, plain mode's required flags, `--log-dir`, the session flags, the skill check) is unchanged.
+- **Logs in the folder.** With a folder, saying yes to logging in the wizard means `--log-dir <folder>/logs`. An explicit `--log-dir` wins. This is an opt-in made in the wizard, not a default: with no wizard answer and no flag, nothing is logged, and plain mode still refuses `--log-dir` (ADR-016).
+- **When the wizard opens.** Full-screen mode only, and only when at least one step below is still open. When flags and the task file answer everything, there is no wizard and no review screen; the run starts as it does today. Plain mode never opens it; a missing input there is an error, as today. The wizard replaces the setup screen.
+- **The steps, in order, each hidden when something already answers it:**
+
+  | Step         | Asks                                                                    | Hidden when                                                   |
+  | ------------ | ----------------------------------------------------------------------- | ------------------------------------------------------------- |
+  | Folder       | A folder, browsed with a picker; a lone missing file gets a file picker | `-d`, or both `-t` and `-p`                                   |
+  | Permissions  | Sandbox or skip permissions, nothing pre-selected; sandbox picks a JSON | `--sandbox-settings` or `--skip-permissions`                  |
+  | Commit       | Yes or no                                                               | `--commit`                                                    |
+  | Logging      | Yes or no; yes means `<folder>/logs`                                    | `--log-dir`, or no folder                                     |
+  | Gate timeout | "Default (each gate's own timeout, else 10m)", pre-selected, or a value | `--gate-timeout`                                              |
+  | Gates        | The file's shared gate list (ADR-019): add, edit, delete                | The task file has a top-level `gates:` key, even an empty one |
+
+  `--dry-run` shows only the folder and file steps.
+- **Pickers.** The folder picker starts in the current directory and shows hidden entries, because run folders usually live under `.local/`. It selects folders only. The sandbox picker selects `.json` files.
+- **Checked where they are asked.** Each step validates its answer with the same functions a run uses and keeps the user on the step with the error shown: the folder step loads both files (a missing file, a parse error, or a `failed` task, the last pointing at `gralph -d <folder> --dry-run` for the table); the sandbox picker loads the settings file; the logging step refuses yes when a repository is open and `<folder>/logs` is inside its work tree but not ignored by git (ADR-015, ADR-016); the timeout step parses the value with `time.ParseDuration` and requires it greater than zero.
+- **One source of truth.** The wizard's answers fill the same values the flags fill. After it closes, the existing startup checks run unchanged on those values; they never assume the wizard checked anything.
+- **The review screen.** Lists every choice, the gates (or "no gates"), and the command line that reproduces the run, such as `gralph -d .local/foo --sandbox-settings ~/sb.json --commit`. Gates are not on the command line; they are in the file. The choices are Start, Edit gates (back to the gates step), and Cancel.
+- **Nothing is written before Start.** On Start, if the gates were edited, gralph saves the task file with the new `gates:` list, and the run begins. Esc or ctrl+c anywhere prints `error: setup cancelled` and exits 1 with nothing written, as the setup screen does today.
+- **Built with huh.** The wizard is a `charm.land/huh/v2` form inside `internal/tui`: `FilePicker` (with `DirAllowed`, `FileAllowed`, `ShowHidden`, `AllowedTypes`, `Validate`), `Select`, `Confirm`, `Input`, and `Note`, with groups hidden per run by `WithHideFunc`. huh v2 is built on the Bubble Tea v2 modules gralph already uses. It has no list editor, so the gates step is a short loop of small huh forms (add, edit, delete, done; each gate a command and an optional timeout). Which steps are open is a plain function of the flags and the task file, and the reproducing command line is a plain function of the answers, so both are tested without a terminal.
+
+**Changes to earlier ADRs on acceptance:** ADR-011's setup screen becomes this wizard. ADR-012 adds `charm.land/huh/v2` to the TUI's modules, still imported only by `internal/tui`. ADR-014 notes that the wizard asks for the permission choice with nothing pre-selected, so there is still no default. ADR-016 notes that `<folder>/logs` is used only when the user says yes in the wizard.
+
+Alternatives not taken: looking for any `*.md` and `*.yaml` pair in the folder (unpredictable, and needs an ambiguity prompt); a bare positional folder argument (every other input is a flag); the wizard only on a bare `gralph` (a single flag would throw away all its help); the wizard on every run, with flags only pre-filling it (second-guesses what the user typed); a remembered settings file (a stored default for the permission choice, against ADR-014); a hand-built multi-step model on `textinput` and `bubbles/filepicker` (more code for the same screens); a new `internal/wizard` package (a second package and import edge for what is the setup screen grown up).
+
+**Consequences:**
+
+_Positive:_
+
+- `gralph` with no arguments walks a user from nothing to a running loop, without knowing the flags
+- `gralph -d .local/feat --sandbox-settings ~/sb.json` replaces the two file paths
+- The review screen teaches the flags: its command line can be copied to skip the wizard next time
+- Every existing command line, and plain mode, behaves as before
+
+_Negative:_
+
+- A new third-party dependency to track and scan
+- A boolean flag cannot say "no", so a run without `--commit` shows the commit step every time the wizard opens for anything else
+- The wizard has no e2e coverage (the suite has no terminal); it is covered by unit tests and checked by hand under a pty
+- Fixed names mean a folder holding two task files still needs `-t`
+
+---
+
+### ADR-019: One gate list per task file
+
+**Status:** Proposed
+
+**Context:**
+
+Under ADR-013 each task carries its own `gates`. In practice the gralph-docs-writer skill interviews the user once about quality gates and copies the same list into every task, so the check that decides whether a task is done is written by a language model, once per task, and can drift between tasks. ADR-013 left room for a file-level list. The setup wizard (ADR-018) needs one place to show and edit the gates for a run.
+
+**Decision:**
+
+Gates move from each task to one top-level list in the task file, and per-task gates are removed. The wizard owns the list; the skill stops writing gates.
+
+- **Format.** A top-level `gates:` sequence next to `tasks:`. Each entry keeps ADR-013's shape and validation: `cmd` required and nonblank, `timeout` optional with a unit and greater than zero, any other key an error. Errors name the list as `gates[<j>]: ...`, in the existing style.
+
+  ```yaml
+  gates:
+    - cmd: make test
+      timeout: 10m
+    - cmd: test -z "$(gofmt -l .)"
+  tasks:
+    - id: 1
+      ...
+  ```
+
+- **Absent and empty differ.** No `gates:` key means not decided yet, and the wizard's gates step opens. `gates: []` means decided: no gates. `SaveTasks` keeps whichever the file had: an absent key stays absent, an empty list is written as `gates: []`. Zero gates is a valid run.
+- **Per-task gates are an error.** A `gates` key on a task fails parsing with `tasks[<i>] (id <id>): gates: gates are set once for the whole file now, as a top-level gates: list; see the HOWTO`, so `--dry-run`, the wizard's folder step, and a run all report it. Other unknown task keys are still ignored and dropped on save. Dropping per-task gates quietly would leave an old file running with no checks at all.
+- **Running them.** After every session that reports `completed` (ADR-005), gralph runs the file's gates in order, with ADR-013's rules unchanged: the timeout order (`--gate-timeout`, then the gate's `timeout`, then 10m), the first failure fails the task, the same error text, output, process handling, and cancel behaviour, and the same events and log record. `--dry-run` lists the gates once, `gate: <first line of cmd>: <timeout> (flag|gate|default)`, instead of once per task.
+- **The skill.** gralph-docs-writer drops its gate interview and every mention of `gates`, and never writes a `gates:` key, so a freshly generated file opens the wizard's gates step on its first run. The prompt template gains a generic instruction to run the project's own checks (tests, linters, the build) before reporting `completed`. The stale-skill check (ADR-010) makes anyone with the old skill reinstall it.
+- **The wire contract is unchanged.** Gates are still never sent to Claude.
+
+**Changes to earlier ADRs on acceptance:** ADR-013 is amended: its "Per-task only" rule, its example, its dry-run line, and its skill paragraph give way to this ADR; the rest of its rules apply to the file's list.
+
+Alternatives not taken: keeping per-task gates beside the shared list (two places to look for one check, and the skill only ever wrote one list); the skill writing the shared list and the wizard only reviewing it (keeps a model-written check as the default); sending the gates to Claude so the session knows what it will be checked against (breaks the wire contract and puts gralph knowledge in the session); a separate `gates.yaml` in the run folder (a second file to load, and a `--gates` flag for runs without a folder); gates held only in the wizard for one run (not repeatable).
+
+**Consequences:**
+
+_Positive:_
+
+- One list, written by a person, decides whether every task is done
+- The wizard has a single place to show and edit the run's checks
+- The skill and the task format get simpler
+
+_Negative:_
+
+- A breaking change to the task file: files with per-task gates must be edited by hand before they run again
+- A check that only one task needs can no longer be a gate; it lives in that task's prompt, as Claude's self-check
+- Sessions are told only to run the project's checks, not which commands gralph will run, so more sessions report `completed` and then fail a gate
+- Editing the gates in the wizard rewrites the task file, which already loses comments and custom formatting on every save (ADR-004)
+
+---
+
+### Build order and future work for ADR-018 and ADR-019
+
+ADR-019 goes first: the wizard's gates step needs the top-level list. Then `-d`, then the wizard. The breaking task-file change suggests v0.10.0; the owner picks the version at release.
+
+A later change may fold the shared prompt into `tasks.yaml`. The run folder survives it: `-d` would then name a folder holding `tasks.yaml` and `logs/`, and the wizard still starts by picking it. Nothing in either ADR depends on there being two files.
 
 ---
 
