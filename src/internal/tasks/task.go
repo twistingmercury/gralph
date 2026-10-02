@@ -20,7 +20,7 @@ const (
 
 const durationHint = "must be a duration string such as 90s or 10m"
 
-// Gate is one command gralph runs itself after a task's session reports
+// Gate is one command gralph runs itself after each task's session reports
 // completed. It is never sent to the session.
 type Gate struct {
 	Cmd     string `yaml:"cmd"`
@@ -33,11 +33,23 @@ type Task struct {
 	Prompt string `yaml:"prompt"`
 	State  string `yaml:"state"`
 	Error  string `yaml:"error,omitempty"`
-	Gates  []Gate `yaml:"gates,omitempty"`
 }
 
+// TaskList is a whole task file. Gates is a pointer so a save can tell a file
+// with no gates key (not decided yet; the wizard asks) from gates: [] (decided:
+// none). It comes first so the list is written above the tasks.
 type TaskList struct {
-	Tasks []Task `yaml:"tasks"`
+	Gates *[]Gate `yaml:"gates,omitempty"`
+	Tasks []Task  `yaml:"tasks"`
+}
+
+// GateList is the file's gates, empty when the key is absent.
+func (tl TaskList) GateList() []Gate {
+	if tl.Gates == nil {
+		return nil
+	}
+
+	return *tl.Gates
 }
 
 func (t Task) String() string {
@@ -64,12 +76,19 @@ func ParseTasks(yml []byte) (TaskList, error) {
 		return TaskList{}, err
 	}
 
-	seq, err := tasksSeq(&doc)
+	seq, gatesNode, err := rootNodes(&doc)
 	if err != nil {
 		return TaskList{}, err
 	}
 
-	var taskList TaskList
+	// Gates are checked before the tasks so a file with an error in each
+	// reports the same one whatever order its keys are in.
+	gates, err := decodeGates(gatesNode)
+	if err != nil {
+		return TaskList{}, err
+	}
+
+	taskList := TaskList{Gates: gates}
 	ids := make(map[int16]int)
 	names := make(map[string]int)
 	for i, el := range seq.Content {
@@ -107,37 +126,61 @@ func checkDuplicate(ids map[int16]int, names map[string]int, i int, task Task, w
 	return nil
 }
 
-// tasksSeq returns the non-empty sequence under the document's single
-// top-level tasks key.
-func tasksSeq(doc *yaml.Node) (*yaml.Node, error) {
+// rootNodes walks the document's top-level mapping once and returns the
+// non-empty sequence under its single tasks key and the node under its gates
+// key, nil when the file has none.
+func rootNodes(doc *yaml.Node) (seq, gates *yaml.Node, err error) {
 	if len(doc.Content) == 0 || doc.Content[0].Kind != yaml.MappingNode {
-		return nil, errors.New("tasks: is required")
+		return nil, nil, errors.New("tasks: is required")
 	}
 
-	var seq *yaml.Node
 	root := doc.Content[0].Content
 	for i := 0; i+1 < len(root); i += 2 {
-		if root[i].Value != "tasks" {
-			continue
-		}
+		switch root[i].Value {
+		case "tasks":
+			if seq != nil {
+				return nil, nil, errors.New("tasks: duplicate key")
+			}
 
-		if seq != nil {
-			return nil, errors.New("tasks: duplicate key")
-		}
+			seq = root[i+1]
+		case "gates":
+			if gates != nil {
+				return nil, nil, errors.New("gates: duplicate key")
+			}
 
-		seq = root[i+1]
+			gates = root[i+1]
+		}
 	}
 
 	switch {
 	case seq == nil:
-		return nil, errors.New("tasks: is required")
+		return nil, nil, errors.New("tasks: is required")
 	case seq.Kind != yaml.SequenceNode:
-		return nil, errors.New("tasks: must be a sequence")
+		return nil, nil, errors.New("tasks: must be a sequence")
 	case len(seq.Content) == 0:
-		return nil, errors.New("tasks: must contain at least one task")
+		return nil, nil, errors.New("tasks: must contain at least one task")
 	}
 
-	return seq, nil
+	return seq, gates, nil
+}
+
+// decodeGates returns a non-nil slice for gates: [] so a save writes the key
+// back and the file keeps saying its author decided on no gates.
+func decodeGates(node *yaml.Node) (*[]Gate, error) {
+	if node == nil {
+		return nil, nil
+	}
+
+	if err := checkGates(node); err != nil {
+		return nil, err
+	}
+
+	gates := []Gate{}
+	if err := node.Decode(&gates); err != nil {
+		return nil, fmt.Errorf("gates: %w", err)
+	}
+
+	return &gates, nil
 }
 
 // parseTask checks element i of the tasks sequence and decodes it. It returns
@@ -167,8 +210,10 @@ func parseTask(i int, el *yaml.Node) (Task, string, error) {
 		return Task{}, where, err
 	}
 
-	if err := checkGates(where, fields["gates"]); err != nil {
-		return Task{}, where, err
+	// An error rather than a quietly dropped key: dropping it would leave an
+	// old file running every task with no checks at all (ADR-019).
+	if fields["gates"] != nil {
+		return Task{}, where, fmt.Errorf("%s: gates: gates are set once for the whole file now, as a top-level gates: list; see the HOWTO", where)
 	}
 
 	task, err := decodeTask(where, el)
@@ -241,20 +286,20 @@ func checkStringField(where, field string, node *yaml.Node) error {
 	return nil
 }
 
-// checkGates checks the optional gates sequence before it is decoded. A
+// checkGates checks the file's gates sequence before it is decoded. A
 // malformed gate must reject the file: decoding would silently drop what it
 // does not recognize, and the next save would then erase it.
-func checkGates(where string, node *yaml.Node) error {
-	if node == nil {
-		return nil
+func checkGates(node *yaml.Node) error {
+	if node.Kind == yaml.AliasNode {
+		node = node.Alias
 	}
 
 	if node.Kind != yaml.SequenceNode {
-		return fmt.Errorf("%s: gates: must be a sequence", where)
+		return errors.New("gates: must be a sequence")
 	}
 
 	for j, el := range node.Content {
-		gateWhere := fmt.Sprintf("%s: gates[%d]", where, j)
+		gateWhere := fmt.Sprintf("gates[%d]", j)
 		if err := checkGate(gateWhere, el); err != nil {
 			return err
 		}

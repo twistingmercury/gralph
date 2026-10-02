@@ -12,12 +12,12 @@ import (
 	"github.com/twistingmercury/gralph/internal/tasks"
 )
 
-// runGates runs task's gates in file order after its session completed and
-// returns the task's final outcome: completed when every gate exits zero,
+// runGates runs the file's gates in file order after task's session completed
+// and returns the task's final outcome: completed when every gate exits zero,
 // failed at the first gate that does not. err is non-nil only when ctx was
 // cancelled, which must leave the task's state and the tasks file untouched.
-func runGates(ctx context.Context, task tasks.Task, override string, report func(Event)) (state, errMsg string, err error) {
-	for _, gate := range task.Gates {
+func runGates(ctx context.Context, task tasks.Task, gates []tasks.Gate, override string, report func(Event)) (state, errMsg string, err error) {
+	for _, gate := range gates {
 		limit, _ := gateLimit(gate, override)
 		runErr := runGateReported(ctx, task, gate, limit, report)
 		if runErr == nil {

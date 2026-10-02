@@ -663,38 +663,38 @@ func TestDryRun_FlagsFailedTasks(t *testing.T) {
 
 func TestDryRun_ListsEffectiveGateTimeouts(t *testing.T) {
 	tasksPath := filepath.Join(t.TempDir(), "tasks.yaml")
-	yml := `tasks:
+	yml := `gates:
+  - cmd: go test ./...
+    timeout: 30s
+  - cmd: |
+      echo one
+      echo two
+  - cmd: make lint
+tasks:
   - id: 1
     name: First
     prompt: p
-    gates:
-      - cmd: go test ./...
-        timeout: 30s
-      - cmd: |
-          echo one
-          echo two
   - id: 2
     name: Second
     prompt: p
   - id: 3
     name: Third
     prompt: p
-    gates:
-      - cmd: make lint
 `
 	require.NoError(t, os.WriteFile(tasksPath, []byte(yml), 0o600))
 
+	// Each gate is listed once for the file, not once per task.
 	tests := []struct {
 		name     string
 		override string
 		want     string
 	}{
-		{name: "gate and default", want: "task 1 gate: go test ./...: 30s (gate)\n" +
-			"task 1 gate: echo one: 10m (default)\n" +
-			"task 3 gate: make lint: 10m (default)\n"},
-		{name: "flag overrides every gate", override: "2m", want: "task 1 gate: go test ./...: 2m (flag)\n" +
-			"task 1 gate: echo one: 2m (flag)\n" +
-			"task 3 gate: make lint: 2m (flag)\n"},
+		{name: "gate and default", want: "gate: go test ./...: 30s (gate)\n" +
+			"gate: echo one: 10m (default)\n" +
+			"gate: make lint: 10m (default)\n"},
+		{name: "flag overrides every gate", override: "2m", want: "gate: go test ./...: 2m (flag)\n" +
+			"gate: echo one: 2m (flag)\n" +
+			"gate: make lint: 2m (flag)\n"},
 	}
 
 	for _, tt := range tests {
@@ -704,7 +704,7 @@ func TestDryRun_ListsEffectiveGateTimeouts(t *testing.T) {
 
 			got := out.String()
 			assert.Contains(t, got, "NAME\n", "the task table comes first")
-			assert.True(t, strings.HasSuffix(got, tt.want+tasksPath+" is valid\n"), "gate lines sit between the table and the valid line, got:\n%s", got)
+			assert.True(t, strings.HasSuffix(got, "Third\n"+tt.want+tasksPath+" is valid\n"), "gate lines sit between the table and the valid line, got:\n%s", got)
 		})
 	}
 }
