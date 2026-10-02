@@ -3,6 +3,7 @@ module github.com/twistingmercury/gralph/tests/e2e
 go 1.27.1
 
 require (
+	github.com/creack/pty v1.1.24
 	github.com/stretchr/testify v1.11.1
 	gopkg.in/yaml.v3 v3.0.1
 )
