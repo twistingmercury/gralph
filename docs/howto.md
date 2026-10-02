@@ -185,6 +185,14 @@ Here's the quick path from zero to a working run:
    gralph -p prompt.md -t tasks.yaml --sandbox-settings sandbox.json
    ```
 
+   Or just run `gralph` in a terminal: a setup wizard asks for the folder
+   holding the two files, the permission choice, and the gates, then shows a
+   command line that starts the same run without it (see
+   [Setup wizard](#setup-wizard)).
+
+   A task file from the skill has no `gates:` key yet, so its first run in a
+   terminal opens the wizard for the gates even with every flag passed.
+
    You'll see a full-screen view of the run (see
    [The full-screen view](#the-full-screen-view)). Press `q` to close it when
    done.
@@ -338,11 +346,13 @@ A run needs exactly one of these two flags:
   by the file at that path.
 - `--skip-permissions`: sessions run with no sandbox at all.
 
-With neither, gralph stops with
+With neither, the full-screen view asks you to choose (see
+[Setup wizard](#setup-wizard)); nothing is chosen for you there either. Plain
+mode can't ask, so it stops with
 `error: pass --sandbox-settings <path>, or --skip-permissions to run without a sandbox`.
-With both, it stops with
+With both, gralph stops in either mode with
 `error: --sandbox-settings and --skip-permissions cannot be used together`.
-Either way it exits 1 before anything runs.
+A stop exits 1 before anything runs.
 
 ### What `--sandbox-settings` does
 
@@ -526,7 +536,7 @@ A few things to know:
   gates, set `timeout` on them (or use `--gate-timeout` for the whole run).
 - Leaving the `gates` key out and writing `gates: []` aren't the same. With no
   key, the gates haven't been decided yet, and the full-screen view asks you
-  for them. `gates: []` means you've decided: no gates. Either way, a run with
+  for them (see [Setup wizard](#setup-wizard)). `gates: []` means you've decided: no gates. Either way, a run with
   no gates is fine.
 - For a multi-line gate, error messages quote only the command's first line, so
   the reason stays readable.
@@ -640,6 +650,11 @@ logs/
 
 Gralph writes these itself. Claude is told nothing about them.
 
+When the [setup wizard](#setup-wizard) opens with a run folder, it asks
+whether to log, and yes means `<folder>/logs`. The answer starts on No: no
+flag and no yes, no record. A `--log-dir` you pass wins, and the wizard
+doesn't ask.
+
 **`run.jsonl`** is the ledger: one JSON object per line, written as things
 happen. Every line has a `time` and an `event`, and every line about a task
 has that task's id as `task`:
@@ -728,11 +743,92 @@ it. Gralph then prints one summary line to stdout: `All tasks completed`,
 To keep what the view showed after it closes, pass `--log-dir` (see
 [Logging a run](#logging-a-run)).
 
-Forgot `--tasks` or `--prompt`? A setup screen asks for each missing path,
-tasks file first. `enter` checks the path with the same rules a run uses and
-shows any problem right under the field. `esc` or `ctrl+c` quits with
-`error: setup cancelled` and exit 1. As in plain mode, a task file with a
-`failed` task prints the task table and exits 1 before the view ever opens.
+### Setup wizard
+
+Start gralph in a terminal without everything a run needs and, before the view
+opens, a setup wizard asks for the rest. A bare `gralph` is enough to get from
+nothing to a running loop.
+
+The wizard opens only when one of these is still open:
+
+- **The files.** No `-d`, and not both `-t` and `-p`.
+- **The permission choice.** Neither `--sandbox-settings` nor
+  `--skip-permissions`.
+- **The gates.** The task file has no top-level `gates:` key. `gates: []`
+  counts as decided (see [Gates](#gates)).
+
+When the flags and the task file answer all three, there's no wizard and no
+review screen: the run starts right away. Plain mode (`--no-tui`, no terminal,
+or `--dry-run`) never opens it; there, a missing file or permission flag is
+still an error.
+
+Its steps, in order. Each is skipped when a flag already answers it:
+
+1. **Run folder.** A folder picker that starts in the current directory and
+   shows hidden folders, since run folders often live under `.local/`. It
+   picks folders only: the folder gives `tasks.yaml` and `prompt.md`, the same
+   as `-d`. If you passed one of `-t` or `-p`, that file wins and the folder
+   gives the other.
+2. **Permissions.** Run sessions in Claude's sandbox or skip permissions.
+   Nothing is chosen for you: the step starts on `Choose one`, and pressing
+   `enter` there just says `choose how sessions run`. Choosing the sandbox
+   then asks you to pick its settings file (`.json` files only).
+3. **Commit.** Whether to commit each completed task, like `--commit`. Starts
+   on No.
+4. **Logging.** Whether to keep a record of the run in `<folder>/logs`, like
+   `--log-dir <folder>/logs`. Starts on No. Skipped when there's no folder
+   (you passed both `-t` and `-p`).
+5. **Gate time limit.** Starts on Default (each gate's own `timeout`, else
+   10m). Choose one limit for every gate and it asks for the value, like
+   `--gate-timeout`.
+6. **Gates.** Only when the task file has no `gates:` key. A list of the gates
+   with `Add a gate` and `Done` under it. Pick a gate to edit or delete it.
+   Each gate is a command and an optional timeout. `Done` with no gates
+   decides on none, and the file gets `gates: []`.
+
+Commit, logging, and the time limit never open the wizard on their own. They
+come along when it opens for something else.
+
+Each step checks its answer on the spot, with the same rules a run uses, and
+keeps you there with the problem shown until it's fixed:
+
+- The folder must hold both files, and both must load. A parse error is shown
+  as is. A `failed` task points you at `gralph -d <folder> --dry-run` to see
+  the table.
+- The sandbox settings file must be one a run would accept.
+- Yes to commit needs what `--commit` needs: a clean work tree and a task file
+  git ignores (see [Committing tasks](#committing-tasks)).
+- Yes to logging, when the run commits, needs the logs folder ignored by git
+  (see [Logging a run](#logging-a-run)).
+- The time limit must be a duration such as `90s` or `10m`.
+
+Keys: the arrow keys move, `→` opens a folder in the picker and `←` goes back
+up, and `enter` picks. `esc` or `ctrl+c` quits at any step with
+`error: setup cancelled` and exit 1.
+
+Last comes the review screen. It lists every choice and the gates (or "no
+gates"), then the command line that starts the same run without the wizard,
+such as:
+
+```bash
+gralph -d .local/widgets --sandbox-settings sandbox.json --commit
+```
+
+Copy it for next time. Gates aren't on it, because they're in the task file.
+A path with spaces or shell characters comes out in single quotes, so the line
+pastes as is. Then choose:
+
+- **Start** saves the gates to the task file, if you changed them, and starts
+  the run.
+- **Edit gates** goes back to the gate list.
+- **Cancel** quits with `error: setup cancelled` and exit 1.
+
+Nothing is written before Start: cancel anywhere and the task file is exactly
+as it was. After Start, gralph runs the same startup checks on the wizard's
+answers that it runs on flags.
+
+As in plain mode, a task file you passed by flag that has a `failed` task
+prints the task table and exits 1 before the wizard or the view opens.
 
 ## When things go wrong
 
@@ -773,10 +869,10 @@ gralph --prompt path/to/prompt.md --tasks path/to/tasks.yaml --sandbox-settings 
 | Flag                 | Required                                                                                       | Description                                                                                                                 |
 | -------------------- | ---------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
 | `--dir` / `-d`       | No; gives `--tasks` and `--prompt` when they are not passed                                    | Run folder holding `tasks.yaml` and `prompt.md` (see [Run folders](#run-folders))                                           |
-| `--prompt` / `-p`    | Yes, unless `--dir` gives it or `--dry-run`; asked for when missing in the full-screen view    | Path to the shared prompt sent to Claude for every task                                                                     |
-| `--tasks` / `-t`     | Yes, unless `--dir` gives it; asked for when missing in the full-screen view                   | Path to the YAML task list that drives the loop                                                                             |
-| `--sandbox-settings` | One of these two for any real run; not both                                                    | Path to a Claude Code settings file; sessions run in Claude's sandbox with it                                               |
-| `--skip-permissions` | One of these two for any real run; not both                                                    | Run sessions with no sandbox and no permission checks. You're on your own (see [Sandboxing sessions](#sandboxing-sessions)) |
+| `--prompt` / `-p`    | Yes, unless `--dir` gives it or `--dry-run`; the full-screen view asks for a folder instead    | Path to the shared prompt sent to Claude for every task                                                                     |
+| `--tasks` / `-t`     | Yes, unless `--dir` gives it; the full-screen view asks for a folder instead                   | Path to the YAML task list that drives the loop                                                                             |
+| `--sandbox-settings` | One of these two for any real run, not both; the full-screen view asks when neither is passed  | Path to a Claude Code settings file; sessions run in Claude's sandbox with it                                               |
+| `--skip-permissions` | One of these two for any real run, not both; the full-screen view asks when neither is passed  | Run sessions with no sandbox and no permission checks. You're on your own (see [Sandboxing sessions](#sandboxing-sessions)) |
 | `--gate-timeout`     | No                                                                                             | Time limit for every gate, like `90s`; overrides the task file's                                                            |
 | `--commit`           | No                                                                                             | Commit each completed task with git, after the gates pass                                                                   |
 | `--log-dir`          | No                                                                                             | Directory to keep a record of the run in; full-screen view only                                                             |
@@ -791,4 +887,6 @@ CI, or pass `--no-tui`, and you get plain text output instead. `--dry-run` is
 always plain.
 
 Every real run needs either `--sandbox-settings` or `--skip-permissions`. There
-is no default: see [Sandboxing sessions](#sandboxing-sessions).
+is no default: see [Sandboxing sessions](#sandboxing-sessions). In the
+full-screen view, whatever a run needs and the flags leave out is asked for by
+the [setup wizard](#setup-wizard).

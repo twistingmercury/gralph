@@ -1,8 +1,8 @@
 # Gralph — System Architecture
 
-> **Version**: v18
+> **Version**: v19
 > **Date**: 2026-10-02
-> **Notes**: `cmd/main` resolves `-d/--dir` into the task and prompt paths before any other startup check (ADR-018).
+> **Notes**: The setup wizard (`tui.Wizard`, on `charm.land/huh/v2`) replaces `Setup`/`SetupModel`; `runTUI` opens it for an open folder, permission, or gates step, rechecks its answers, and saves edited gates on Start (ADR-018).
 
 [Back to Overview](00_overview.md) | [Back to Project README](../../README.md)
 
@@ -36,7 +36,7 @@ graph TB
     CLI["cmd/main<br/>(mode selection)"]
     Settings["sandbox settings file<br/>(--sandbox-settings)"] -->|read once: SandboxArgs| CLI
     CLI -->|plain: Start, DryRun| Looper["internal/looper<br/>(Run → runLoop)"]
-    CLI -->|terminal: Setup, Run| TUI["internal/tui<br/>(SetupModel, Model)"]
+    CLI -->|terminal: Wizard, Run| TUI["internal/tui<br/>(Wizard, Model)"]
     TUI -->|Run with report hook| Looper
     Looper -.->|events via report| TUI
     CLI -->|"--log-dir: Open"| RunLog["internal/runlog<br/>(Open, Record, Close)"]
@@ -69,10 +69,16 @@ graph TB
 - Validate `--gate-timeout` (if set) before any load or run; bad value exits 1. `validateGateTimeout` uses `tasks.ParseTimeout`, the same parser and rules as a gate's `timeout` field
 - Startup order: `--dir`, `--gate-timeout` check, mode selection, plain mode's required flags, `validateLogDir`, `validateSessionFlags`, the skill check, then the dry run, plain run, or TUI. Every startup error in `main` goes through `fatal` (`error: ` prefix, exit 1)
 - Choose the mode: plain when `--dry-run`, `--no-tui`, or stdin or stdout is not a terminal (`github.com/charmbracelet/x/term`); otherwise the TUI
-- Pick the session flags (`validateSessionFlags`/`sessionArgs`), after the `--gate-timeout` check and plain mode's required flags and before the skill check: `looper.SandboxArgs` for `--sandbox-settings`, `looper.BypassArgs` for `--skip-permissions`. Both flags together, or neither on a real run, exits 1; an empty `--sandbox-settings=` counts as not passed. A dry run needs neither, but a settings file it is given is still checked. The result goes to `looper.Start` and `tui.Run`
+- Pick the session flags (`validateSessionFlags`/`sessionArgs`), after the `--gate-timeout` check and plain mode's required flags and before the skill check: `looper.SandboxArgs` for `--sandbox-settings`, `looper.BypassArgs` for `--skip-permissions`. Both flags together exits 1; so does neither on a real run in plain mode. In TUI mode neither passes with no session args (`sessionArgs`'s `wizard` argument), because the wizard asks; `recheck` runs `sessionArgs` again, strict, on its answer. An empty `--sandbox-settings=` counts as not passed. A dry run needs neither, but a settings file it is given is still checked. The result goes to `looper.Start` and `tui.Run`
 - Plain mode: validate required flags and `--gate-timeout`, then route to `looper.Start` (normal run) or `looper.DryRun` (validation only)
-- TUI mode (`runTUI`): load the given paths with `looper.LoadPrompt`/`looper.LoadTasksReport` (a failed task prints the `PrintTasks` table and exits 1, as in plain mode), run `tui.Setup` for any missing path, then `openRepo` (`looper.OpenRepo` when `--commit` is set, before the view opens) and `openLog`, then `tui.Run`, and print the one-line summary after the view closes
-- `--log-dir` (ADR-016): `validateLogDir`/`checkLogDir` runs after plain mode's required flags and before the session flags; in plain mode on a real run, exit 1 with `--log-dir only works with the full-screen view`; `--dry-run` ignores the flag; an empty `--log-dir=` counts as not passed. In TUI mode, after the setup screen and the repository checks: with a repository open, refuse a run folder inside the work tree that git does not ignore; then `runlog.Open`, pass its `Record` to `tui.Run` as `observe`, and `Close` it after the view closes
+- TUI mode (`runTUI`), split along its seams:
+  1. `settingsFromFlags`: load the given paths with `loadGiven` (`looper.LoadPrompt`/`looper.LoadTasksReport`; a failed task prints the `PrintTasks` table and exits 1, as in plain mode) and build a `tui.Settings` from the flags and what loaded
+  2. `askWizard`: when `tui.NeedsWizard` reports an open folder, permission, or gates step, run `tui.Wizard` with a `tui.Given` read from `pflag.CommandLine.Changed` (`--commit`, `--log-dir`, `--gate-timeout`), since a flag set to its zero value still answers its step. `tui.ErrCancelled` prints `error: setup cancelled`; any other error prints the `--no-tui` hint; both exit 1
+  3. `applySettings`: write the answers back into the flag variables, so the rest of the run reads one set of values
+  4. `recheck`: run `main`'s checks again in `main`'s order on those values (`checkGateTimeout` when set, `checkLogDir`, strict `sessionArgs`); the wizard's own checks are never trusted in their place
+  5. `saveGates`: `tasks.SaveTasks` the task file only when `Settings.GatesEdited`, which is only after Start, so a cancel anywhere writes nothing
+  6. `runView`: `openRepo` (`looper.OpenRepo` when `--commit` is set, before the view opens) and `openLog`, then `tui.Run`, and print the one-line summary after the view closes
+- `--log-dir` (ADR-016): `validateLogDir`/`checkLogDir` runs after plain mode's required flags and before the session flags; in plain mode on a real run, exit 1 with `--log-dir only works with the full-screen view`; `--dry-run` ignores the flag; an empty `--log-dir=` counts as not passed. In TUI mode, after the wizard and the repository checks: with a repository open, refuse a run folder inside the work tree that git does not ignore; then `runlog.Open`, pass its `Record` to `tui.Run` as `observe`, and `Close` it after the view closes
 - Set up context with signal handling (SIGINT, SIGTERM)
 - Exit with appropriate code (0 on success, 1 on error); a Bubble Tea error exits 1 with a hint to rerun with `--no-tui`
 
@@ -89,7 +95,13 @@ graph TB
 
 **Responsibilities:**
 
-- `Setup`/`SetupModel`: the path-entry screen; one text field per missing `--tasks`/`--prompt` path, each validated on Enter with `looper.LoadTasks` or `looper.LoadPrompt`, errors shown under the field; Esc or ctrl+c cancels (exit 1)
+- `Settings` (`command.go`): the run as `cmd/main` will use it, however each value was given: paths, the loaded prompt and task list, the permission choice, commit, log folder, gate timeout, and `GatesEdited`. `CommandLine` turns it into the command that starts the same run without the wizard: `-d` when there is a folder, plus `-t`/`-p` only for a file that is not the folder's fixed name, then the permission flag, `--commit`, `--log-dir`, `--gate-timeout`. A value that is not a plain shell word is single-quoted (`shellQuote`), so the line pastes into zsh or bash; gates are not on it
+- `NeedsWizard` (`wizard.go`): true when the folder (`TasksPath` or `PromptPath` empty), the permission choice (no sandbox file and no skip), or the gates (no task list, or `Gates == nil`) are open; commit, logging, and the timeout never open the wizard alone
+- `Wizard(s, given, opts...)`: one `huh.Form` with a group per step, each hidden by a method on the `wizard` struct (`WithHideFunc`): folder (`huh.FilePicker`, folders only, hidden entries shown, from `.`), permissions (`Select` starting on a `Choose one` placeholder), sandbox file (`.json` picker, shown only for the sandbox choice), commit and logging (`Confirm`, starting on No; logging only with a folder, and its title names `<folder>/logs`), gate time limit (`Select`, Default first) and a custom limit (`Input`, shown only for that choice). `Given` hides the optional steps a flag answered, because a false or empty value cannot tell "no" from "not asked". The form is skipped when none of its steps is shown. `fold` then moves the answers held outside `Settings` into it. When the gates are open, `editGates` follows; then the review loop
+- Step checks (`wizard_checks.go`), run by each field's `Validate` so an error keeps the user on the step: `checkFolder` (both fixed files exist unless a flag gave one, `looper.LoadTasks` and `looper.LoadPrompt` succeed, and `looper.ErrFailedTasks` becomes a pointer to `gralph -d <folder> --dry-run`; only a folder that passes is written into `Settings`), `checkPermission` (refuses the placeholder, so Enter without moving chooses nothing, ADR-014), `checkSandboxFile` (`looper.SandboxArgs`), `checkCommit` (on yes, `looper.OpenRepo`: clean work tree, task file ignored), `checkLogging` (on yes with commit by flag or answer, `Repo.CheckLogDir` on a stand-in run folder under `<folder>/logs`), `checkCustomTimeout` (`tasks.ParseTimeout`)
+- The gate editor (`wizard_gates.go`): `editGates` loops small huh forms on a copy of the list: a picker of the gates plus `Add a gate` and `Done`; a picked gate offers Edit, Delete, Back; each gate is a command (nonblank) and an optional timeout (`tasks.ParseTimeout`). It starts from a non-nil list, so Done on an empty one gives `gates: []`. The wizard sets `GatesEdited` when the key was absent or the list changed
+- The review screen: a `huh.Note` listing the files or folder, permissions, commit, logging, gate limit, the gates or `no gates`, and `CommandLine`, with markup escaped so paths show as typed; a `Select` of Start, Edit gates (back to the editor, then the review again), and Cancel (`ErrCancelled`)
+- Keys: every wizard form uses huh's default key map with Quit bound to ctrl+c and Esc; huh's `ErrUserAborted` becomes `ErrCancelled`. The wizard writes nothing; `cmd/main` saves an edited gate list after Start
 - `Run`: derives a cancellable context from `cmd/main`'s signal context, runs `looper.Run` in a goroutine with a `report` hook that calls `program.Send`, and returns the exit code and summary when the view closes. When given an `observe func(looper.Event) error` (nil without `--log-dir`), the hook calls it with each event first; on its first error `Run` cancels the run and puts that error in the final `RunDone`, so the status reads `Run stopped: log: <error>`. The hook is a `forwarder` (`forward.go`); after `observe`'s first error it never calls it again, so the record ends there
 - `Model`: the run view (alt screen, relaid out on resize) with three titled panes (title bars rendered above the viewports so they stay put while scrolling): Current task (`<id>: <name>` and prompt), Task progress (`<icon> <id>: <name>: <state>` per task, colored by state, under a one-line outcome banner once the run ends), Claude activity (the current task's activity, cleared on each `TaskStarted`, following the newest line unless scrolled up), and a key legend that also carries the confirm prompt and final status
 - Keys: `tab` switches the focused pane, `↑/↓/PgUp/PgDn` scroll it; `q` or ctrl+c opens a `[y/N]` stop confirm during the run and quits after it
@@ -99,7 +111,7 @@ graph TB
 
 | Characteristic      | Value                                                                                                                                                     |
 | ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Libraries           | Bubble Tea v2, bubbles v2 (viewport, textinput), lipgloss v2 (ADR-012)                                                                                    |
+| Libraries           | Bubble Tea v2, bubbles v2 (viewport), lipgloss v2 (ADR-012); huh v2 for the wizard (ADR-018)                                                              |
 | Imported by         | `cmd/main` only; `looper` and `tasks` never import it or Bubble Tea; it never imports `runlog`; v1 `github.com/charmbracelet` modules are never imported                                                                                       |
 | Input from looper   | `looper.Event` messages: `TaskStarted`, `Activity`, `TaskFinished`, `RunDone`; `SessionFinished`, `GateFinished`, and `Committed` are ignored by the view |
 | Signal Handling     | Bubble Tea's own handler is off (`tea.WithoutSignalHandler`)                                                                                              |
@@ -292,7 +304,7 @@ graph TB
 
 ## Test Seam
 
-There is no injectable runner; `runLoop` execs inline. Both test suites (`internal/looper`, `tests/e2e`) build a fake `claude` into a temp dir, put it first on `PATH` for the gralph process only, and drive it with environment variables, because gralph passes fixed argv. `internal/tui` tests drive `Model` and `SetupModel` directly, or `tui.Run` and `tui.Setup` with test program options. The e2e tests are black-box and have no terminal, so they always run plain mode.
+There is no injectable runner; `runLoop` execs inline. Both test suites (`internal/looper`, `tests/e2e`) build a fake `claude` into a temp dir, put it first on `PATH` for the gralph process only, and drive it with environment variables, because gralph passes fixed argv. `internal/tui` tests drive `Model` directly, or `tui.Run` and `tui.Wizard` with test program options; `NeedsWizard`, `CommandLine`, and each step's check are plain functions tested without a terminal. The e2e tests are black-box and have no terminal, so they always run plain mode.
 
 ## Data Flow
 
@@ -354,12 +366,13 @@ sequenceDiagram
     participant Looper
     participant Claude
 
-    User->>CLI: gralph [-p prompt.md] [-t tasks.yaml] (in a terminal)
+    User->>CLI: gralph [-d folder] [-p prompt.md] [-t tasks.yaml] [flags] (in a terminal)
     CLI->>Looper: LoadPrompt / LoadTasksReport for the given paths
-    opt A path is missing
-        CLI->>TUI: Setup(tasksPath, promptPath)
-        TUI->>Looper: LoadTasks / LoadPrompt on each entry
-        TUI-->>CLI: paths, prompt, task list
+    opt NeedsWizard: folder, permissions, or gates open
+        CLI->>TUI: Wizard(settings, given)
+        TUI->>Looper: LoadTasks / LoadPrompt, SandboxArgs, OpenRepo as each step is answered
+        TUI-->>CLI: settings (Start), or ErrCancelled
+        CLI->>CLI: recheck, then SaveTasks if the gates were edited
     end
     CLI->>TUI: Run(ctx, prompt, tl, tasksFile, gateTimeout, sessionArgs, repo, observe)
     TUI->>Looper: Run(runCtx, ..., report) in a goroutine
@@ -416,7 +429,7 @@ sequenceDiagram
 | From        | To              | Protocol                         | Purpose                                        | Data Format                                                                                               |
 | ----------- | --------------- | -------------------------------- | ---------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
 | CLI         | Looper          | Direct function call             | Plain start or dry-run; load paths for the TUI | Go function args                                                                                          |
-| CLI         | TUI             | Direct function call             | Setup screen and run view                      | Go function args                                                                                          |
+| CLI         | TUI             | Direct function call             | Setup wizard and run view                      | Go function args                                                                                          |
 | TUI         | Looper          | `Run` with `report` hook         | Run the loop, receive progress                 | `looper.Event`                                                                                            |
 | Looper      | Filesystem      | os.ReadFile, os.WriteFile        | Load inputs, persist state                     | Text files (YAML); the sandbox settings file (JSON, read only)                                            |
 | Looper      | TaskParser      | ParseTasks, SaveTasks functions  | Parse and serialize task lists                 | YAML bytes                                                                                                |

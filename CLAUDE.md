@@ -39,11 +39,11 @@ Easy to get wrong:
 
 Package paths are relative to `src/`. Doc 03 has a section per package; this is the map and the rules.
 
-Imports: `cmd/main` → `internal/tui` → `internal/looper` → `internal/tasks` (`cmd/main` also calls `looper` directly), and `cmd/main` → `internal/runlog` → `internal/looper`. `looper` never imports `tui`, `runlog`, or any Bubble Tea module; `tui` never imports `runlog`; `tasks` imports none of them. Bubble Tea is v2 only (`charm.land/bubbletea/v2`, `bubbles/v2`, `lipgloss/v2`); never import the `github.com/charmbracelet` v1 modules.
+Imports: `cmd/main` → `internal/tui` → `internal/looper` → `internal/tasks` (`cmd/main` also calls `looper` directly), and `cmd/main` → `internal/runlog` → `internal/looper`. `looper` never imports `tui`, `runlog`, or any Bubble Tea module; `tui` never imports `runlog`; `tasks` imports none of them. Bubble Tea is v2 only (`charm.land/bubbletea/v2`, `bubbles/v2`, `lipgloss/v2`, and `huh/v2` for the wizard), imported only by `internal/tui`; never import the `github.com/charmbracelet` v1 modules.
 
-- **`cmd/main`** — flag checks and mode selection (`looper.Start`/`looper.DryRun` for plain mode, `runTUI` otherwise). Startup checks run in a fixed order, so keep it: `--dir`, `--gate-timeout`, plain mode's required flags, `--log-dir`, the session flags, the skill check.
+- **`cmd/main`** — flag checks and mode selection (`looper.Start`/`looper.DryRun` for plain mode, `runTUI` otherwise). Startup checks run in a fixed order, so keep it: `--dir`, `--gate-timeout`, plain mode's required flags, `--log-dir`, the session flags, the skill check. In the full-screen view the session check lets a missing choice through for the wizard, and `recheck` runs the checks again, strict and in the same order, on the wizard's answers; never skip it because the wizard already checked.
 - **`internal/looper`** — the loop, session flags (ADR-014), gates (ADR-013), commit (ADR-015), process groups, and the `Event`s it reports. The `report func(Event)` hook picks the path: `nil` is plain, non-nil is the stream path.
-- **`internal/tui`** — the setup screen and the run view (ADR-011, ADR-012).
+- **`internal/tui`** — the setup wizard and the run view (ADR-011, ADR-012, ADR-018).
 - **`internal/runlog`** — the `--log-dir` record (ADR-016). Standard library only.
 - **`internal/tasks`** — the YAML task model (ADR-002, ADR-004).
 - **`internal/skillinstall`**, **`skills/`** — the embedded skill and the stale-skill check (ADR-009, ADR-010).
