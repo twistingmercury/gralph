@@ -21,19 +21,20 @@ local: ## Performs only a local build of gralph
 	./cmd/main
 
 build: ## Performs a full build of gralph (Docker-based; use `make local` for a quick local binary)
-	./build/build.sh
+	@./build/build.sh
 
-install: local ## Install gralph to $GOBIN
-	cp ${LOCAL_BUILD}/gralph ${GOBIN}/gralph
+install: local uninstall ## Install gralph to $GOBIN
+	@cp ${LOCAL_BUILD}/gralph ${GOBIN}/gralph
+	@gralph --install-skill
 
 uninstall: ## Uninstall gralph to $GOBIN
-	rm ${GOBIN}/gralph
+	@rm ${GOBIN}/gralph
 
 test: ## Runs unit tests only (cmd and internal packages). The e2e suite runs in a container via `make build`.
 	go -C src test ./cmd/... ./internal/...
 
 analyze: ## Run linters, formatters, security scanners on production code (no tests/ or *_test.go)
-	goimports -w src/cmd src/internal
-	cd src && golangci-lint run --tests=false ./...
-	cd src && govulncheck ./cmd/... ./internal/...
-	cd src && gosec -quiet ./...
+	@goimports -w src/cmd src/internal
+	@cd src && golangci-lint run --tests=false ./...
+	@cd src && govulncheck ./cmd/... ./internal/...
+	@cd src && gosec -quiet ./...
