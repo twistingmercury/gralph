@@ -1,8 +1,8 @@
 # Gralph — System Architecture
 
-> **Version**: v15
+> **Version**: v16
 > **Date**: 2026-10-02
-> **Notes**: OS support row: a `windows/amd64` binary can be built by hand but is untested and not released (ADR-007 amendment).
+> **Notes**: Implementation details previously kept only in CLAUDE.md were added.
 
 [Back to Overview](00_overview.md) | [Back to Project README](../../README.md)
 
@@ -10,6 +10,7 @@
 
 - [Architecture Overview](#architecture-overview)
 - [Component Breakdown](#component-breakdown)
+- [Test Seam](#test-seam)
 - [Data Flow](#data-flow)
 - [Component Interactions](#component-interactions)
 - [Boundary Definitions](#boundary-definitions)
@@ -64,12 +65,13 @@ graph TB
 **Responsibilities:**
 
 - Parse command-line flags (--prompt, --tasks, --sandbox-settings, --skip-permissions, --dry-run, --no-tui, --gate-timeout, --commit, --log-dir, --install-skill, --version)
-- Validate `--gate-timeout` (if set) before any load or run; bad value exits 1
+- Validate `--gate-timeout` (if set) before any load or run; bad value exits 1. `validateGateTimeout` uses `tasks.ParseTimeout`, the same parser and rules as a gate's `timeout` field
+- Startup order: `--gate-timeout` check, mode selection, plain mode's required flags, `validateLogDir`, `validateSessionFlags`, the skill check, then the dry run, plain run, or TUI. Every startup error in `main` goes through `fatal` (`error: ` prefix, exit 1)
 - Choose the mode: plain when `--dry-run`, `--no-tui`, or stdin or stdout is not a terminal (`github.com/charmbracelet/x/term`); otherwise the TUI
 - Pick the session flags (`validateSessionFlags`/`sessionArgs`), after the `--gate-timeout` check and plain mode's required flags and before the skill check: `looper.SandboxArgs` for `--sandbox-settings`, `looper.BypassArgs` for `--skip-permissions`. Both flags together, or neither on a real run, exits 1; an empty `--sandbox-settings=` counts as not passed. A dry run needs neither, but a settings file it is given is still checked. The result goes to `looper.Start` and `tui.Run`
 - Plain mode: validate required flags and `--gate-timeout`, then route to `looper.Start` (normal run) or `looper.DryRun` (validation only)
-- TUI mode: load the given paths with `looper.LoadPrompt`/`looper.LoadTasksReport` (a failed task prints the `PrintTasks` table and exits 1, as in plain mode), run `tui.Setup` for any missing path, then `tui.Run`, and print the one-line summary after the view closes
-- `--log-dir` (ADR-016): in plain mode on a real run, exit 1 with `--log-dir only works with the full-screen view`; `--dry-run` ignores the flag; an empty `--log-dir=` counts as not passed. In TUI mode, after the setup screen and the repository checks: with a repository open, refuse a run folder inside the work tree that git does not ignore; then `runlog.Open`, pass its `Record` to `tui.Run` as `observe`, and `Close` it after the view closes
+- TUI mode (`runTUI`): load the given paths with `looper.LoadPrompt`/`looper.LoadTasksReport` (a failed task prints the `PrintTasks` table and exits 1, as in plain mode), run `tui.Setup` for any missing path, then `openRepo` (`looper.OpenRepo` when `--commit` is set, before the view opens) and `openLog`, then `tui.Run`, and print the one-line summary after the view closes
+- `--log-dir` (ADR-016): `validateLogDir`/`checkLogDir` runs after plain mode's required flags and before the session flags; in plain mode on a real run, exit 1 with `--log-dir only works with the full-screen view`; `--dry-run` ignores the flag; an empty `--log-dir=` counts as not passed. In TUI mode, after the setup screen and the repository checks: with a repository open, refuse a run folder inside the work tree that git does not ignore; then `runlog.Open`, pass its `Record` to `tui.Run` as `observe`, and `Close` it after the view closes
 - Set up context with signal handling (SIGINT, SIGTERM)
 - Exit with appropriate code (0 on success, 1 on error); a Bubble Tea error exits 1 with a hint to rerun with `--no-tui`
 
@@ -97,7 +99,7 @@ graph TB
 | Characteristic      | Value                                                                                                                                                     |
 | ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Libraries           | Bubble Tea v2, bubbles v2 (viewport, textinput), lipgloss v2 (ADR-012)                                                                                    |
-| Imported by         | `cmd/main` only; `looper` and `tasks` never import it or Bubble Tea                                                                                       |
+| Imported by         | `cmd/main` only; `looper` and `tasks` never import it or Bubble Tea; it never imports `runlog`; v1 `github.com/charmbracelet` modules are never imported                                                                                       |
 | Input from looper   | `looper.Event` messages: `TaskStarted`, `Activity`, `TaskFinished`, `RunDone`; `SessionFinished`, `GateFinished`, and `Committed` are ignored by the view |
 | Signal Handling     | Bubble Tea's own handler is off (`tea.WithoutSignalHandler`)                                                                                              |
 | Exit code           | 0 only when every task completed; 1 on a failed task or a stop                                                                                            |
@@ -110,15 +112,17 @@ graph TB
 - Load and parse task file via `tasks.ParseTasks` (`LoadTasks`)
 - Check preconditions (`LoadTasks` returns the list plus `ErrFailedTasks` if any task is `failed`; `LoadTasksReport` then prints the failed-task notice and table, and `Start` refuses to run)
 - Iterate pending tasks in file order (`Run` → `runLoop`)
-- Combine shared prompt with each task
+- Combine shared prompt with each task: stdin is `fmt.Sprintf("%s\n\n%s\n", prompt, task.String())` on both paths (the wire contract; both test suites golden-assert it)
 - Run each task on one of two paths, picked by the `report` hook:
   - `report == nil` → `runTaskPlain`: spawn `claude --print <session flags>` in a process group, echo the combined prompt, tee claude's stdout, inherit stderr
-  - `report != nil` → `runTaskStream`: spawn `claude --print --output-format stream-json --verbose <session flags>` in a process group, write nothing to gralph's stdout/stderr, report `TaskStarted`, `Activity` (parsed stdout events and raw stderr lines), and `TaskFinished` events, then `RunDone` from `Run`. The same path reports what the run log needs (ADR-016): `SessionFinished` (outcome and duration), `GateFinished` per gate (the gate, its timeout, its error, its duration), and `Committed` (the new hash); `TaskFinished` and `RunDone` carry a duration. The looper measures the durations and knows nothing about the log
+  - `report != nil` → `runTaskStream`: spawn `claude --print --output-format stream-json --verbose <session flags>` in a process group, write nothing to gralph's stdout/stderr, report `TaskStarted`, `Activity` (parsed stdout events and raw stderr lines), and `TaskFinished` events, then `RunDone` from `Run`. The same path reports what the run log needs (ADR-016): `SessionFinished` (outcome and duration), `GateFinished` per gate (the gate, its timeout, its error, its duration), and `Committed` (the new hash); `TaskFinished` and `RunDone` carry a duration; a cancelled session or gate reports none of the new kinds. The looper measures the durations and knows nothing about the log
+- Resolve the outcome on both paths with `finishTask`, so the argv, stdin text, cancellation rule, and outcome rule live in one place
 - Build every claude command in `claudeCmd`: `--print`, then the stream flags on the TUI path, then the `sessionArgs` it was handed
 - Build the session flags (`sandbox.go`): `SandboxArgs` reads the settings file, forces `sandbox.enabled: true`, `sandbox.allowUnsandboxedCommands: false`, and `sandbox.failIfUnavailable: true`, keeps every other key as raw JSON, and returns `--permission-mode acceptEdits --settings <merged JSON>`; `BypassArgs` returns `--dangerously-skip-permissions`
 - Capture output, parse result line, determine the session's outcome
 - After a `completed` session, run the task's gates (`runGates`); a failing gate makes the task `failed`
-- Update task state and save atomically
+- Update task state and save atomically after every task
+- `DryRun` (always plain; `--prompt` ignored) loads and prints the task table, lists each gate with its effective timeout and source (gate field, `--gate-timeout` flag, or default), prints `sandbox settings: <path>` when given a settings file, applies the `--commit` work tree check through `repoFor` (printing `commit: <root>`; a dirty tree exits 1), and never execs claude or writes a file
 - Block on first failure
 - Handle SIGINT/SIGTERM via context cancellation (kills the claude or gate process group)
 
@@ -127,7 +131,7 @@ graph TB
 | Characteristic      | Value                                                                                                                                                                                                                                                                                                                             |
 | ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Language            | Go 1.27.1+                                                                                                                                                                                                                                                                                                                        |
-| Core Function       | `Run(ctx, prompt, tl, tasksFile, gateTimeout, sessionArgs, repo, report)` runs the loop; `Start(ctx, promptFile, tasksFile, gateTimeout, sessionArgs, commit)` is plain mode's load + `Run(..., repo, nil)` where `repo` comes from `repoFor`; `DryRun(w, tasksFile, gateTimeout, sandboxFile, commit)` validates without running |
+| Core Function       | `Run(ctx, prompt, tl, tasksFile, gateTimeout, sessionArgs, repo, report)` runs the loop; `Start(ctx, promptFile, tasksFile, gateTimeout, sessionArgs, commit)` is plain mode's load + `Run(..., repo, nil)` where `repo` comes from `repoFor` and `gateTimeout` is the flag value as given (`""` when not passed); `DryRun(w, tasksFile, gateTimeout, sandboxFile, commit)` validates without running |
 | Scaling Model       | Sequential tasks; on the TUI path stdout and stderr are read concurrently, so `report` may be called from more than one goroutine                                                                                                                                                                                                 |
 | Communication       | Reads files, spawns subprocess, reads stdout (plain text or stream-json)                                                                                                                                                                                                                                                          |
 | UI dependency       | None; never imports `internal/tui` or Bubble Tea                                                                                                                                                                                                                                                                                  |
@@ -137,15 +141,18 @@ graph TB
 
 **Responsibilities:**
 
-- Unmarshal YAML without custom tags (rejects non-core tags)
+- Unmarshal into a `yaml.Node` and reject non-core tags anywhere, before decoding; check each `tasks` element in file order (it must be a mapping)
 - Validate each task element in sequence:
-  - `id`: required, positive int16, unique
+  - `id`: required, a positive int16 YAML integer, unique
   - `name`: required, non-empty string, unique (case-insensitive, whitespace trimmed)
   - `prompt`: required, non-empty string
-  - `state`: optional string, must be "pending", "completed", or "failed"
+  - `state`: optional string, must be exactly "pending", "completed", or "failed" (no trimming or case folding)
   - `error`: optional string, written by gralph only
   - `gates`: optional sequence; each element a mapping with keys `cmd` (required, nonblank string) and `timeout` (optional, a duration string like `90s` or `10m`); unknown keys are rejected (errors read `tasks[<i>] (id <id>): gates[<j>]: <field>: <problem>`); stored unaltered and written back by `SaveTasks`, omitted when empty
 - Normalize `state`: empty → `pending`
+- Gate `timeout` is checked by `tasks.ParseTimeout` (a duration greater than zero), shared with the `--gate-timeout` flag
+- Error text reads `tasks[<index>] (id <id>): <field>: <problem>`; the id is omitted when missing or invalid, and file-level errors name no task
+- Stored `Name` and `Prompt` are never altered: the prompt goes to Claude verbatim
 - Save tasks back to YAML with 2-space indent, atomically (temp file + rename)
 
 **Key Characteristics:**
@@ -165,6 +172,7 @@ graph TB
 - On signal (SIGINT, SIGTERM), kill the entire process group
 - For git commits (when `--commit` is set), send SIGTERM first (`stopProcessTree`), wait up to 2 seconds (`gitStopGrace`), then SIGKILL only if still alive, so git can clean up its `index.lock` file
 - Ensure no orphaned processes remain after cancellation
+- `process_tree_other.go` (`//go:build !unix`) gives no-op `configureProcessTree` and `configureGitProcessTree`, so the package compiles off Unix: a cancel kills only the direct child, and git gets no SIGTERM-first stop. Keep the split by build constraint, with no `runtime.GOOS` branches; after changing process handling, check `GOOS=windows go build ./cmd/main` from `src/`, since CI does not
 
 **Key Characteristics:**
 
@@ -267,6 +275,7 @@ graph TB
 - `Record` and `Close` do nothing on a nil `*Log`, which is what a run without the flag has
 - `Close`: close the open files
 - Safe for calls from more than one goroutine (a mutex), since `report` is
+- The ledger is written with `encoding/json`, HTML escaping off; one struct per event in `ledger.go` fixes the key order
 
 **Key Characteristics:**
 
@@ -278,6 +287,10 @@ graph TB
 | Output              | `run.jsonl` (one JSON object per line, each with `time` and `event`) and one `task-<id>.log` per task that ran |
 | Used in             | TUI mode only; plain mode and `--dry-run` never open a log                                                     |
 | Error Handling      | `Open` errors exit 1 before the view opens (`--log-dir: ...`); a `Record` error stops the run                  |
+
+## Test Seam
+
+There is no injectable runner; `runLoop` execs inline. Both test suites (`internal/looper`, `tests/e2e`) build a fake `claude` into a temp dir, put it first on `PATH` for the gralph process only, and drive it with environment variables, because gralph passes fixed argv. `internal/tui` tests drive `Model` and `SetupModel` directly, or `tui.Run` and `tui.Setup` with test program options. The e2e tests are black-box and have no terminal, so they always run plain mode.
 
 ## Data Flow
 
