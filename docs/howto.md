@@ -4,6 +4,7 @@
 
 - [What gralph is](#what-gralph-is)
 - [Before you start](#before-you-start)
+- [Installing gralph](#installing-gralph)
 - [Your first run](#your-first-run)
 - [The task file](#the-task-file)
 - [How a run works](#how-a-run-works)
@@ -64,6 +65,71 @@ may need to install). On macOS, it's Seatbelt, which is built in. If the
 sandbox can't start during a run, the session exits non-zero and the task
 fails. Gralph never falls back to running unsandboxed. See
 [Sandboxing sessions](#sandboxing-sessions) for details.
+
+## Installing gralph
+
+You don't need Go, or the source. Every release has an archive for each
+platform at <https://github.com/twistingmercury/gralph/releases>: Linux and
+macOS, each for `amd64` (Intel and AMD) and `arm64` (Apple silicon and other
+ARM machines). An archive holds three files: `gralph`, this guide
+(`howto.md`), and `LICENSE`.
+
+Set the three variables for the version you want and your machine, then run
+the rest as it is:
+
+```bash
+VERSION=v0.9.7   # the release you want, from the releases page
+OS=linux         # or darwin, for macOS
+ARCH=amd64       # or arm64
+
+BASE="https://github.com/twistingmercury/gralph/releases/download/${VERSION}"
+curl -fsSLO "${BASE}/gralph_${VERSION}_${OS}_${ARCH}.tar.gz"
+curl -fsSLO "${BASE}/checksums.txt"
+
+sha256sum -c --ignore-missing checksums.txt
+
+tar -xzf "gralph_${VERSION}_${OS}_${ARCH}.tar.gz"
+mkdir -p ~/.local/bin
+mv gralph ~/.local/bin/
+
+gralph --version
+gralph --install-skill
+```
+
+Not sure which `ARCH` you have? `uname -m` prints `x86_64` for `amd64`, and
+`arm64` or `aarch64` for `arm64`.
+
+On macOS there's no `sha256sum`. Use this line for the check instead:
+
+```bash
+shasum -a 256 -c --ignore-missing checksums.txt
+```
+
+The check should print the archive's name followed by `OK`. If it doesn't,
+the download is damaged: delete it and download again.
+
+If `gralph --version` says "command not found", `~/.local/bin` isn't on your
+`PATH`. Add it with the line for your shell, then open a new terminal:
+
+```bash
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc   # bash
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc    # zsh (the macOS default)
+```
+
+The macOS archives haven't been tried on a Mac yet. One thing is known: if you
+download an archive with a browser instead of `curl`, macOS quarantines it and
+refuses to run `gralph`. Clear that with:
+
+```bash
+xattr -d com.apple.quarantine ~/.local/bin/gralph
+```
+
+To upgrade, do the same steps with the new version. Don't skip
+`gralph --install-skill`: gralph won't start a run while the installed skill
+comes from a different version.
+
+If you'd rather build gralph yourself, get the source and run
+`make local install`. That needs Go and make.
 
 ## Your first run
 
