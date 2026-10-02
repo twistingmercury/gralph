@@ -181,6 +181,44 @@ func TestCheckLogDir(t *testing.T) {
 	}
 }
 
+func TestResolveDir(t *testing.T) {
+	full := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(full, "tasks.yaml"), []byte("x"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(full, "prompt.md"), []byte("x"), 0o600))
+	noPrompt := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(noPrompt, "tasks.yaml"), []byte("x"), 0o600))
+	empty := t.TempDir()
+
+	cases := map[string]struct {
+		dir, tasks, prompt string
+		dryRun             bool
+		wantTasks          string
+		wantPrompt         string
+		wantErr            string
+	}{
+		"no folder leaves the flags alone": {tasks: "a.yaml", prompt: "b.md", wantTasks: "a.yaml", wantPrompt: "b.md"},
+		"folder fills both":                {dir: full, wantTasks: filepath.Join(full, "tasks.yaml"), wantPrompt: filepath.Join(full, "prompt.md")},
+		"flag wins over the folder":        {dir: full, tasks: "other.yaml", wantTasks: "other.yaml", wantPrompt: filepath.Join(full, "prompt.md")},
+		"missing tasks.yaml":               {dir: empty, wantErr: "--dir: no tasks.yaml in " + empty},
+		"missing prompt.md":                {dir: noPrompt, wantErr: "--dir: no prompt.md in " + noPrompt},
+		"dry run needs no prompt.md":       {dir: noPrompt, dryRun: true, wantTasks: filepath.Join(noPrompt, "tasks.yaml"), wantPrompt: ""},
+		"a flag fills the missing file":    {dir: noPrompt, prompt: "p.md", wantTasks: filepath.Join(noPrompt, "tasks.yaml"), wantPrompt: "p.md"},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			gotTasks, gotPrompt, err := resolveDir(tc.dir, tc.tasks, tc.prompt, tc.dryRun)
+			if tc.wantErr != "" {
+				assert.EqualError(t, err, tc.wantErr)
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, tc.wantTasks, gotTasks)
+			assert.Equal(t, tc.wantPrompt, gotPrompt)
+		})
+	}
+}
+
 func TestOpenLog_NotPassedOpensNothing(t *testing.T) {
 	runLog, err := openLog("", nil, runlog.Info{})
 

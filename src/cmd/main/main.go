@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -22,8 +23,9 @@ import (
 
 var (
 	versionFlag     = pflag.BoolP("version", "v", false, "Show the current version of gralph")
-	tasksFlag       = pflag.StringP("tasks", "t", "", "Path to the tasks.yaml task list that drives the loop; required, but asked for when missing in the full-screen view")
-	promptFlag      = pflag.StringP("prompt", "p", "", "Path to the prompt.md shared prompt passed to Claude with every task; required unless --dry-run, but asked for when missing in the full-screen view")
+	dirFlag         = pflag.StringP("dir", "d", "", "Run folder holding tasks.yaml and prompt.md; --tasks and --prompt override either file")
+	tasksFlag       = pflag.StringP("tasks", "t", "", "Path to the tasks.yaml task list that drives the loop; required unless --dir gives it, but asked for when missing in the full-screen view")
+	promptFlag      = pflag.StringP("prompt", "p", "", "Path to the prompt.md shared prompt passed to Claude with every task; required unless --dry-run or --dir gives it, but asked for when missing in the full-screen view")
 	dryRunFlag      = pflag.Bool("dry-run", false, "Validate the tasks file and report failed tasks without running anything")
 	installFlag     = pflag.Bool("install-skill", false, "Install the gralph-docs-writer skill bundled with this binary into ~/.claude/skills")
 	gateTimeoutFlag = pflag.String("gate-timeout", "", "Limit for every gate, such as 90s or 10m; overrides each gate's own timeout (default: the gate's timeout, else 10m)")
@@ -38,6 +40,7 @@ func main() {
 	pflag.Parse()
 	checkVersion()
 	checkInstallSkill()
+	validateDir()
 	validateGateTimeout()
 	stdinFd := os.Stdin.Fd()
 	stdinTTY := term.IsTerminal(stdinFd)
@@ -260,6 +263,51 @@ func checkInstallSkill() {
 
 	fmt.Println(path)
 	os.Exit(0)
+}
+
+// validateDir resolves --dir into --tasks and --prompt before any other
+// check, so every later check sees the paths the run will use.
+func validateDir() {
+	tasksPath, promptPath, err := resolveDir(*dirFlag, *tasksFlag, *promptFlag, *dryRunFlag)
+	if err != nil {
+		fatal(err)
+	}
+
+	*tasksFlag, *promptFlag = tasksPath, promptPath
+}
+
+// resolveDir turns a run folder into the two file paths. The names are fixed
+// so a folder written by the skill needs no other flag; a path passed by flag
+// always wins (ADR-018). A dry run never reads the prompt, so it does not
+// require one.
+func resolveDir(dir, tasksPath, promptPath string, dryRun bool) (string, string, error) {
+	if dir == "" {
+		return tasksPath, promptPath, nil
+	}
+
+	if tasksPath == "" {
+		tasksPath = filepath.Join(dir, "tasks.yaml")
+		if err := requireFile(tasksPath, dir, "tasks.yaml"); err != nil {
+			return "", "", err
+		}
+	}
+
+	if promptPath == "" && !dryRun {
+		promptPath = filepath.Join(dir, "prompt.md")
+		if err := requireFile(promptPath, dir, "prompt.md"); err != nil {
+			return "", "", err
+		}
+	}
+
+	return tasksPath, promptPath, nil
+}
+
+func requireFile(path, dir, name string) error {
+	if _, err := os.Stat(path); err != nil {
+		return fmt.Errorf("--dir: no %s in %s", name, dir)
+	}
+
+	return nil
 }
 
 // validateGateTimeout rejects a bad --gate-timeout before anything loads or

@@ -50,6 +50,7 @@ fixing your `PATH`, macOS notes, and upgrading are in
 gralph --install-skill   # once: installs the gralph-docs-writer skill for Claude Code
 gralph -t path/to/tasks.yaml --dry-run
 gralph --prompt path/to/prompt.md --tasks path/to/tasks.yaml --sandbox-settings path/to/sandbox.json
+gralph -d path/to/folder --sandbox-settings path/to/sandbox.json
 ```
 
 Run it in a terminal and you get a full-screen view of the run. Pipe it,

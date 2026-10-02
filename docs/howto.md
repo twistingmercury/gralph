@@ -225,6 +225,23 @@ tasks:
 - Tasks run in file order. The `id` just identifies a task; it doesn't set the
   order.
 
+### Run folders
+
+The task file and the prompt usually sit together in one folder. Name the
+folder with `-d` (`--dir`) instead of passing both paths:
+
+```bash
+gralph -d .local/widgets --sandbox-settings sandbox.json
+```
+
+The names are fixed: `-d` means `<folder>/tasks.yaml` and `<folder>/prompt.md`.
+`-t` or `-p` still wins over the folder's file, so
+`gralph -d .local/widgets -t .local/widgets/tasks-v2.yaml` runs `tasks-v2.yaml`
+with the folder's prompt. If the folder lacks a file and no flag gives it,
+gralph stops with `error: --dir: no tasks.yaml in <folder>` (or `prompt.md`)
+and exits 1. A dry run never reads the prompt, so `gralph -d <folder> --dry-run`
+needs no `prompt.md`.
+
 ### The gralph-docs-writer skill
 
 Writing a good task file by hand is tedious, so gralph ships a Claude Code
@@ -753,19 +770,20 @@ Still stuck, or got a question or an idea? Ask in
 gralph --prompt path/to/prompt.md --tasks path/to/tasks.yaml --sandbox-settings path/to/sandbox.json
 ```
 
-| Flag                 | Required                                                                | Description                                                                                                                 |
-| -------------------- | ----------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| `--prompt` / `-p`    | Yes, unless `--dry-run`; asked for when missing in the full-screen view | Path to the shared prompt sent to Claude for every task                                                                     |
-| `--tasks` / `-t`     | Yes; asked for when missing in the full-screen view                     | Path to the YAML task list that drives the loop                                                                             |
-| `--sandbox-settings` | One of these two for any real run; not both                             | Path to a Claude Code settings file; sessions run in Claude's sandbox with it                                               |
-| `--skip-permissions` | One of these two for any real run; not both                             | Run sessions with no sandbox and no permission checks. You're on your own (see [Sandboxing sessions](#sandboxing-sessions)) |
-| `--gate-timeout`     | No                                                                      | Time limit for every gate, like `90s`; overrides the task file's                                                            |
-| `--commit`           | No                                                                      | Commit each completed task with git, after the gates pass                                                                   |
-| `--log-dir`          | No                                                                      | Directory to keep a record of the run in; full-screen view only                                                             |
-| `--dry-run`          | No                                                                      | Validate the task file and report on it without running anything                                                            |
-| `--no-tui`           | No                                                                      | Use plain output instead of the full-screen view                                                                            |
-| `--install-skill`    | No                                                                      | Install the bundled `gralph-docs-writer` skill for Claude Code and exit                                                     |
-| `--version` / `-v`   | No                                                                      | Print version information and exit                                                                                          |
+| Flag                 | Required                                                                                       | Description                                                                                                                 |
+| -------------------- | ---------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `--dir` / `-d`       | No; gives `--tasks` and `--prompt` when they are not passed                                    | Run folder holding `tasks.yaml` and `prompt.md` (see [Run folders](#run-folders))                                           |
+| `--prompt` / `-p`    | Yes, unless `--dir` gives it or `--dry-run`; asked for when missing in the full-screen view    | Path to the shared prompt sent to Claude for every task                                                                     |
+| `--tasks` / `-t`     | Yes, unless `--dir` gives it; asked for when missing in the full-screen view                   | Path to the YAML task list that drives the loop                                                                             |
+| `--sandbox-settings` | One of these two for any real run; not both                                                    | Path to a Claude Code settings file; sessions run in Claude's sandbox with it                                               |
+| `--skip-permissions` | One of these two for any real run; not both                                                    | Run sessions with no sandbox and no permission checks. You're on your own (see [Sandboxing sessions](#sandboxing-sessions)) |
+| `--gate-timeout`     | No                                                                                             | Time limit for every gate, like `90s`; overrides the task file's                                                            |
+| `--commit`           | No                                                                                             | Commit each completed task with git, after the gates pass                                                                   |
+| `--log-dir`          | No                                                                                             | Directory to keep a record of the run in; full-screen view only                                                             |
+| `--dry-run`          | No                                                                                             | Validate the task file and report on it without running anything                                                            |
+| `--no-tui`           | No                                                                                             | Use plain output instead of the full-screen view                                                                            |
+| `--install-skill`    | No                                                                                             | Install the bundled `gralph-docs-writer` skill for Claude Code and exit                                                     |
+| `--version` / `-v`   | No                                                                                             | Print version information and exit                                                                                          |
 
 Run it in a terminal and you get a full-screen view of the run (see
 [The full-screen view](#the-full-screen-view)). Pipe it, redirect it, run it in

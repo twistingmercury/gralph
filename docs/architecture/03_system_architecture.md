@@ -1,8 +1,8 @@
 # Gralph — System Architecture
 
-> **Version**: v17
+> **Version**: v18
 > **Date**: 2026-10-02
-> **Notes**: Gates moved to one top-level list per task file (ADR-019): the task parser, gate runner, and dry run were updated.
+> **Notes**: `cmd/main` resolves `-d/--dir` into the task and prompt paths before any other startup check (ADR-018).
 
 [Back to Overview](00_overview.md) | [Back to Project README](../../README.md)
 
@@ -64,9 +64,10 @@ graph TB
 
 **Responsibilities:**
 
-- Parse command-line flags (--prompt, --tasks, --sandbox-settings, --skip-permissions, --dry-run, --no-tui, --gate-timeout, --commit, --log-dir, --install-skill, --version)
+- Parse command-line flags (--dir, --prompt, --tasks, --sandbox-settings, --skip-permissions, --dry-run, --no-tui, --gate-timeout, --commit, --log-dir, --install-skill, --version)
+- Resolve `--dir` first (ADR-018): `validateDir` calls `resolveDir`, which fills an unset `--tasks` with `<folder>/tasks.yaml` and an unset `--prompt` with `<folder>/prompt.md` (not on `--dry-run`, which never reads the prompt), and writes the results back into the two flags so every later check sees resolved paths. A flag always wins over the folder's file. A file the folder lacks and no flag gives exits 1 with `--dir: no tasks.yaml in <folder>` (or `prompt.md`), in both modes
 - Validate `--gate-timeout` (if set) before any load or run; bad value exits 1. `validateGateTimeout` uses `tasks.ParseTimeout`, the same parser and rules as a gate's `timeout` field
-- Startup order: `--gate-timeout` check, mode selection, plain mode's required flags, `validateLogDir`, `validateSessionFlags`, the skill check, then the dry run, plain run, or TUI. Every startup error in `main` goes through `fatal` (`error: ` prefix, exit 1)
+- Startup order: `--dir`, `--gate-timeout` check, mode selection, plain mode's required flags, `validateLogDir`, `validateSessionFlags`, the skill check, then the dry run, plain run, or TUI. Every startup error in `main` goes through `fatal` (`error: ` prefix, exit 1)
 - Choose the mode: plain when `--dry-run`, `--no-tui`, or stdin or stdout is not a terminal (`github.com/charmbracelet/x/term`); otherwise the TUI
 - Pick the session flags (`validateSessionFlags`/`sessionArgs`), after the `--gate-timeout` check and plain mode's required flags and before the skill check: `looper.SandboxArgs` for `--sandbox-settings`, `looper.BypassArgs` for `--skip-permissions`. Both flags together, or neither on a real run, exits 1; an empty `--sandbox-settings=` counts as not passed. A dry run needs neither, but a settings file it is given is still checked. The result goes to `looper.Start` and `tui.Run`
 - Plain mode: validate required flags and `--gate-timeout`, then route to `looper.Start` (normal run) or `looper.DryRun` (validation only)
