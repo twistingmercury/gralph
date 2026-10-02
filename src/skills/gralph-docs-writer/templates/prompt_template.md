@@ -17,6 +17,7 @@ the repository.
 - Never edit or commit `tasks.yaml`.
 - Preserve unrelated changes in the workspace and Git.
 - Clean up anything you created that the task does not keep.
+- Before reporting completed, run the project's own checks (tests, linters, the build) and fix what fails.
 
 ## Finish
 

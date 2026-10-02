@@ -1,8 +1,8 @@
 # Gralph — System Architecture
 
-> **Version**: v16
+> **Version**: v17
 > **Date**: 2026-10-02
-> **Notes**: Implementation details previously kept only in CLAUDE.md were added.
+> **Notes**: Gates moved to one top-level list per task file (ADR-019): the task parser, gate runner, and dry run were updated.
 
 [Back to Overview](00_overview.md) | [Back to Project README](../../README.md)
 
@@ -17,7 +17,7 @@
 
 ## Architecture Overview
 
-Gralph is organized into four layers: CLI entry point, terminal UI, looper orchestration, and task/state management. Dependencies point one way: `cmd/main` → `internal/tui` → `internal/looper` → `internal/tasks` (`cmd/main` also calls `internal/looper` directly). Beside them sits the run log writer, `internal/runlog` (ADR-016), used only with `--log-dir`: `cmd/main` → `internal/runlog` → `internal/looper`. The looper loads both input files (prompt.md and tasks.yaml), validates preconditions, then walks each pending task, spawning a fresh Claude session with the combined prompt and reading the result to determine outcome. When the session reports `completed`, the looper runs the task's gates (ADR-013), commands from the task file, and the task is completed only if every one exits zero. With `--commit` (ADR-015), inside a git work tree, the looper then commits the task's changes under the task's name; a commit git refuses fails the task.
+Gralph is organized into four layers: CLI entry point, terminal UI, looper orchestration, and task/state management. Dependencies point one way: `cmd/main` → `internal/tui` → `internal/looper` → `internal/tasks` (`cmd/main` also calls `internal/looper` directly). Beside them sits the run log writer, `internal/runlog` (ADR-016), used only with `--log-dir`: `cmd/main` → `internal/runlog` → `internal/looper`. The looper loads both input files (prompt.md and tasks.yaml), validates preconditions, then walks each pending task, spawning a fresh Claude session with the combined prompt and reading the result to determine outcome. When the session reports `completed`, the looper runs the file's gates (ADR-013, ADR-019), one list of commands at the top of the task file, and the task is completed only if every one exits zero. With `--commit` (ADR-015), inside a git work tree, the looper then commits the task's changes under the task's name; a commit git refuses fails the task.
 
 Every session's argv is `claude --print` plus the **session flags** (ADR-014), which `cmd/main` picks once from the two permission flags and passes down as `sessionArgs`:
 
@@ -120,9 +120,9 @@ graph TB
 - Build every claude command in `claudeCmd`: `--print`, then the stream flags on the TUI path, then the `sessionArgs` it was handed
 - Build the session flags (`sandbox.go`): `SandboxArgs` reads the settings file, forces `sandbox.enabled: true`, `sandbox.allowUnsandboxedCommands: false`, and `sandbox.failIfUnavailable: true`, keeps every other key as raw JSON, and returns `--permission-mode acceptEdits --settings <merged JSON>`; `BypassArgs` returns `--dangerously-skip-permissions`
 - Capture output, parse result line, determine the session's outcome
-- After a `completed` session, run the task's gates (`runGates`); a failing gate makes the task `failed`
+- After a `completed` session, run the file's gates (`runGates`); a failing gate makes the task `failed`
 - Update task state and save atomically after every task
-- `DryRun` (always plain; `--prompt` ignored) loads and prints the task table, lists each gate with its effective timeout and source (gate field, `--gate-timeout` flag, or default), prints `sandbox settings: <path>` when given a settings file, applies the `--commit` work tree check through `repoFor` (printing `commit: <root>`; a dirty tree exits 1), and never execs claude or writes a file
+- `DryRun` (always plain; `--prompt` ignored) loads and prints the task table, lists each of the file's gates once with its effective timeout and source (`printGateLimits`: `gate: <first line of cmd>: <timeout> (flag|gate|default)`), prints `sandbox settings: <path>` when given a settings file, applies the `--commit` work tree check through `repoFor` (printing `commit: <root>`; a dirty tree exits 1), and never execs claude or writes a file
 - Block on first failure
 - Handle SIGINT/SIGTERM via context cancellation (kills the claude or gate process group)
 
@@ -142,13 +142,14 @@ graph TB
 **Responsibilities:**
 
 - Unmarshal into a `yaml.Node` and reject non-core tags anywhere, before decoding; check each `tasks` element in file order (it must be a mapping)
+- Validate the optional top-level `gates` (ADR-019): a sequence (else `gates: must be a sequence`; a repeated key is `gates: duplicate key`); each element a mapping with keys `cmd` (required, nonblank string) and `timeout` (optional, a duration string like `90s` or `10m`); unknown keys are rejected (errors read `gates[<j>]: <field>: <problem>`). `TaskList.Gates` is a `*[]Gate`: nil when the key is absent (not decided yet), non-nil and empty for `gates: []` (decided: none). `SaveTasks` keeps whichever the file had, written above `tasks`. `GateList()` returns the list, empty when the key is absent. Cmd and timeout are stored unaltered
 - Validate each task element in sequence:
   - `id`: required, a positive int16 YAML integer, unique
   - `name`: required, non-empty string, unique (case-insensitive, whitespace trimmed)
   - `prompt`: required, non-empty string
   - `state`: optional string, must be exactly "pending", "completed", or "failed" (no trimming or case folding)
   - `error`: optional string, written by gralph only
-  - `gates`: optional sequence; each element a mapping with keys `cmd` (required, nonblank string) and `timeout` (optional, a duration string like `90s` or `10m`); unknown keys are rejected (errors read `tasks[<i>] (id <id>): gates[<j>]: <field>: <problem>`); stored unaltered and written back by `SaveTasks`, omitted when empty
+  - `gates`: not allowed on a task; fails with `tasks[<i>] (id <id>): gates: gates are set once for the whole file now, as a top-level gates: list; see the HOWTO`. Other unknown task keys are ignored and dropped on save
 - Normalize `state`: empty → `pending`
 - Gate `timeout` is checked by `tasks.ParseTimeout` (a duration greater than zero), shared with the `--gate-timeout` flag
 - Error text reads `tasks[<index>] (id <id>): <field>: <problem>`; the id is omitted when missing or invalid, and file-level errors name no task
@@ -219,8 +220,8 @@ graph TB
 
 **Responsibilities:**
 
-- `runGates` runs after `finishTask` returns `completed`, on both task paths, before the state is saved (ADR-013); it is skipped when the task has no gates or the session failed
-- Run the task's gates in file order, one at a time, each as `sh -c <cmd>` in gralph's working directory, with no stdin, in its own process group (`configureProcessTree`). The call carries the one owner-approved `// #nosec G204` (ADR-013)
+- `runGates` runs after `finishTask` returns `completed`, on both task paths, before the state is saved (ADR-013); it gets the file's gates (`tl.GateList()`, ADR-019), the same list for every task, and is skipped when the session failed. With no gates the task is completed
+- Run the file's gates in file order, one at a time, each as `sh -c <cmd>` in gralph's working directory, with no stdin, in its own process group (`configureProcessTree`). The call carries the one owner-approved `// #nosec G204` (ADR-013)
 - Stop at the first gate that exits non-zero or cannot be started: the task becomes `failed` with error `gate "<cmd>" failed: <exit error>` (or `gate "<cmd>" timed out after <timeout>` when it hit its limit; `<cmd>` is the command's first line), and later gates do not run
 - Plain path (`report == nil`): print `gate: <cmd>` to stdout, then let the gate's stdout and stderr pass straight through
 - TUI path (`report != nil`): write nothing to gralph's stdout/stderr; report `Activity` `→ gate <first line of cmd>`, then one `Activity` per line of the gate's stdout and stderr, then `GateFinished` with the gate's result and duration
@@ -230,7 +231,7 @@ graph TB
 
 | Characteristic      | Value                                                                                                                       |
 | ------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| Input               | The task's `Gates` (`[]tasks.Gate`, each with `Cmd` string and optional `Timeout` string, parsed as a duration at run time) |
+| Input               | The file's gates (`[]tasks.Gate`, each with `Cmd` string and optional `Timeout` string, parsed as a duration at run time)   |
 | Output              | Nothing on success; the failed gate's error message; or a cancellation error                                                |
 | Judged by           | Exit code only; output is shown, never parsed                                                                               |
 | Seen by Claude      | Never; gates are not part of the stdin prompt                                                                               |
@@ -324,7 +325,7 @@ sequenceDiagram
         Claude-->>Looper: stdout, stderr, exit code
         Looper->>Looper: parseResult(last line)
         Looper->>Looper: determine session outcome
-        opt Session completed and the task has gates
+        opt Session completed and the file has gates
             Looper->>Gates: sh -c cmd, one gate at a time
             Gates-->>Looper: exit code (first non-zero fails the task)
         end
@@ -367,7 +368,7 @@ sequenceDiagram
         Claude-->>Looper: stream-json events, stderr lines
         Looper-->>TUI: Activity (one per line)
         Looper->>Looper: session outcome from result event text
-        opt Session completed and the task has gates
+        opt Session completed and the file has gates
             Looper-->>TUI: Activity (gate line, then its output lines)
         end
         opt All gates passed and --commit is set
@@ -430,7 +431,7 @@ sequenceDiagram
 
 ### Trust Boundary: Gralph Process vs. Filesystem
 
-Gralph reads the prompt and task files. Both must be treated as user-provided code: they are executed by Claude, and each task's `gates` commands are run by gralph itself through `sh -c`. Gralph does not sanitize or sandbox them; the user is responsible for not running gralph against untrusted prompts or task files.
+Gralph reads the prompt and task files. Both must be treated as user-provided code: they are executed by Claude, and the file's `gates` commands are run by gralph itself through `sh -c`. Gralph does not sanitize or sandbox them; the user is responsible for not running gralph against untrusted prompts or task files.
 
 The sandbox settings file (`--sandbox-settings`, ADR-014) is a third input. Gralph reads it once at startup and never writes it. It must hold a JSON object; gralph forces `sandbox.enabled: true`, `sandbox.allowUnsandboxedCommands: false`, and `sandbox.failIfUnavailable: true` on top and passes every other key to Claude untouched, so the file cannot turn the sandbox off, but whatever else it opens up is opened. The sandbox limits what a session's shell commands can read, write, and reach; it does not cover gates or commits. With `--skip-permissions` there is no settings file and no limit on the session.
 

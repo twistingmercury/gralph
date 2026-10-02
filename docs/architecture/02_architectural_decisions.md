@@ -1,8 +1,8 @@
 # Gralph — Architectural Decisions
 
-> **Version**: v16
+> **Version**: v17
 > **Date**: 2026-10-02
-> **Notes**: ADR-018 (a run folder and a setup wizard) and ADR-019 (one gate list per task file) proposed, with their build order.
+> **Notes**: ADR-019 (one gate list per task file) accepted; ADR-013 amended by it. ADR-018 (a run folder and a setup wizard) still proposed.
 
 [Back to Overview](00_overview.md) | [Back to Project README](../../README.md)
 
@@ -44,7 +44,7 @@ Each architectural decision is recorded as an ADR with the following structure:
 | ADR-016 | Gralph logs a run on request                                  | Accepted | 2026-10-01 |
 | ADR-017 | Release archives, built by a workflow started by hand         | Accepted | 2026-10-02 |
 | ADR-018 | A run folder and a setup wizard                               | Proposed | 2026-10-02 |
-| ADR-019 | One gate list per task file                                   | Proposed | 2026-10-02 |
+| ADR-019 | One gate list per task file                                   | Accepted | 2026-10-02 |
 
 ## Decisions
 
@@ -442,6 +442,8 @@ Under ADR-005 the only evidence that a task worked is the session's own result l
 
 **Decision:**
 
+_Amended by ADR-019:_ gates are one top-level list per file; the per-task list, its example, its dry-run line, and its skill paragraph are replaced by ADR-019.
+
 A task may carry an optional `gates` list. Each entry is a mapping with keys `cmd` (required, nonblank string) and `timeout` (optional, a duration string):
 
 ```yaml
@@ -794,7 +796,7 @@ _Negative:_
 
 ### ADR-019: One gate list per task file
 
-**Status:** Proposed
+**Status:** Accepted
 
 **Context:**
 

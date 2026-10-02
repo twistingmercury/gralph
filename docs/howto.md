@@ -191,11 +191,15 @@ Here's the quick path from zero to a working run:
 
 ## The task file
 
-A task file is a `tasks` list. Each task needs a unique positive integer `id`,
-a `name` (unique, ignoring case and surrounding spaces), and a `prompt`. `state`
-and `gates` are optional:
+A task file is a `tasks` list, plus an optional top-level `gates` list (see
+[Gates](#gates)). Each task needs a unique positive integer `id`, a `name`
+(unique, ignoring case and surrounding spaces), and a `prompt`. `state` is
+optional:
 
 ```yaml
+gates:
+  - cmd: go test ./...
+    timeout: 10m
 tasks:
   - id: 1
     name: Add the widget repository
@@ -205,9 +209,6 @@ tasks:
 
       Verification:
       - Command: go test ./internal/widget/...
-    gates:
-      - cmd: go test ./internal/widget/...
-        timeout: 10m
   - id: 2
     name: Expose GET /widgets/{id}
     state: pending
@@ -218,10 +219,9 @@ tasks:
 - `state` is `pending`, `completed`, or `failed`. Leave it out for new work;
   it's read as `pending`.
 - Gralph adds an `error` field when a task fails. The session never writes it.
-- `gates` is a list of commands gralph runs itself once the task's session says
-  it's done (see [Gates](#gates)). Each entry has `cmd` (required) and
-  `timeout` (optional, a duration like `90s` or `10m`; when omitted, the gate
-  uses the built-in default 10m, or `--gate-timeout` if that flag is set).
+- `gates` sits at the top level, next to `tasks`, and holds the commands
+  gralph runs itself after every task whose session says it's done (see
+  [Gates](#gates)). A task can't have its own `gates`.
 - Tasks run in file order. The `id` just identifies a task; it doesn't set the
   order.
 
@@ -261,7 +261,7 @@ output (lines that are just code fences don't count). Your shared prompt should
 ask Claude to end with a JSON line like `{"state": "completed", "error": ""}`.
 
 - If that line is valid JSON with `state: "completed"` **and** the session
-  exits zero, gralph runs the task's [gates](#gates), if it has any. When they
+  exits zero, gralph runs the file's [gates](#gates), if it has any. When they
   all pass, or there are none, the task is `completed` and gralph saves the
   file.
 - Anything else marks the task `failed`: a `failed` state, a missing or broken
@@ -296,7 +296,7 @@ anything. `--prompt` is ignored, and since nothing runs, you need neither
 stderr and a non-zero exit. If it's valid, you get a table of each task's id,
 state, and name. If the file has gates, you then get one line per gate showing
 the timeout it would run under and where that came from (`flag`, `gate`, or
-`default`), like `task 1 gate: go test ./...: 10m (default)`. Pass
+`default`), like `gate: go test ./...: 10m (default)`. Pass
 `--gate-timeout` along with `--dry-run` to see what it would change. If you
 pass `--sandbox-settings` too, gralph checks that file the same way a real run
 would and prints `sandbox settings: <path>`. With `--commit`, it also checks
@@ -465,15 +465,31 @@ container or a throwaway VM.
 
 ## Gates
 
-Claude saying a task is done isn't proof. A task can list `gates`: commands
-gralph runs itself once the session exits zero and reports `completed`.
+Claude saying a task is done isn't proof. A task file can have one top-level
+`gates` list: commands gralph runs itself after every task whose session exits
+zero and reports `completed`. Each entry has `cmd` (required) and `timeout`
+(optional, a duration like `90s` or `10m`):
 
+```yaml
+gates:
+  - cmd: golangci-lint run ./...
+    timeout: 5m
+  - cmd: go test ./...
+    timeout: 20m
+tasks:
+  - id: 1
+    name: Add the widget repository
+    prompt: |
+      Add a Postgres-backed WidgetRepository with Create and GetByID.
+```
+
+- The same gates run for every task.
 - Gates run in file order, one at a time, through `sh`, from the directory you
   started gralph in. Pipes and other shell syntax work.
 - A gate passes when it exits zero. Gralph doesn't read its output.
 - If every gate passes, the task is `completed`. The first gate that fails
   marks the task `failed` with `gate "<cmd>" failed: <exit status>` as its
-  error, the rest of its gates are skipped, and the run stops like any other
+  error, the remaining gates are skipped, and the run stops like any other
   failure.
 - Gates don't run when the session itself failed.
 - Claude never sees the gates. If you want Claude to run the same checks
@@ -489,11 +505,12 @@ A few things to know:
   `--gate-timeout` flag if set, the gate's `timeout` value if present, or the
   built-in default 10m. When a gate exceeds its timeout, gralph kills it,
   marks the task `failed` with `gate "<cmd>" timed out after <timeout>`, skips
-  any remaining gates, and stops the run. If your task has slow but legitimate
+  any remaining gates, and stops the run. If you have slow but legitimate
   gates, set `timeout` on them (or use `--gate-timeout` for the whole run).
-- If you have existing task files with no `timeout` set, they now get a 10m
-  limit per gate (previously they had no limit). Gates that legitimately run
-  longer need their own `timeout`.
+- Leaving the `gates` key out and writing `gates: []` aren't the same. With no
+  key, the gates haven't been decided yet, and the full-screen view asks you
+  for them. `gates: []` means you've decided: no gates. Either way, a run with
+  no gates is fine.
 - For a multi-line gate, error messages quote only the command's first line, so
   the reason stays readable.
 - Write gates that check instead of fix: `test -z "$(gofmt -l .)"`, not
@@ -501,7 +518,20 @@ A few things to know:
   it, the task's whole change, including what a gate does, goes into one commit.
 - Resetting a gate-failed task to `pending` runs its whole session again, not
   just the gates. Setting it to `completed` by hand skips them.
-- `--dry-run` checks that `gates` is well formed. It never runs a gate.
+- `--dry-run` checks that `gates` is well formed and lists each gate once,
+  as `gate: <cmd>: <timeout> (flag|gate|default)`. It never runs a gate.
+
+### Gates on a task
+
+Older task files put a `gates` list on each task. That's now an error, and
+gralph won't run the file (a dry run reports it too):
+
+```text
+tasks[0] (id 1): gates: gates are set once for the whole file now, as a top-level gates: list; see the HOWTO
+```
+
+To fix an old file, move one copy of the list to the top level, next to
+`tasks`, and delete the per-task copies.
 
 ## Committing tasks
 
@@ -730,7 +760,7 @@ gralph --prompt path/to/prompt.md --tasks path/to/tasks.yaml --sandbox-settings 
 | `--sandbox-settings` | One of these two for any real run; not both                             | Path to a Claude Code settings file; sessions run in Claude's sandbox with it                                               |
 | `--skip-permissions` | One of these two for any real run; not both                             | Run sessions with no sandbox and no permission checks. You're on your own (see [Sandboxing sessions](#sandboxing-sessions)) |
 | `--gate-timeout`     | No                                                                      | Time limit for every gate, like `90s`; overrides the task file's                                                            |
-| `--commit`           | No                                                                      | Commit each completed task with git, after its gates pass                                                                   |
+| `--commit`           | No                                                                      | Commit each completed task with git, after the gates pass                                                                   |
 | `--log-dir`          | No                                                                      | Directory to keep a record of the run in; full-screen view only                                                             |
 | `--dry-run`          | No                                                                      | Validate the task file and report on it without running anything                                                            |
 | `--no-tui`           | No                                                                      | Use plain output instead of the full-screen view                                                                            |
