@@ -1,8 +1,8 @@
 # Gralph — Architecture Overview
 
-> **Version**: v09
-> **Date**: 2026-10-01
-> **Notes**: Added run logging on request (`--log-dir`, ADR-016): the Run Log Writer component and a note on the full-screen view.
+> **Version**: v10
+> **Date**: 2026-10-02
+> **Notes**: Dropped the Deployment Architecture document from the navigation; it was archived as more than a console app needs.
 
 [Back to Project README](../../README.md)
 
@@ -48,18 +48,18 @@ graph TB
 
 ## System Model
 
-| Component          | Description                                                                         |
-| ------------------ | ----------------------------------------------------------------------------------- |
-| CLI Entrypoint     | Parses flags, picks plain or TUI mode, routes to Start/DryRun or the TUI            |
-| Terminal UI        | Setup screen for missing paths; run view fed live by looper events (`internal/tui`) |
+| Component          | Description                                                                                                                                   |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| CLI Entrypoint     | Parses flags, picks plain or TUI mode, routes to Start/DryRun or the TUI                                                                      |
+| Terminal UI        | Setup screen for missing paths; run view fed live by looper events (`internal/tui`)                                                           |
 | Looper             | Orchestrates the loop: loads files, checks preconditions, runs tasks sequentially; plain or stream-json task path chosen by the `report` hook |
-| Task Parser        | Strict YAML validation: rejects any invalid element, whole file fails at parse time |
-| Process Manager    | Spawns claude subprocess in its own process group; kills group on SIGINT/SIGTERM   |
-| State Persistence  | Atomic task state writes via temp-file + rename; YAML rewritten on every change    |
-| Result Interpreter | Parses JSON result line from claude output; missing/invalid line = failed          |
-| Gate Runner        | After a `completed` session, runs the task's `gates` commands with `sh -c`; any non-zero exit = failed |
-| Committer          | With `--commit`, commits a completed task's changes after its gates; requires a clean work tree at startup |
-| Run Log Writer     | With `--log-dir` (TUI only), writes a JSON-lines ledger and a detail file per task from the looper's events (`internal/runlog`) |
+| Task Parser        | Strict YAML validation: rejects any invalid element, whole file fails at parse time                                                           |
+| Process Manager    | Spawns claude subprocess in its own process group; kills group on SIGINT/SIGTERM                                                              |
+| State Persistence  | Atomic task state writes via temp-file + rename; YAML rewritten on every change                                                               |
+| Result Interpreter | Parses JSON result line from claude output; missing/invalid line = failed                                                                     |
+| Gate Runner        | After a `completed` session, runs the task's `gates` commands with `sh -c`; any non-zero exit = failed                                        |
+| Committer          | With `--commit`, commits a completed task's changes after its gates; requires a clean work tree at startup                                    |
+| Run Log Writer     | With `--log-dir` (TUI only), writes a JSON-lines ledger and a detail file per task from the looper's events (`internal/runlog`)               |
 
 ## Key Principles
 
@@ -80,10 +80,9 @@ graph TB
 
 | #   | Document                                                    | Description                           | Status  |
 | --- | ----------------------------------------------------------- | ------------------------------------- | ------- |
-| 00  | [Overview](00_overview.md)                              | This document                         | Current |
-| 01  | [Requirements](01_requirements.md)                      | Problem statement, goals, constraints | Active  |
-| 02  | [Architectural Decisions](02_architectural_decisions.md) | ADR log                               | Active  |
-| 03  | [System Architecture](03_system_architecture.md)        | Components, data flow, boundaries     | Active  |
-| 05  | [Deployment Architecture](05_deployment_architecture.md) | Deployment, infrastructure, scaling   | Active  |
+| 00  | [Overview](00_overview.md)                                  | This document                         | Current |
+| 01  | [Requirements](01_requirements.md)                          | Problem statement, goals, constraints | Active  |
+| 02  | [Architectural Decisions](02_architectural_decisions.md)    | ADR log                               | Active  |
+| 03  | [System Architecture](03_system_architecture.md)            | Components, data flow, boundaries     | Active  |
 
 **Next:** [Requirements](01_requirements.md)

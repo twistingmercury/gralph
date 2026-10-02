@@ -19,6 +19,7 @@
 Complex software tasks often require a sequence of steps that depend on prior work. When orchestrating AI-assisted workflows, executing each step in a fresh session (with no context from prior steps) ensures determinism but requires careful prompt engineering and state tracking.
 
 Claude Code users need a way to:
+
 - Define a sequence of related tasks
 - Run each in a fresh Claude session with a shared prompt
 - Track which tasks completed, which failed
@@ -72,20 +73,20 @@ Claude Code users need a way to:
 
 ## Success Criteria
 
-| Criterion                               | Target                                 | Measurement Method                              |
-| --------------------------------------- | -------------------------------------- | ----------------------------------------------- |
-| Task file validation                    | Whole file rejected on any invalid     | Unit tests and e2e tests verify rejection       |
-| State persistence                       | Atomic writes, no partial state       | E2E tests verify file state after each run      |
-| Failed task blocking                    | Gralph refuses to run with any failed | E2E test attempts run with failed task, expect exit 1 |
-| Dry-run accuracy                        | Task summary table matches actual run | Dry-run e2e tests compare output format         |
-| Gate enforcement                        | Completed only when every gate exits zero; gates skipped when the session failed | Unit and e2e tests run real shell commands as passing and failing gates |
-| Session permissions                     | Sandboxed argv with the three forced keys, or the bypass flag; neither or both flags exits 1 | Unit tests on the merged settings; e2e tests assert the recorded argv and the flag errors |
-| Session independence                    | Each task has only its prompt + task  | Golden test asserts combined-prompt format      |
-| Exit code correctness                   | Zero only when all tasks complete     | E2E test matrix covers pass/fail/cancel cases   |
-| Signal handling                         | SIGINT/SIGTERM kills claude group    | Process tree test verifies Setpgid and signal   |
-| Commit on request                       | One commit per completed task, named after it; none for a failed task; a dirty tree refuses to start | Unit and e2e tests run real git in temporary repositories |
-| Run logging on request                  | With `--log-dir`, one folder per run holding the ledger and a detail file per task; nothing written without it; plain mode with the flag exits 1 | Unit tests feed events to `internal/runlog` and assert the files; e2e tests pin the plain-mode refusal and that `--dry-run` ignores the flag |
-| Unix-only behavior                      | No Windows build, no runtime fallback | Build pipeline has no Windows target            |
+| Criterion              | Target                                                                                                                                           | Measurement Method                                                                                                                           |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| Task file validation   | Whole file rejected on any invalid                                                                                                               | Unit tests and e2e tests verify rejection                                                                                                    |
+| State persistence      | Atomic writes, no partial state                                                                                                                  | E2E tests verify file state after each run                                                                                                   |
+| Failed task blocking   | Gralph refuses to run with any failed                                                                                                            | E2E test attempts run with failed task, expect exit 1                                                                                        |
+| Dry-run accuracy       | Task summary table matches actual run                                                                                                            | Dry-run e2e tests compare output format                                                                                                      |
+| Gate enforcement       | Completed only when every gate exits zero; gates skipped when the session failed                                                                 | Unit and e2e tests run real shell commands as passing and failing gates                                                                      |
+| Session permissions    | Sandboxed argv with the three forced keys, or the bypass flag; neither or both flags exits 1                                                     | Unit tests on the merged settings; e2e tests assert the recorded argv and the flag errors                                                    |
+| Session independence   | Each task has only its prompt + task                                                                                                             | Golden test asserts combined-prompt format                                                                                                   |
+| Exit code correctness  | Zero only when all tasks complete                                                                                                                | E2E test matrix covers pass/fail/cancel cases                                                                                                |
+| Signal handling        | SIGINT/SIGTERM kills claude group                                                                                                                | Process tree test verifies Setpgid and signal                                                                                                |
+| Commit on request      | One commit per completed task, named after it; none for a failed task; a dirty tree refuses to start                                             | Unit and e2e tests run real git in temporary repositories                                                                                    |
+| Run logging on request | With `--log-dir`, one folder per run holding the ledger and a detail file per task; nothing written without it; plain mode with the flag exits 1 | Unit tests feed events to `internal/runlog` and assert the files; e2e tests pin the plain-mode refusal and that `--dry-run` ignores the flag |
+| Unix-only behavior     | No Windows build, no runtime fallback                                                                                                            | Build pipeline has no Windows target                                                                                                         |
 
 ## Constraints
 

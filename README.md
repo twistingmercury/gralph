@@ -550,7 +550,7 @@ shows any problem right under the field. `esc` or `ctrl+c` quits with
 `failed` task prints the task table and exits 1 before the view ever opens.
 
 Want the background? The idea behind gralph is in
-[docs/gralph-concept.md](docs/gralph-concept.md), and the design starts at
+[.archive/gralph-concept.md](.archive/gralph-concept.md), and the design starts at
 [docs/architecture/00_overview.md](docs/architecture/00_overview.md).
 
 ## Key Considerations
