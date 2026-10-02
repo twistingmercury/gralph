@@ -85,9 +85,21 @@ More on each of these in
 
 ## Development Considerations
 
-### Quick Start
+### Prerequisites
 
-Requires Go 1.27.1 or later.
+| Tool                                                 | Needed for                                            |
+| ---------------------------------------------------- | ----------------------------------------------------- |
+| Go 1.27.1 or later                                   | `make local`, `make test`, `make analyze`             |
+| make                                                 | Every target                                          |
+| git                                                  | Cloning; the version stamped into the binary          |
+| Docker, with the `docker compose` plugin             | `make build` (the release build and the e2e suite)    |
+| `goimports`, `golangci-lint`, `govulncheck`, `gosec` | `make analyze`, each on your `PATH`                   |
+
+You don't need the lint tools or Docker for a quick local build. And `make
+build` doesn't need the lint tools on your machine: they're in the image it
+builds with.
+
+### Quick Start
 
 ```bash
 git clone https://github.com/twistingmercury/gralph.git
