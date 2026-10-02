@@ -81,7 +81,7 @@ Set the three variables on the first three lines, then run the rest as it is:
 - `ARCH` is `amd64` or `arm64`.
 
 ```bash
-VERSION=v0.9.7
+VERSION=v0.9.8
 OS=linux
 ARCH=amd64
 
