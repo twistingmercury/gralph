@@ -74,13 +74,16 @@ macOS, each for `amd64` (Intel and AMD) and `arm64` (Apple silicon and other
 ARM machines). An archive holds three files: `gralph`, this guide
 (`howto.md`), and `LICENSE`.
 
-Set the three variables for the version you want and your machine, then run
-the rest as it is:
+Set the three variables on the first three lines, then run the rest as it is:
+
+- `VERSION` is the release you want, from the releases page.
+- `OS` is `linux`, or `darwin` for macOS.
+- `ARCH` is `amd64` or `arm64`.
 
 ```bash
-VERSION=v0.9.7   # the release you want, from the releases page
-OS=linux         # or darwin, for macOS
-ARCH=amd64       # or arm64
+VERSION=v0.9.7
+OS=linux
+ARCH=amd64
 
 BASE="https://github.com/twistingmercury/gralph/releases/download/${VERSION}"
 curl -fsSLO "${BASE}/gralph_${VERSION}_${OS}_${ARCH}.tar.gz"
@@ -121,11 +124,18 @@ tar -xzf "gralph_${VERSION}_${OS}_${ARCH}.tar.gz" -C ~/.local/share/gralph howto
 ```
 
 If `gralph --version` says "command not found", `~/.local/bin` isn't on your
-`PATH`. Add it with the line for your shell, then open a new terminal:
+`PATH`. Add it with the line for your shell, then open a new terminal.
+
+For bash:
 
 ```bash
-echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc   # bash
-echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc    # zsh (the macOS default)
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
+```
+
+For zsh (the macOS default):
+
+```bash
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
 ```
 
 The macOS archives haven't been tried on a Mac yet. One thing is known: if you

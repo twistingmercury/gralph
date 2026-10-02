@@ -27,12 +27,13 @@ context instead of one long session that drifts.
 
 You don't need Go. Download the archive for your machine from the
 [releases page](https://github.com/twistingmercury/gralph/releases) and unpack
-`gralph` into `~/.local/bin`:
+`gralph` into `~/.local/bin`. Set `VERSION` to the release you want, `OS` to
+`linux` or `darwin`, and `ARCH` to `amd64` or `arm64`:
 
 ```bash
-VERSION=v0.9.7   # the release you want
-OS=linux         # or darwin
-ARCH=amd64       # or arm64
+VERSION=v0.9.7
+OS=linux
+ARCH=amd64
 
 curl -fsSLO "https://github.com/twistingmercury/gralph/releases/download/${VERSION}/gralph_${VERSION}_${OS}_${ARCH}.tar.gz"
 mkdir -p ~/.local/bin
