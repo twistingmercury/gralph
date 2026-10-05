@@ -1,8 +1,8 @@
 # Gralph — Architectural Decisions
 
-> **Version**: v25
+> **Version**: v26
 > **Date**: 2026-10-05
-> **Notes**: ADR-021 accepted: `-d <folder>` also resolves `<folder>/sandbox.json` as `--sandbox-settings`, and `--skip-permissions` opts out of it. ADR-014 and ADR-018 carry notes of what it changed. Earlier: ADR-020 moved the shared prompt and gates into `tasks.yaml` under `shared`.
+> **Notes**: ADR-022 accepted: gralph no longer checks the installed skill, so a missing, edited, or old skill never stops a run; it supersedes ADR-010 and amends ADR-009. Earlier: ADR-021 made `-d` resolve the run folder's `sandbox.json`.
 
 [Back to Overview](00_overview.md) | [Back to Project README](../../README.md)
 
@@ -35,7 +35,7 @@ Each architectural decision is recorded as an ADR with the following structure:
 | ADR-007 | Unix only, process group lifecycle management                 | Accepted | 2026-09-25 |
 | ADR-008 | Docker-first CI: build, test, e2e in container                | Accepted | 2026-09-25 |
 | ADR-009 | Embed the skill, install with --install-skill                 | Accepted | 2026-09-25 |
-| ADR-010 | Refuse to run with a stale installed skill                    | Accepted | 2026-09-25 |
+| ADR-010 | Refuse to run with a stale installed skill                    | Superseded by ADR-022 | 2026-09-25 |
 | ADR-011 | Full-screen TUI by default, plain mode intact                 | Accepted | 2026-09-25 |
 | ADR-012 | Bubble Tea v2 for the TUI, confined to its use                | Accepted | 2026-09-25 |
 | ADR-013 | Gralph runs a task's gates after a completed session          | Accepted | 2026-09-30 |
@@ -47,6 +47,7 @@ Each architectural decision is recorded as an ADR with the following structure:
 | ADR-019 | One gate list per task file                                   | Accepted | 2026-10-02 |
 | ADR-020 | The shared prompt and gates live in the task file             | Accepted | 2026-10-05 |
 | ADR-021 | The run folder's sandbox.json answers the permission choice   | Accepted | 2026-10-05 |
+| ADR-022 | Gralph does not check the installed skill                     | Accepted | 2026-10-05 |
 
 ## Decisions
 
@@ -332,11 +333,13 @@ _Negative:_
 
 _Amended by ADR-010:_ A stale install is now detected: a run or dry run exits 1 and tells the user to run `gralph --install-skill`.
 
+_Amended by ADR-022:_ That detection is gone. Nothing compares the installed copy with the binary again, and `--install-skill` writes only the embedded files.
+
 ---
 
 ### ADR-010: Refuse to run with a stale installed skill
 
-**Status:** Accepted
+**Status:** Superseded by ADR-022
 
 **Context:**
 
@@ -968,6 +971,44 @@ _Negative:_
 - A settings file in a run folder is applied without being named on the command line, so it is as trusted as the folder's `tasks.yaml`, which is already code the run executes. Plain mode says nothing about it; the dry run and the run log do.
 - The wizard cannot pick "skip permissions" for a folder holding the file; the flag is the only way
 - Going back in the wizard and picking a different folder keeps the first folder's sandbox file, the same way it already keeps the first folder's task file; the wizard's folder step is built to be answered once
+
+---
+
+### ADR-022: Gralph does not check the installed skill
+
+**Status:** Accepted
+
+**Context:**
+
+ADR-010 made every run and every `--dry-run` refuse to start unless the installed `gralph-docs-writer` skill matched the binary's embedded copy by content hash. It listed its own costs: every run needs the skill installed even for someone who never generates a task file with it, local edits to the installed skill make every run fail until `--install-skill` overwrites them, and every test that runs gralph needs a `HOME` with the skill installed. The skill is a helper, and people adapt it to their own projects: their commit rules, their gates, their wording. A check that treats any edit as damage works against that, and it gates a program that does not need the skill at all.
+
+**Decision:**
+
+Gralph stops checking the installed skill. A missing, edited, or old skill never changes whether a run or a dry run starts.
+
+- **Removed.** `skillinstall.Check`, its call at the end of the startup checks, `Hash`, and the `VERSION` file that `--install-skill` wrote for the check. The startup order loses its last step and nothing else moves.
+- **Kept.** `--install-skill` still replaces `~/.claude/skills/gralph-docs-writer` with the files embedded in the binary, prints the path, and exits 0 (1 on error), as ADR-009 says. It is now only a convenience for getting the skill that matches this binary. It still removes the folder first, so running it again discards edits made to the installed copy.
+- **No replacement.** No warning, notice, or flag. A warning would still nag the people this is for, and ADR-009 already decided against an override flag or environment variable.
+- **A stale skill fails where it matters.** The task file parser is strict (ADR-002, ADR-020), so a file a stale skill generated that the current gralph cannot read is rejected with a message naming the field, and the skill's own last step is a `--dry-run` of what it wrote. The failure moves from "gralph will not start" to "gralph rejects this file".
+- **Tests.** The e2e suite no longer installs the skill into a shared `HOME`; tests that start a run need no skill, and new tests pin that a run and a dry run start with no skill installed and with an edited one.
+
+**Changes to earlier ADRs on acceptance:** ADR-010 is superseded. ADR-009's `--install-skill` stands without its detection note.
+
+Alternatives not taken: a warning on a stale skill (still blocks nothing but still nags, and costs the hash this removes); keeping the hash and skipping the check for an edited skill (a hash cannot tell an edit from an old version); an opt-out flag or environment variable (more surface, and ADR-009 refused one); keeping the `VERSION` file as information only (nothing would read it).
+
+**Consequences:**
+
+_Positive:_
+
+- Runs and dry runs need no skill installed, and people can edit the installed skill freely
+- The `VERSION` stamp, the hash, and the shared test `HOME` setup are gone, along with the "development install fails the check" trap from `scripts/install_skill.sh`
+- A new gralph never makes an old skill block anyone's work
+
+_Negative:_
+
+- After an upgrade nothing tells a user to reinstall, so a skill can drift from the parser without notice; the HOWTO's upgrade steps still say to run `gralph --install-skill`
+- A stale skill may generate task files the current gralph rejects, which the user finds by running `--dry-run`
+- Re-running `--install-skill` still discards edits to the installed skill
 
 ---
 
