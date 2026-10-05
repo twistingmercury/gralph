@@ -1,8 +1,8 @@
 # Gralph — Architectural Decisions
 
-> **Version**: v23
+> **Version**: v24
 > **Date**: 2026-10-05
-> **Notes**: ADR-020 accepted: the shared prompt moves into `tasks.yaml` under a `shared` block with the gates, and `-p/--prompt` and `prompt.md` are removed. ADR-002, ADR-015, ADR-016, ADR-018, and ADR-019 carry notes of what it changed.
+> **Notes**: ADR-020 accepted: the shared prompt moves into `tasks.yaml` under a `shared` block with the gates, and `-p/--prompt` and `prompt.md` are removed. ADR-002, ADR-015, ADR-016, ADR-018, and ADR-019 carry notes of what it changed. The template's shared prompt is trimmed to the project block and the result line.
 
 [Back to Overview](00_overview.md) | [Back to Project README](../../README.md)
 
@@ -903,9 +903,9 @@ The shared prompt moves into `tasks.yaml`. It joins the gates under one top-leve
 - **The run log drops `prompt_file`** from `run_started` and the ledger. `tasks_file` stays. The record's format changes, with no migration, since a log is written once per run and never read back by gralph (ADR-016).
 - **The wire contract is unchanged.** Claude gets `shared.prompt`, a blank line, then the task, then a newline. Gates and the `error` field are still never sent. The golden assertions in both suites keep their expected bytes; only their fixtures change.
 - **A cancel changes nothing on disk, and a save keeps `shared`.** `SaveTasks` writes `shared` above `tasks`, with the prompt intact, so a state update never drops or reorders it.
-- **The skill.** `prompt_template.md` is deleted. Its content moves into `tasks_template.yaml` as `shared.prompt`, and the template's field rules and `SKILL.md` describe one file. The stale-skill check (ADR-010) makes anyone with the old skill reinstall it. The advice to keep the shared prompt out of git (ADR-015) now covers only the task file, which it already named.
+- **The skill.** `prompt_template.md` is deleted. Its content moves into `tasks_template.yaml` as `shared.prompt`, trimmed to the project block (documents, build and test, commit rules, and never editing or committing `tasks.yaml`) and the result line; the template's field rules and `SKILL.md` describe one file. The stale-skill check (ADR-010) makes anyone with the old skill reinstall it. The advice to keep the shared prompt out of git (ADR-015) now covers only the task file, which it already named.
 
-**Changes to earlier ADRs on acceptance:** ADR-002's "YAML task file + shared prompt" becomes one file holding both; its strict-parsing rules gain the `shared` ones above. ADR-018's `-d` means `tasks.yaml` alone, the wizard has no prompt path, and its "later change" note is fulfilled. ADR-019's top-level `gates:` becomes `shared.gates`. ADR-015's two-file ignore advice shrinks to one. ADR-016's `run_started` loses `prompt_file`.
+**Changes to earlier ADRs on acceptance:** ADR-002's "YAML task file + shared prompt" becomes one file holding both; its strict-parsing rules gain the `shared` ones above. ADR-018's `-d` means `tasks.yaml` alone, the wizard has no prompt path, and its "later change" note is fulfilled. ADR-019's top-level `gates:` becomes `shared.gates`, and its generic "run the project's own checks" line is dropped from the prompt, since every task lists its own verification. ADR-015's two-file ignore advice shrinks to one. ADR-016's `run_started` loses `prompt_file`.
 
 Alternatives not taken: keeping `-p` as an override or fallback (keeps the two-file code path this removes, and the version is young enough for a clean break); a top-level `prompt:` key beside `gates:` (two meanings of `prompt` at different levels, and the shared settings stay scattered); `shared_prompt` as a flat key (clunkier than a block, and gates would still sit apart); an optional `shared.prompt` (a file could forget the result-line contract that ADR-005 depends on); migrating old pairs automatically (ADR-002 already says no migration, and gralph never edits files it was not asked to).
 

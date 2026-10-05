@@ -100,9 +100,9 @@ authorized.
    project's commit policy, since the session sees only this prompt and one
    task. For a `--commit` run the `Commits` line tells the session not to
    commit; otherwise keep commits conditional on the project's authorization.
-   Keep the Rules and Finish sections as written so the file works without
-   this skill installed. Apart from the project's own checks, keep generic
-   rules out of task prompts; they live once, in `shared.prompt`.
+   Keep the `tasks.yaml` rule and the Finish section as written so the file
+   works without this skill installed. Apart from the project's own checks,
+   keep generic rules out of task prompts; they live once, in `shared.prompt`.
 8. Validate `tasks.yaml` with `gralph -t <tasks.yaml> --dry-run`: it applies
    the same rules a real run does and exits non-zero on an invalid file. If
    `gralph` is not installed, check YAML syntax and the field rules in step 5
