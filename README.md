@@ -1,7 +1,7 @@
 # Gralph
 
 > **Maturity Level**: Basic - ready for real work; a breaking change can still land before 1.0, and sandboxed runs are tested on Linux only  
-> **Version**: v0.10.0
+> **Version**: v0.11.0
 >
 > - **Emerging**: Prototype, not production-ready, expect breaking changes
 > - **Basic**: Production-ready but actively evolving, expect minor version changes
@@ -31,7 +31,7 @@ You don't need Go. Download the archive for your machine from the
 `linux` or `darwin`, and `ARCH` to `amd64` or `arm64`:
 
 ```bash
-VERSION=v0.10.0
+VERSION=v0.11.0
 OS=linux
 ARCH=amd64
 
