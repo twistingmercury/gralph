@@ -45,7 +45,7 @@ func TestInstall_WritesEmbeddedFiles(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, files, "SKILL.md")
 	assert.Contains(t, files, filepath.Join("templates", "tasks_template.yaml"))
-	assert.Contains(t, files, filepath.Join("templates", "prompt_template.md"))
+	assert.NotContains(t, files, filepath.Join("templates", "prompt_template.md"))
 }
 
 func TestInstall_ReplacesExistingFolder(t *testing.T) {

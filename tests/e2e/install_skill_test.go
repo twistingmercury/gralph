@@ -23,11 +23,12 @@ func TestInstallSkill(t *testing.T) {
 	require.Equal(t, 0, res.exitCode, "stdout:\n%s\nstderr:\n%s", res.stdout, res.stderr)
 	assert.Equal(t, dest, strings.TrimSpace(res.stdout))
 
+	assert.FileExists(t, filepath.Join(dest, "SKILL.md"))
 	skill, err := os.ReadFile(filepath.Join(dest, "SKILL.md"))
 	require.NoError(t, err)
 	assert.Contains(t, string(skill), "name: gralph-docs-writer")
 	assert.FileExists(t, filepath.Join(dest, "templates", "tasks_template.yaml"))
-	assert.FileExists(t, filepath.Join(dest, "templates", "prompt_template.md"))
+	assert.NoFileExists(t, filepath.Join(dest, "templates", "prompt_template.md"))
 
 	stamp, err := os.ReadFile(filepath.Join(dest, "VERSION"))
 	require.NoError(t, err)
