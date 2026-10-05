@@ -10,11 +10,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// This file covers --log-dir (ADR-016). The suite has no terminal, so gralph
-// always runs plain mode here and only the flag's plain-mode rules can be
-// pinned: a real run refuses it, and a dry run ignores it. The record itself
-// is covered by the unit tests of internal/runlog, internal/looper, and
-// internal/tui.
+// This file covers --log-dir (ADR-016) without a terminal, so gralph runs
+// plain mode and only the flag's plain-mode rules can be pinned: a real run
+// refuses it, and a dry run ignores it. The record of a full-screen run is
+// pinned under a pty in log_dir_pty_linux_test.go, and by the unit tests of
+// internal/runlog, internal/looper, and internal/tui.
 
 const logDirPlainError = "error: --log-dir only works with the full-screen view\n"
 

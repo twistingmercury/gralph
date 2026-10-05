@@ -1,8 +1,8 @@
 # Gralph — Architecture Overview
 
-> **Version**: v12
+> **Version**: v13
 > **Date**: 2026-10-02
-> **Notes**: Principle 13 added: releases are archives on a GitHub release, made by a workflow started by hand (ADR-017).
+> **Notes**: The setup wizard replaces the setup screen (ADR-018); principle 9 notes that the full-screen view asks for the permission choice. Gates are one list per file (ADR-019).
 
 [Back to Project README](../../README.md)
 
@@ -51,13 +51,13 @@ graph TB
 | Component          | Description                                                                                                                                   |
 | ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------- |
 | CLI Entrypoint     | Parses flags, picks plain or TUI mode, routes to Start/DryRun or the TUI                                                                      |
-| Terminal UI        | Setup screen for missing paths; run view fed live by looper events (`internal/tui`)                                                           |
+| Terminal UI        | Setup wizard for a missing folder, permission choice, or gate list; run view fed live by looper events (`internal/tui`)                       |
 | Looper             | Orchestrates the loop: loads files, checks preconditions, runs tasks sequentially; plain or stream-json task path chosen by the `report` hook |
 | Task Parser        | Strict YAML validation: rejects any invalid element, whole file fails at parse time                                                           |
 | Process Manager    | Spawns claude subprocess in its own process group; kills group on SIGINT/SIGTERM                                                              |
 | State Persistence  | Atomic task state writes via temp-file + rename; YAML rewritten on every change                                                               |
 | Result Interpreter | Parses JSON result line from claude output; missing/invalid line = failed                                                                     |
-| Gate Runner        | After a `completed` session, runs the task's `gates` commands with `sh -c`; any non-zero exit = failed                                        |
+| Gate Runner        | After a `completed` session, runs the file's `gates` commands with `sh -c`; any non-zero exit = failed                                        |
 | Committer          | With `--commit`, commits a completed task's changes after its gates; requires a clean work tree at startup                                    |
 | Run Log Writer     | With `--log-dir` (TUI only), writes a JSON-lines ledger and a detail file per task from the looper's events (`internal/runlog`)               |
 
@@ -68,10 +68,10 @@ graph TB
 3. **Strict validation** — Invalid YAML elements (bad id, empty name/prompt, unknown state) reject the entire file at parse time.
 4. **Atomic state writes** — Task state written via temp-file + rename after every run, with no retry on write failure.
 5. **Outcome from JSON, not exit code** — Result determined by parsing the final non-blank JSON line; missing/invalid line is always failed, never a fallback to exit code.
-6. **Gates confirm a completed task** — A session's `completed` is then checked by gralph itself: the task's `gates` commands run in order and every one must exit zero. Claude is never sent the gates.
+6. **Gates confirm a completed task** — A session's `completed` is then checked by gralph itself: the file's `gates` commands run in order and every one must exit zero. Claude is never sent the gates.
 7. **Failed task blocks** — A failed task must be manually reset (state changed to pending or completed) before the next run. Gralph refuses to start with any failed task present.
 8. **Built for Unix** — Linux, macOS, BSDs. There is no Windows release; a `windows/amd64` binary can be built by hand, but it has never been run or tested (ADR-007).
-9. **Sandboxed unless asked otherwise by name** — A run must pass `--sandbox-settings <path>` (sessions run in Claude Code's sandbox) or `--skip-permissions` (no sandbox, the user's responsibility). There is no default and no fallback to an unsandboxed run.
+9. **Sandboxed unless asked otherwise by name** — A run must choose `--sandbox-settings <path>` (sessions run in Claude Code's sandbox) or `--skip-permissions` (no sandbox, the user's responsibility), by flag or, in the full-screen view, in the setup wizard, which pre-selects neither (ADR-018). There is no default and no fallback to an unsandboxed run.
 10. **Gralph commits, not the session** — With `--commit`, a commit is made only after the gates pass; a failed task is never committed.
 11. **Plain mode intact** — The full-screen TUI is the default in a terminal, but plain mode (`--no-tui` or no terminal) keeps the same argv, output, and exit codes. One loop serves both, through a `report` hook.
 12. **Docker-first CI** — Lint, gosec, govulncheck, unit tests, and e2e all run inside the build container; this is the only supported CI path.

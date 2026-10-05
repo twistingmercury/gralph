@@ -1,8 +1,8 @@
 # Gralph — Architectural Decisions
 
-> **Version**: v15
-> **Date**: 2026-10-02
-> **Notes**: ADR-017 added: release archives on a GitHub release, built by a workflow that is started by hand.
+> **Version**: v21
+> **Date**: 2026-10-05
+> **Notes**: ADR-011, ADR-016, and ADR-018 consequences now say which full-screen behaviour the pty e2e tests pin (wizard happy path, `--log-dir` record of a stopped run) instead of saying the suite has no terminal.
 
 [Back to Overview](00_overview.md) | [Back to Project README](../../README.md)
 
@@ -17,7 +17,7 @@
 Each architectural decision is recorded as an ADR with the following structure:
 
 - **Title**: Short descriptive name for the decision
-- **Status**: Accepted
+- **Status**: Proposed (designed, not built) or Accepted
 - **Context**: The situation, forces at play, and why a decision is needed
 - **Decision**: What was decided and the rationale
 - **Consequences**: Both positive outcomes and trade-offs accepted
@@ -43,6 +43,8 @@ Each architectural decision is recorded as an ADR with the following structure:
 | ADR-015 | Gralph commits a completed task on request                    | Accepted | 2026-09-30 |
 | ADR-016 | Gralph logs a run on request                                  | Accepted | 2026-10-01 |
 | ADR-017 | Release archives, built by a workflow started by hand         | Accepted | 2026-10-02 |
+| ADR-018 | A run folder and a setup wizard                               | Accepted | 2026-10-02 |
+| ADR-019 | One gate list per task file                                   | Accepted | 2026-10-02 |
 
 ## Decisions
 
@@ -375,6 +377,8 @@ In plain mode a run shows the combined prompt and then nothing from Claude until
 
 When stdin and stdout are both terminals, gralph opens a full-screen view (`internal/tui`) with the current task's prompt, the task list and statuses, the current session's live activity, and a key legend. Plain mode is chosen by `--no-tui`, by `--dry-run`, or automatically when either stream is not a terminal, and keeps today's argv, output, and exit codes. In the TUI, a missing `--prompt` or `--tasks` is asked for on a setup screen instead of being an error.
 
+_Amended by ADR-018:_ the setup screen is replaced by the setup wizard, which asks for a run folder instead of typed paths, and also for a missing permission choice and an undecided gate list, then shows a review screen. It still opens only in the TUI; plain mode is unchanged.
+
 There is one loop. `looper.Run` → `runLoop` takes a `report func(Event)` hook:
 
 - `report == nil` (plain): `runTaskPlain` runs `claude --print --dangerously-skip-permissions`, echoes the combined prompt, tees claude's stdout, and inherits stderr, exactly as before.
@@ -391,7 +395,7 @@ _Positive:_
 - A run is easy to follow live: what Claude is doing, which task is running, which are done
 - Plain mode, its tests, and every script or CI job that uses gralph are unchanged
 - One copy of the loop rules; the two task paths differ only in how they talk to claude
-- The e2e suite needs no change: it has no terminal, so it always runs plain mode
+- The plain-mode e2e tests need no change: with no terminal they run plain mode; the full-screen view has its own pty tests
 
 _Negative:_
 
@@ -413,6 +417,8 @@ ADR-011 needs a full-screen terminal UI: an alt screen, resizable panes, scrolli
 **Decision:**
 
 The TUI uses Bubble Tea v2 only: `charm.land/bubbletea/v2`, `charm.land/bubbles/v2` (viewport, textinput), and `charm.land/lipgloss/v2`. The v1 `github.com/charmbracelet/bubbletea`, `bubbles`, and `lipgloss` modules are never imported. These modules are imported only by `internal/tui`; `cmd/main`, `internal/looper`, and `internal/tasks` never import them, so dependencies point one way: `cmd/main` → `internal/tui` → `internal/looper` → `internal/tasks`. The looper reaches the TUI only through the `report` hook, which `tui.Run` forwards to the program with `Send`. `cmd/main` uses `github.com/charmbracelet/x/term` for the terminal check. Bubble Tea's own signal handling is off (`tea.WithoutSignalHandler`), so the SIGINT/SIGTERM context from `cmd/main` stays the only outside stop.
+
+_Amended by ADR-018:_ `charm.land/huh/v2` joins the TUI's modules for the setup wizard, imported only by `internal/tui` like the rest. huh v2 is built on the same Bubble Tea v2 modules. The wizard's forms run one after another before the run view opens, and ctrl+c or Esc in any of them cancels the setup.
 
 **Consequences:**
 
@@ -439,6 +445,8 @@ _Negative:_
 Under ADR-005 the only evidence that a task worked is the session's own result line. The prompts ask Claude to run the task's verification, but gralph checks nothing itself. A session that skips a check, or reports `completed` anyway, marks the task `completed`, and the next task builds on it. The checks that matter (lint, tests, a build) are ordinary commands with exit codes, and gralph can run them the same way every time, whatever the session did or said.
 
 **Decision:**
+
+_Amended by ADR-019:_ gates are one top-level list per file; the per-task list, its example, its dry-run line, and its skill paragraph are replaced by ADR-019.
 
 A task may carry an optional `gates` list. Each entry is a mapping with keys `cmd` (required, nonblank string) and `timeout` (optional, a duration string):
 
@@ -528,6 +536,8 @@ A run needs exactly one of two new flags. There is no default.
 The rules:
 
 - **Neither flag, or both, is an error.** A real run (plain or TUI) with neither exits 1 with `error: pass --sandbox-settings <path>, or --skip-permissions to run without a sandbox`. Both together exits 1 with `error: --sandbox-settings and --skip-permissions cannot be used together`. Both checks happen in every mode, after the `--gate-timeout` check and plain mode's missing `--tasks`/`--prompt` check, and before the skill check and any task or prompt file loads. An empty `--sandbox-settings=` counts as not passed. The setup screen does not ask for either; it only asks for paths that have a safe meaning when missing.
+
+  _Amended by ADR-018:_ in the TUI, passing neither flag is no longer an error at startup: the setup wizard asks for the permission choice, with nothing pre-selected, so there is still no default. Its answer then goes through the same check, strict, before anything runs. Plain mode and the both-flags error are unchanged.
 - **The settings file is validated before anything runs.** It must be readable and hold a JSON object; `sandbox`, when present, must be an object. Errors read `--sandbox-settings: <problem>` and exit 1. Gralph does not check the rest: unknown keys and bad values are Claude Code's to reject.
 - **Gralph forces three keys and leaves the rest alone.** On top of the user's file it sets `sandbox.enabled: true`, `sandbox.allowUnsandboxedCommands: false`, and `sandbox.failIfUnavailable: true`. The first turns the sandbox on. The second closes the escape hatch the spike showed. The third stops a file from asking Claude to carry on unsandboxed when the sandbox cannot start. Paths, domains, and every other settings key pass through untouched. The file on disk is never written.
 - **The argv.** Sandboxed sessions run as `claude --print --permission-mode acceptEdits --settings <merged JSON>`; the TUI path still inserts `--output-format stream-json --verbose` right after `--print`. With `--skip-permissions` the argv is today's, unchanged. The merged settings travel inline as one compact JSON argument, so there is no temporary file to clean up. Both paths still build the command in `claudeCmd` (ADR-011).
@@ -582,6 +592,8 @@ A new `--commit` flag makes gralph commit each task itself. Without the flag gra
 - **Outside a repository the flag does nothing.** At startup gralph asks git whether its working directory is inside a work tree (`git rev-parse --show-toplevel`). If git says it is not, or git is not installed, the run goes ahead with no check and no commits. Any other git failure (a broken config, a repository git refuses to trust) is an error, `--commit: git rev-parse: <git's message>`, exit 1: a repository gralph cannot read must not turn into a run that silently commits nothing. Plain mode and `--dry-run` print `commit: not a git repository, nothing will be committed` to stdout; the full-screen view prints nothing. Gralph does not require a repository.
 - **Git must not see the task file.** Inside a repository, the task file has to be ignored by git or kept outside the work tree; otherwise gralph exits 1 with `error: --commit needs the task file ignored by git or outside the repository: <path>`. Gralph rewrites the file after every task, and it never names the file to git, so an ignore rule is the only thing keeping it out of the commits. A tracked task file is refused by the same check.
 - **Inside a repository the work tree must be clean at startup.** If `git status --porcelain` reports any change in the work tree (modified, staged, or untracked and not ignored), gralph exits 1 with `error: --commit needs a clean work tree; commit, stash, or remove:` followed by the paths. This happens in every mode, after the task file is loaded and the failed-task refusal (ADR-006), and before the first session; in the TUI, after the setup screen and before the view opens. The check is what makes each commit hold exactly one task's work.
+
+  _Amended by ADR-018:_ in the TUI the check runs after the setup wizard, which replaced the setup screen. The wizard's commit step runs the same checks when the user says yes, so a dirty tree or a task file git can see is refused there first.
 - **When gralph commits.** The order for a task is session, gates, commit, save. The commit step runs only when the session reported `completed` (ADR-005) and every gate passed (ADR-013). A failed session or gate means no commit.
 - **What is committed.** Gralph stages every change in the work tree with a plain `git add -A`, run from the work tree's root, and commits it: exactly what git would stage for a person, so ignored files stay out. Gralph passes git no path list and no exclusions. Gralph cannot tell which files a session touched, and with a clean start it does not need to. Files changed by a gate are part of the commit.
 - **The message** is the task's `name`, passed to `git commit -m` as stored. There is no message field in the task file and the session supplies nothing.
@@ -641,6 +653,8 @@ A new `--log-dir <path>` flag makes gralph write a record of the run. Without th
 - **Opt-in per run.** `--log-dir` takes the directory to write under. There is no default location and no task-file key. An empty `--log-dir=` counts as not passed.
 - **Full-screen view only.** With `--no-tui`, or when stdin or stdout is not a terminal, a run given `--log-dir` exits 1 with `error: --log-dir only works with the full-screen view` before anything loads or runs. `--dry-run` ignores the flag completely, as it ignores `--prompt`: no check, no output line, nothing created.
 - **One folder per run.** At startup gralph creates `<log-dir>` if needed and, inside it, a folder named after the run's start time in local time, `YYYYMMDDTHHMMSS` (for example `20261001T140211`). Folders are created with mode `0700` and files with `0600`: the record holds Claude's text and whatever a gate or git printed. If the run folder already exists, or anything cannot be created, gralph exits 1 with an error starting `--log-dir:` after the setup screen and before the view opens or any session starts. Gralph never rotates or deletes old run folders.
+
+  _Amended by ADR-018:_ the setup screen is now the setup wizard, so these errors come after it. With a run folder, the wizard offers `<folder>/logs`, used only when the user says yes; with no yes and no flag, nothing is logged. An explicit `--log-dir` wins and hides the question.
 - **With `--commit`, git must not see the logs.** When a repository is open (ADR-015) and the run folder is inside its work tree, the folder must be ignored by git; otherwise gralph exits 1 with `error: --commit needs the log directory ignored by git or outside the repository: <path>`. The check is made on the run folder's path before it is created, after the task-file and clean-tree checks. `git add -A` takes no exclusions, so an ignore rule is the only thing keeping a log out of a task's commit. Without `--commit`, or outside a repository, there is no check.
 - **The ledger, `run.jsonl`.** One JSON object per line, written as each thing happens. Every line has `time` (RFC 3339, local time with its UTC offset, like `2026-10-01T14:02:11-04:00`) and `event`:
 
@@ -680,7 +694,7 @@ _Negative:_
 - With `--commit`, a log folder inside the repository needs an ignore rule first
 - A stop by the user and a stop by signal read the same in the ledger
 - A write error cancels the running task; its work so far stays in the work tree, uncommitted
-- The e2e suite has no terminal, so it can pin only the two plain-mode rules; the logging path itself is covered by unit tests
+- Without a terminal the e2e suite can pin only the two plain-mode rules; one test under a pseudo-terminal (`log_dir_pty_linux_test.go`) pins the ledger and the task log of a stopped run, and the rest of the logging path is covered by unit tests
 
 ---
 
@@ -731,6 +745,122 @@ _Negative:_
 - The binaries are not signed; `checksums.txt` comes from the same release, so it catches a damaged download, not a tampered release
 - The tests for `build/package.sh` (BATS, in `tests/bats/`, with `bats-support` and `bats-assert` vendored beside them) are not run by CI (`build/build.sh` has no place for them); they are run by hand with `bats tests/bats`
 - No package manager knows about gralph; upgrading means downloading again
+
+---
+
+### ADR-018: A run folder and a setup wizard
+
+**Status:** Accepted
+
+**Context:**
+
+A full run names every input on the command line: `gralph -p .local/feat/prompt.md -t .local/feat/tasks.yaml --sandbox-settings ~/sandbox.json --commit --log-dir .local/feat/logs --gate-timeout 5m`. Most of it repeats from run to run, and the two files almost always sit together in one folder, under the names the gralph-docs-writer skill gives them. The full-screen view's setup screen (ADR-011) asks only for a missing `--tasks` or `--prompt` path, typed by hand, and a missing permission flag (ADR-014) is still an error. A user who starts `gralph` with no arguments cannot get to a run without knowing the flags.
+
+**Decision:**
+
+Two additions: a `-d/--dir` flag that names a run folder, and a setup wizard in the full-screen view that asks for whatever the flags and the task file leave open, then shows a review screen before the run starts.
+
+- **The run folder.** `-d/--dir <folder>` means `<folder>/tasks.yaml` and `<folder>/prompt.md`. The names are fixed; `-t` and `-p` override either file, so `-d foo -t foo/tasks-v2.yaml` works and every command line that works today keeps working. A file the folder lacks and no flag supplies is an error in plain mode, `--dir: no tasks.yaml in <folder>` (or `prompt.md`), exit 1. In plain mode `-d` is shorthand for `-t`/`-p` and changes nothing else. `-d` is resolved into the two paths before any other startup check, so the fixed order after it (`--gate-timeout`, plain mode's required flags, `--log-dir`, the session flags, the skill check) is unchanged.
+- **Logs in the folder.** With a folder, saying yes to logging in the wizard means `--log-dir <folder>/logs`. An explicit `--log-dir` wins. This is an opt-in made in the wizard, not a default: with no wizard answer and no flag, nothing is logged, and plain mode still refuses `--log-dir` (ADR-016).
+- **When the wizard opens.** Full-screen mode only, and only when the folder, permissions, or gates step is still open. Commit, logging, and the gate timeout ride along when it opens and never open it alone; otherwise every run without `--commit` would stop to ask. When flags and the task file answer those three, there is no wizard and no review screen; the run starts as it does today. Plain mode never opens it; a missing input there is an error, as today. A dry run is always plain mode, so it never opens the wizard either. The wizard replaces the setup screen.
+- **The steps, in order, each hidden when something already answers it:**
+
+  | Step         | Asks                                                                    | Hidden when                                                   |
+  | ------------ | ----------------------------------------------------------------------- | ------------------------------------------------------------- |
+  | Folder       | A folder, browsed with a picker; a lone `-t` or `-p` overrides its file | `-d`, or both `-t` and `-p`                                   |
+  | Permissions  | Sandbox or skip permissions, nothing pre-selected; sandbox picks a JSON | `--sandbox-settings` or `--skip-permissions`                  |
+  | Commit       | Yes or no, "No" pre-selected (the same as no flag)                      | `--commit`                                                    |
+  | Logging      | Yes or no, "No" pre-selected; yes means `<folder>/logs`                 | `--log-dir`, or no folder                                     |
+  | Gate timeout | "Default (each gate's own timeout, else 10m)", pre-selected, or a value | `--gate-timeout`                                              |
+  | Gates        | The file's shared gate list (ADR-019): add, edit, delete                | The task file has a top-level `gates:` key, even an empty one |
+
+- **Pickers.** The folder picker starts in the current working directory (not limited to it) and shows hidden entries, because run folders usually live under `.local/`. It selects folders only: with just one of `-t` or `-p` passed, the user still picks a folder, which supplies the other file. Chosen paths are shown relative to the working directory when possible. There is no picker for the task or prompt file. The sandbox picker selects `.json` files and also starts in the working directory with paths shown relative to it.
+- **Checked where they are asked.** Each step validates its answer with the same functions a run uses and keeps the user on the step with the error shown: the folder step loads both files (a missing file, a parse error, or a `failed` task, the last pointing at `gralph -d <folder> --dry-run` for the table); the sandbox picker loads the settings file; the commit step, on yes, opens the repository as a `--commit` run does (`looper.OpenRepo`), so a dirty work tree or a task file git does not ignore is refused there (ADR-015); the logging step refuses yes when the run commits (by flag or the commit step) and `<folder>/logs` is inside the work tree but not ignored by git (ADR-015, ADR-016); the timeout step parses the value with `time.ParseDuration` and requires it greater than zero.
+- **One source of truth.** The wizard's answers fill the same values the flags fill. After it closes, the existing startup checks run unchanged on those values; they never assume the wizard checked anything.
+- **The review screen.** Lists every choice, the gates (or "no gates"), and when `-t` or `-p` override the folder, also `Tasks:` and/or `Prompt:`. Then the command line that reproduces the run, such as `gralph -d .local/foo --sandbox-settings ~/sb.json --commit`. Gates are not on the command line; they are in the file. The choices are Start, Edit gates (back to the gates step), and Cancel.
+- **Nothing is written before Start.** On Start, the commit repository check (clean tree, task file ignored) and the log folder's git-ignore check run first, before the gates are saved to the task file. If both pass, gralph saves the task file with the new `gates:` list if changed, prints one unwrapped line to stdout (`Same run, no wizard: <command>`) before the full-screen view opens (so the command can be copied even when wrapped), and the run begins. The wizard's forms run without Bubble Tea's signal handler so gralph's signal context is the only path that stops them, avoiding a race where the two handlers could crash or hang the process. Esc or ctrl+c anywhere prints `error: setup cancelled` and exits 1 with nothing written, the message the setup screen used.
+- **Built with huh.** The wizard is a `charm.land/huh/v2` form inside `internal/tui`: `FilePicker` (with `DirAllowed`, `FileAllowed`, `ShowHidden`, `AllowedTypes`, `Validate`), `Select`, `Confirm`, `Input`, and `Note`, with groups hidden per run by `WithHideFunc`. huh v2 is built on the Bubble Tea v2 modules gralph already uses. It has no list editor, so the gates step is a short loop of small huh forms (add, edit, delete, done; each gate a command and an optional timeout). Which steps are open is a plain function of the flags and the task file, and the reproducing command line is a plain function of the answers, so both are tested without a terminal.
+
+**Corrected on acceptance:** the proposal opened the wizard when any step was open and had `--dry-run` show the folder and file steps. Planning found that the commit, logging, and timeout steps would then open it on every run without those flags, and that a dry run is always plain mode, so the wizard opens only for the folder, permissions, or gates step, and never on a dry run. The commit step's check was added to the list above.
+
+**Changes to earlier ADRs on acceptance:** ADR-011's setup screen becomes this wizard. ADR-012 adds `charm.land/huh/v2` to the TUI's modules, still imported only by `internal/tui`. ADR-014 notes that the wizard asks for the permission choice with nothing pre-selected, so there is still no default. ADR-015 notes that the clean-tree check runs after the wizard, and on its commit step. ADR-016 notes that `<folder>/logs` is used only when the user says yes in the wizard.
+
+Alternatives not taken: looking for any `*.md` and `*.yaml` pair in the folder (unpredictable, and needs an ambiguity prompt); a bare positional folder argument (every other input is a flag); the wizard only on a bare `gralph` (a single flag would throw away all its help); the wizard on every run, with flags only pre-filling it (second-guesses what the user typed); a remembered settings file (a stored default for the permission choice, against ADR-014); a hand-built multi-step model on `textinput` and `bubbles/filepicker` (more code for the same screens); a new `internal/wizard` package (a second package and import edge for what is the setup screen grown up).
+
+**Consequences:**
+
+_Positive:_
+
+- `gralph` with no arguments walks a user from nothing to a running loop, without knowing the flags
+- `gralph -d .local/feat --sandbox-settings ~/sb.json` replaces the two file paths
+- The review screen teaches the flags: its command line can be copied to skip the wizard next time
+- Every existing command line, and plain mode, behaves as before
+
+_Negative:_
+
+- A new third-party dependency to track and scan
+- A run without `--commit` or `--log-dir` still shows those steps whenever the wizard opens for anything else; "No" is pre-selected, so each costs one Enter
+- Two e2e tests run the binary under a pseudo-terminal: `wizard_signal_linux_test.go` pins that SIGTERM and SIGINT cancel the open wizard, and `wizard_pty_linux_test.go` walks the happy path with real keystrokes; the other wizard steps are covered by unit tests and checked by hand
+- Fixed names mean a folder holding two task files still needs `-t`
+
+---
+
+### ADR-019: One gate list per task file
+
+**Status:** Accepted
+
+**Context:**
+
+Under ADR-013 each task carries its own `gates`. In practice the gralph-docs-writer skill interviews the user once about quality gates and copies the same list into every task, so the check that decides whether a task is done is written by a language model, once per task, and can drift between tasks. ADR-013 left room for a file-level list. The setup wizard (ADR-018) needs one place to show and edit the gates for a run.
+
+**Decision:**
+
+Gates move from each task to one top-level list in the task file, and per-task gates are removed. The wizard owns the list; the skill stops writing gates.
+
+- **Format.** A top-level `gates:` sequence next to `tasks:`. Each entry keeps ADR-013's shape and validation: `cmd` required and nonblank, `timeout` optional with a unit and greater than zero, any other key an error. Errors name the list as `gates[<j>]: ...`, in the existing style.
+
+  ```yaml
+  gates:
+    - cmd: make test
+      timeout: 10m
+    - cmd: test -z "$(gofmt -l .)"
+  tasks:
+    - id: 1
+      ...
+  ```
+
+- **Absent and empty differ.** No `gates:` key means not decided yet, and the wizard's gates step opens. `gates: []` means decided: no gates. `SaveTasks` keeps whichever the file had: an absent key stays absent, an empty list is written as `gates: []`. Zero gates is a valid run.
+- **Per-task gates are an error.** A `gates` key on a task fails parsing with `tasks[<i>] (id <id>): gates: gates are set once for the whole file now, as a top-level gates: list; see the HOWTO`, so `--dry-run`, the wizard's folder step, and a run all report it. Other unknown task keys are still ignored and dropped on save. Dropping per-task gates quietly would leave an old file running with no checks at all.
+- **Running them.** After every session that reports `completed` (ADR-005), gralph runs the file's gates in order, with ADR-013's rules unchanged: the timeout order (`--gate-timeout`, then the gate's `timeout`, then 10m), the first failure fails the task, the same error text, output, process handling, and cancel behaviour, and the same events and log record. `--dry-run` lists the gates once, `gate: <first line of cmd>: <timeout> (flag|gate|default)`, instead of once per task.
+- **The skill.** gralph-docs-writer drops its gate interview and never writes a `gates:` key, so a freshly generated file opens the wizard's gates step on its first run. The prompt template gains a generic instruction to run the project's own checks (tests, linters, the build) before reporting `completed`. In its generated files, the skill guides the person writing and editing them to check each task against every run-level gate, and to add to the run's gates any check the session cannot run itself. The stale-skill check (ADR-010) makes anyone with the old skill reinstall it.
+- **The wire contract is unchanged.** Gates are still never sent to Claude.
+
+**Changes to earlier ADRs on acceptance:** ADR-013 is amended: its "Per-task only" rule, its example, its dry-run line, and its skill paragraph give way to this ADR; the rest of its rules apply to the file's list.
+
+Alternatives not taken: keeping per-task gates beside the shared list (two places to look for one check, and the skill only ever wrote one list); the skill writing the shared list and the wizard only reviewing it (keeps a model-written check as the default); sending the gates to Claude so the session knows what it will be checked against (breaks the wire contract and puts gralph knowledge in the session); a separate `gates.yaml` in the run folder (a second file to load, and a `--gates` flag for runs without a folder); gates held only in the wizard for one run (not repeatable).
+
+**Consequences:**
+
+_Positive:_
+
+- One list, written by a person, decides whether every task is done
+- The wizard has a single place to show and edit the run's checks
+- The skill and the task format get simpler
+
+_Negative:_
+
+- A breaking change to the task file: files with per-task gates must be edited by hand before they run again
+- A check that only one task needs can no longer be a gate; it lives in that task's prompt, as Claude's self-check
+- Sessions are told only to run the project's checks, not which commands gralph will run, so more sessions report `completed` and then fail a gate
+- Editing the gates in the wizard rewrites the task file, which already loses comments and custom formatting on every save (ADR-004)
+
+---
+
+### Build order and future work for ADR-018 and ADR-019
+
+ADR-019 goes first: the wizard's gates step needs the top-level list. Then `-d`, then the wizard. The breaking task-file change suggests v0.10.0; the owner picks the version at release.
+
+A later change may fold the shared prompt into `tasks.yaml` and then deprecate `-t` and `-p`. The run folder survives it: `-d` would then name a folder holding `tasks.yaml` and `logs/`, and the wizard still starts by picking it. Nothing in either ADR depends on there being two files, and the wizard has no code that serves only `-t` or `-p`: they stay in this round as overrides, which is path resolution alone.
 
 ---
 

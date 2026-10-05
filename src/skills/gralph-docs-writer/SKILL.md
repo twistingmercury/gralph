@@ -31,22 +31,14 @@ result line, or a non-zero exit, marks the task `failed`. Gralph refuses to run
 while any task is `failed`; a person fixes the cause (often by editing the
 task's `prompt`) and resets its `state` to `pending` by hand.
 
-A task may also list `gates`: commands Gralph runs itself, in order, after a
-session that reported `completed`. Each gate runs under a timeout (the `--gate-timeout`
-flag if the user passes it, else the gate's `timeout` field, else the built-in
-default 10m). The task is `completed` only when every gate exits zero before
-its timeout; the first gate that fails or times out marks the task `failed` and
-stops the run. Gates are never sent to the session, so the prompt must still
-tell Claude what to verify.
-
-With the `--commit` flag, Gralph also commits each task itself: once the
-session reported `completed` and every gate passed, it commits what a plain
-`git add -A` would stage, with the task's `name` as the commit message. A failed
-task is not committed; its changes stay in the work tree for a person to sort
-out. For a `--commit` run the task file must be ignored by Git or kept outside
-the repository; Gralph refuses to start otherwise. The shared prompt file and
-any sandbox settings file should also be ignored or kept outside, so they do
-not show up as uncommitted changes. Without the flag, Gralph never touches Git.
+With the `--commit` flag, Gralph also commits each task itself: once a task is
+`completed`, it commits what a plain `git add -A` would stage, with the task's
+`name` as the commit message. A failed task is not committed; its changes stay
+in the work tree for a person to sort out. For a `--commit` run the task file
+must be ignored by Git or kept outside the repository; Gralph refuses to start
+otherwise. The shared prompt file and any sandbox settings file should also be
+ignored or kept outside, so they do not show up as uncommitted changes. Without
+the flag, Gralph never touches Git.
 
 A `tasks.yaml` that does not match the rules below is invalid and Gralph
 refuses to run it. There is no migration from other formats or older states.
@@ -67,14 +59,7 @@ in place when authorized.
    and Git policies. Do not add automatic commits where none are required.
 2. Read [the YAML task template](templates/tasks_template.yaml) and
    [the prompt template](templates/prompt_template.md).
-3. Interview the user about quality gates before drafting tasks. Propose the
-   gates the repository already has (tests, linters, formatters, security
-   scanners, builds, end-to-end suites) as runnable commands, then ask which
-   ones every task must pass and what to add. Ask one question at a time.
-   Every task's Verification lists the agreed gates, plus its own
-   task-specific checks, so Claude runs them. The same commands also go in
-   each task's `gates` list (step 5), so Gralph checks them itself.
-   Then ask whether the run will use `gralph --commit`. If it will, the
+3. Ask the user whether the run will use `gralph --commit`. If it will, the
    session must not commit: the `Commits` line in `prompt.md` reads "Do not
    commit. Leave your changes in the work tree.", task names are written as
    commit subjects (imperative, under about 70 characters), and no task prompt
@@ -90,38 +75,31 @@ in place when authorized.
    Names are unique ignoring case and surrounding whitespace. `state` is
    `pending`, `completed`, or `failed`; leave it empty for new work, which
    Gralph reads as `pending`. The optional `error` field is gralph-only: never
-   write it; preserve it if present when updating an existing file. The
-   optional `gates` field is a sequence of mappings, each with keys `cmd`
-   (required, a nonblank string holding one shell command) and `timeout`
-   (optional, a duration string with a unit like `90s` or `10m`); any other
-   key in a gate makes the file invalid. Gralph runs each `cmd` through `sh`
-   from the directory it was started in and judges it only by its exit code.
-   Each gate has a timeout determined by (in order): the `--gate-timeout` flag
-   if the user sets it (overrides all), the gate's `timeout` field if present,
-   or the built-in default 10m. When a gate exceeds its timeout, it is killed
-   and the task fails with `gate "..." timed out after <timeout>`. Write
-   commands that exit non-zero when the check fails (`test -z "$(gofmt -l .)"`,
-   not `gofmt -w .`), that need no input, and that finish on their own.
-   Give every task the agreed quality gates plus any task-specific check that
-   is a plain command; always include a `timeout` on every gate you generate
-   (choose a generous value per gate: a format or lint check gets a few minutes;
-   a test suite or build gets more room; when unsure, be generous). Leave
-   `gates` out when a task has nothing to check by command. Write no other
-   task keys: Gralph ignores them when reading and drops them the first time
-   it saves the file.
-6. Put scope, steps, the agreed quality gates, task-specific verification, and
-   completion criteria inside each task's prompt. Preserve project-specific
-   instructions. YAML comments are not durable task instructions: they never
-   reach the session. Gralph rewrites the task file with every state change,
-   so comments and custom formatting are not preserved.
+   write it; preserve it if present when updating an existing file. Write no
+   other task keys: Gralph ignores them when reading and drops them the first
+   time it saves the file. Never write a `gates:` key anywhere in the file;
+   Gralph asks for the run's gates itself the first time the file runs in the
+   full-screen view.
+6. Put scope, steps, the project's own checks (tests, linters, the build),
+   task-specific verification, and completion criteria inside each task's
+   prompt. Preserve project-specific instructions. YAML comments are not
+   durable task instructions: they never reach the session. Gralph rewrites
+   the task file with every state change, so comments and custom formatting
+   are not preserved. Every verification command must be one the session can
+   run. The session runs under Claude Code's permissions and, with
+   `--sandbox-settings`, inside its sandbox: a command that sets a variable
+   inline (`VAR=value cmd`) can be refused, and Docker, other users' files,
+   and hosts outside the sandbox's network list are out of reach. Give the
+   session an equivalent it can run. A check it cannot run belongs only in the
+   run's gates, which Gralph runs itself; tell the user to add it there.
 7. Write `prompt.md` from the prompt template. Replace every `GENERATE_*` token
    with project content and actual paths: full build/test commands and the
    project's commit policy, since the session sees only this prompt and one
    task. For a `--commit` run the `Commits` line tells the session not to
    commit; otherwise keep commits conditional on the project's authorization.
    Keep the Rules and Finish sections as written so the pair works without
-   this skill installed. Apart from the quality gates, keep generic rules out
-   of task prompts; they live once, in `prompt.md`.
+   this skill installed. Apart from the project's own checks, keep generic
+   rules out of task prompts; they live once, in `prompt.md`.
 8. Validate `tasks.yaml` with `gralph -t <tasks.yaml> --dry-run`: it applies
    the same rules a real run does and exits non-zero on an invalid file. If
    `gralph` is not installed, check YAML syntax and the field rules in step 5
@@ -149,10 +127,17 @@ documentation-only changes.
 
 Make each task small enough that a person can verify it from its commit alone:
 one focused change, a short diff, and a runnable check that shows it works.
-Split a larger change into a sequence of such steps, each passing the agreed
-quality gates on its own. When one step would break the gates until another
+Split a larger change into a sequence of such steps, each passing the project's
+own checks on its own. When one step would break those checks until another
 lands, put the prerequisite step first (for example, update test fixtures
 before the change that needs them).
+
+Check each task against every check the run will apply, not only its own
+tests: the project's own checks and any gates the user sets for the run. A
+task can be complete and tested and still fail one because of where it sits in
+the sequence: code that nothing calls until a later task fails an unused-code
+linter, and a fixture change can break a suite another task fixes. Reorder or
+merge tasks so each one leaves every check passing.
 
 Honor project policies for source commits unless the run uses `--commit`, where
 Gralph does the committing, and never instruct the session to edit or commit

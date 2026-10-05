@@ -336,6 +336,13 @@ func workGate(name string) tasks.Gate {
 	return tasks.Gate{Cmd: "echo work > " + name}
 }
 
+// numberedWorkGate is workGate for a file whose gates run after every task:
+// each run writes the next free work-<n>.txt, so each task's commit holds a
+// file of its own.
+func numberedWorkGate() tasks.Gate {
+	return tasks.Gate{Cmd: "n=1; while [ -e work-$n.txt ]; do n=$((n+1)); done; echo work > work-$n.txt"}
+}
+
 // openRepo opens the test's repository the way a --commit run does.
 func openRepo(t *testing.T, tasksPath string) *Repo {
 	t.Helper()
@@ -376,10 +383,13 @@ func TestRun_CommitsOneCommitPerCompletedTask(t *testing.T) {
 			useFakeClaude(t)
 			dir := initRepo(t)
 			tasksPath := taskFile(dir)
-			tl := &tasks.TaskList{Tasks: []tasks.Task{
-				{ID: 1, Name: "First", Prompt: "p1", Gates: []tasks.Gate{workGate("one.txt")}},
-				{ID: 2, Name: "Second", Prompt: "p2", Gates: []tasks.Gate{workGate("two.txt")}},
-			}}
+			tl := &tasks.TaskList{
+				Gates: &[]tasks.Gate{numberedWorkGate()},
+				Tasks: []tasks.Task{
+					{ID: 1, Name: "First", Prompt: "p1"},
+					{ID: 2, Name: "Second", Prompt: "p2"},
+				},
+			}
 
 			var rec recorder
 			var report func(Event)
@@ -390,7 +400,7 @@ func TestRun_CommitsOneCommitPerCompletedTask(t *testing.T) {
 			require.NoError(t, Run(context.Background(), "prompt", tl, tasksPath, "", bypass, openRepo(t, tasksPath), report))
 
 			assert.Equal(t, []string{"Second", "First", "init"}, subjects(t, dir))
-			assert.Equal(t, []string{"two.txt"}, headFiles(t, dir))
+			assert.Equal(t, []string{"work-2.txt"}, headFiles(t, dir))
 			assert.Empty(t, gitRun(t, dir, "status", "--porcelain"), "nothing may be left uncommitted")
 
 			saved := readSavedTasks(t, tasksPath)
@@ -474,10 +484,13 @@ func TestRun_CommitFailureFailsTaskAndStopsRun(t *testing.T) {
 	recordPath := filepath.Join(tempDir(t), "record.log")
 	t.Setenv("FAKE_CLAUDE_RECORD", recordPath)
 	tasksPath := taskFile(dir)
-	tl := &tasks.TaskList{Tasks: []tasks.Task{
-		{ID: 1, Name: "First", Prompt: "p1", Gates: []tasks.Gate{workGate("one.txt")}},
-		{ID: 2, Name: "Second", Prompt: "p2"},
-	}}
+	tl := &tasks.TaskList{
+		Gates: &[]tasks.Gate{workGate("one.txt")},
+		Tasks: []tasks.Task{
+			{ID: 1, Name: "First", Prompt: "p1"},
+			{ID: 2, Name: "Second", Prompt: "p2"},
+		},
+	}
 
 	const wantErr = "commit failed: exit status 1"
 	err := Run(context.Background(), "prompt", tl, tasksPath, "", bypass, openRepo(t, tasksPath), nil)
@@ -589,7 +602,7 @@ func TestRun_CommitOddTaskNames(t *testing.T) {
 			useFakeClaude(t)
 			dir := initRepo(t)
 			tasksPath := taskFile(dir)
-			tl := &tasks.TaskList{Tasks: []tasks.Task{{ID: 1, Name: tt.taskName, Prompt: "p", Gates: []tasks.Gate{workGate("one.txt")}}}}
+			tl := &tasks.TaskList{Gates: &[]tasks.Gate{workGate("one.txt")}, Tasks: []tasks.Task{{ID: 1, Name: tt.taskName, Prompt: "p"}}}
 
 			var rec recorder
 			require.NoError(t, Run(context.Background(), "prompt", tl, tasksPath, "", bypass, openRepo(t, tasksPath), rec.report))
@@ -793,7 +806,7 @@ func TestStart_CommitFlagCommitsTheTask(t *testing.T) {
 	run := tempDir(t)
 	promptPath, tasksPath := filepath.Join(run, "prompt.md"), filepath.Join(run, "tasks.yaml")
 	writeFile(t, promptPath, "prompt\n")
-	writeFile(t, tasksPath, "tasks:\n  - id: 1\n    name: First\n    prompt: p1\n    gates:\n      - cmd: echo work > one.txt\n")
+	writeFile(t, tasksPath, "gates:\n  - cmd: echo work > one.txt\ntasks:\n  - id: 1\n    name: First\n    prompt: p1\n")
 
 	require.NoError(t, Start(context.Background(), promptPath, tasksPath, "", bypass, true))
 	assert.Equal(t, []string{"First", "init"}, subjects(t, dir))

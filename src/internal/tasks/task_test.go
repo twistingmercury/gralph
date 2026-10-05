@@ -482,27 +482,30 @@ func TestSaveTasks_FailedSaveLeavesExistingFileUntouched(t *testing.T) {
 func TestSaveTasks_WritesTwoSpaceIndent(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "tasks.yaml")
 
-	tl := TaskList{Tasks: []Task{
-		{ID: 1, Name: "First", Prompt: "p", State: PendingState, Gates: []Gate{
+	tl := TaskList{
+		Gates: &[]Gate{
 			{Cmd: "go test ./...", Timeout: "90s"},
 			{Cmd: "echo one"},
-		}},
-		{ID: 2, Name: "Second", Prompt: "q", State: FailedState, Error: "boom"},
-	}}
+		},
+		Tasks: []Task{
+			{ID: 1, Name: "First", Prompt: "p", State: PendingState},
+			{ID: 2, Name: "Second", Prompt: "q", State: FailedState, Error: "boom"},
+		},
+	}
 	require.NoError(t, SaveTasks(path, tl))
 
 	data, err := os.ReadFile(path)
 	require.NoError(t, err)
 
-	want := `tasks:
+	want := `gates:
+  - cmd: go test ./...
+    timeout: 90s
+  - cmd: echo one
+tasks:
   - id: 1
     name: First
     prompt: p
     state: pending
-    gates:
-      - cmd: go test ./...
-        timeout: 90s
-      - cmd: echo one
   - id: 2
     name: Second
     prompt: q
@@ -512,45 +515,47 @@ func TestSaveTasks_WritesTwoSpaceIndent(t *testing.T) {
 	assert.Equal(t, want, string(data), "the saved file must use a 2-space indent at every level")
 }
 
+func TestParseTasks_TopLevelGates(t *testing.T) {
+	yml := "gates:\n  - cmd: make test\n    timeout: 10m\n  - cmd: go vet ./...\ntasks:\n  - id: 1\n    name: First\n    prompt: do it\n"
+	tl, err := ParseTasks([]byte(yml))
+	require.NoError(t, err)
+	require.NotNil(t, tl.Gates)
+	assert.Equal(t, []Gate{{Cmd: "make test", Timeout: "10m"}, {Cmd: "go vet ./..."}}, *tl.Gates)
+}
+
 func TestParseTasks_ReadsGates(t *testing.T) {
-	yml := []byte(`tasks:
+	yml := []byte(`gates:
+  - cmd: go test ./...
+  - cmd: |
+      test -z "$(gofmt -l .)"
+tasks:
   - id: 1
-    name: Gated
+    name: First
     prompt: p
-    gates:
-      - cmd: go test ./...
-      - cmd: |
-          test -z "$(gofmt -l .)"
   - id: 2
-    name: Ungated
+    name: Second
     prompt: p
-  - id: 3
-    name: Empty list
-    prompt: p
-    gates: []
 `)
 
 	got, err := ParseTasks(yml)
 	require.NoError(t, err)
-	require.Len(t, got.Tasks, 3)
+	require.Len(t, got.Tasks, 2)
 
 	want := []Gate{{Cmd: "go test ./..."}, {Cmd: "test -z \"$(gofmt -l .)\"\n"}}
-	assert.Equal(t, want, got.Tasks[0].Gates, "cmd text must be stored unaltered, in file order")
-	assert.Empty(t, got.Tasks[1].Gates)
-	assert.Empty(t, got.Tasks[2].Gates)
+	assert.Equal(t, want, got.GateList(), "cmd text must be stored unaltered, in file order")
 }
 
 func TestParseTasks_ReadsGateTimeout(t *testing.T) {
-	yml := []byte(`tasks:
+	yml := []byte(`gates:
+  - cmd: go test ./...
+    timeout: 10m
+  - cmd: echo hi
+  - cmd: sleep 1
+    timeout: 1h30m
+tasks:
   - id: 1
     name: Gated
     prompt: p
-    gates:
-      - cmd: go test ./...
-        timeout: 10m
-      - cmd: echo hi
-      - cmd: sleep 1
-        timeout: 1h30m
 `)
 
 	got, err := ParseTasks(yml)
@@ -558,11 +563,41 @@ func TestParseTasks_ReadsGateTimeout(t *testing.T) {
 	require.Len(t, got.Tasks, 1)
 
 	want := []Gate{{Cmd: "go test ./...", Timeout: "10m"}, {Cmd: "echo hi"}, {Cmd: "sleep 1", Timeout: "1h30m"}}
-	assert.Equal(t, want, got.Tasks[0].Gates, "timeout text must be stored as written")
+	assert.Equal(t, want, got.GateList(), "timeout text must be stored as written")
+}
+
+func TestParseTasks_GatesAbsentVersusEmpty(t *testing.T) {
+	absent, err := ParseTasks([]byte("tasks:\n  - id: 1\n    name: First\n    prompt: do it\n"))
+	require.NoError(t, err)
+	assert.Nil(t, absent.Gates, "no gates key means not decided")
+	assert.Empty(t, absent.GateList())
+
+	empty, err := ParseTasks([]byte("gates: []\ntasks:\n  - id: 1\n    name: First\n    prompt: do it\n"))
+	require.NoError(t, err)
+	require.NotNil(t, empty.Gates, "gates: [] means decided: none")
+	assert.Empty(t, *empty.Gates)
+	assert.Empty(t, empty.GateList())
+}
+
+// An old file's per-task gates must stop the run rather than be dropped:
+// dropping them would run every task with no checks at all.
+func TestParseTasks_TaskLevelGatesAreAnError(t *testing.T) {
+	cases := map[string]string{
+		"list":  "tasks:\n  - id: 3\n    name: First\n    prompt: do it\n    gates:\n      - cmd: make test\n",
+		"empty": "tasks:\n  - id: 3\n    name: First\n    prompt: do it\n    gates: []\n",
+	}
+	for name, yml := range cases {
+		t.Run(name, func(t *testing.T) {
+			got, err := ParseTasks([]byte(yml))
+			require.Error(t, err)
+			assert.EqualError(t, err, "tasks[0] (id 3): gates: gates are set once for the whole file now, as a top-level gates: list; see the HOWTO")
+			assert.Equal(t, TaskList{}, got, "an error must return the zero TaskList, never a partial one")
+		})
+	}
 }
 
 func TestTaskString_OmitsGates(t *testing.T) {
-	task := Task{ID: 1, Name: "First task", Prompt: "Do it.", Gates: []Gate{{Cmd: "go test ./..."}}}
+	task := Task{ID: 1, Name: "First task", Prompt: "Do it."}
 	assert.Equal(t, "1: First task\n\nDo it.", task.String(), "gates are gralph's check and must never reach the session")
 }
 
@@ -572,36 +607,65 @@ func TestParseTasks_GateErrors(t *testing.T) {
 		gates   string
 		wantErr string
 	}{
-		{name: "null gates", gates: "gates:", wantErr: "tasks[0] (id 1): gates: must be a sequence"},
-		{name: "scalar gates", gates: "gates: go test ./...", wantErr: "tasks[0] (id 1): gates: must be a sequence"},
-		{name: "mapping gates", gates: "gates: {cmd: go test ./...}", wantErr: "tasks[0] (id 1): gates: must be a sequence"},
-		{name: "string element", gates: "gates: [go test ./...]", wantErr: "tasks[0] (id 1): gates[0]: must be a mapping"},
-		{name: "missing cmd", gates: "gates: [{}]", wantErr: "tasks[0] (id 1): gates[0]: cmd: is required"},
-		{name: "misspelled key", gates: "gates: [{command: a}]", wantErr: "tasks[0] (id 1): gates[0]: command: unknown key; a gate has only cmd and timeout"},
-		{name: "extra key", gates: "gates: [{cmd: a, retries: 3}]", wantErr: "tasks[0] (id 1): gates[0]: retries: unknown key; a gate has only cmd and timeout"},
-		{name: "duplicate cmd", gates: "gates: [{cmd: a, cmd: b}]", wantErr: "tasks[0] (id 1): gates[0]: cmd: duplicate key"},
-		{name: "integer cmd", gates: "gates: [{cmd: 5}]", wantErr: "tasks[0] (id 1): gates[0]: cmd: must be a string"},
-		{name: "null cmd", gates: "gates: [{cmd: }]", wantErr: "tasks[0] (id 1): gates[0]: cmd: must be a string"},
-		{name: "blank cmd", gates: `gates: [{cmd: "  "}]`, wantErr: "tasks[0] (id 1): gates[0]: cmd: must not be empty or whitespace"},
-		{name: "integer timeout", gates: "gates: [{cmd: a, timeout: 30}]", wantErr: "tasks[0] (id 1): gates[0]: timeout: must be a duration string such as 90s or 10m"},
-		{name: "null timeout", gates: "gates: [{cmd: a, timeout: }]", wantErr: "tasks[0] (id 1): gates[0]: timeout: must be a duration string such as 90s or 10m"},
-		{name: "sequence timeout", gates: "gates: [{cmd: a, timeout: [10m]}]", wantErr: "tasks[0] (id 1): gates[0]: timeout: must be a duration string such as 90s or 10m"},
-		{name: "unparseable timeout", gates: "gates: [{cmd: a, timeout: soon}]", wantErr: "tasks[0] (id 1): gates[0]: timeout: must be a duration string such as 90s or 10m"},
-		{name: "unitless timeout", gates: `gates: [{cmd: a, timeout: "30"}]`, wantErr: "tasks[0] (id 1): gates[0]: timeout: must be a duration string such as 90s or 10m"},
-		{name: "blank timeout", gates: `gates: [{cmd: a, timeout: "  "}]`, wantErr: "tasks[0] (id 1): gates[0]: timeout: must be a duration string such as 90s or 10m"},
-		{name: "zero timeout", gates: "gates: [{cmd: a, timeout: 0s}]", wantErr: "tasks[0] (id 1): gates[0]: timeout: must be greater than zero"},
-		{name: "negative timeout", gates: "gates: [{cmd: a, timeout: -5m}]", wantErr: "tasks[0] (id 1): gates[0]: timeout: must be greater than zero"},
-		{name: "duplicate timeout", gates: "gates: [{cmd: a, timeout: 1s, timeout: 2s}]", wantErr: "tasks[0] (id 1): gates[0]: timeout: duplicate key"},
-		{name: "second gate invalid", gates: "gates: [{cmd: a}, {cmd: ''}]", wantErr: "tasks[0] (id 1): gates[1]: cmd: must not be empty or whitespace"},
+		{name: "null gates", gates: "gates:", wantErr: "gates: must be a sequence"},
+		{name: "scalar gates", gates: "gates: go test ./...", wantErr: "gates: must be a sequence"},
+		{name: "mapping gates", gates: "gates: {cmd: go test ./...}", wantErr: "gates: must be a sequence"},
+		{name: "duplicate gates key", gates: "gates: []\ngates: []", wantErr: "gates: duplicate key"},
+		{name: "string element", gates: "gates: [go test ./...]", wantErr: "gates[0]: must be a mapping"},
+		{name: "missing cmd", gates: "gates: [{}]", wantErr: "gates[0]: cmd: is required"},
+		{name: "timeout without cmd", gates: "gates:\n  - timeout: 5m", wantErr: "gates[0]: cmd: is required"},
+		{name: "misspelled key", gates: "gates: [{command: a}]", wantErr: "gates[0]: command: unknown key; a gate has only cmd and timeout"},
+		{name: "extra key", gates: "gates: [{cmd: a, retries: 3}]", wantErr: "gates[0]: retries: unknown key; a gate has only cmd and timeout"},
+		{name: "duplicate cmd", gates: "gates: [{cmd: a, cmd: b}]", wantErr: "gates[0]: cmd: duplicate key"},
+		{name: "integer cmd", gates: "gates: [{cmd: 5}]", wantErr: "gates[0]: cmd: must be a string"},
+		{name: "null cmd", gates: "gates: [{cmd: }]", wantErr: "gates[0]: cmd: must be a string"},
+		{name: "blank cmd", gates: `gates: [{cmd: "  "}]`, wantErr: "gates[0]: cmd: must not be empty or whitespace"},
+		{name: "integer timeout", gates: "gates: [{cmd: a, timeout: 30}]", wantErr: "gates[0]: timeout: must be a duration string such as 90s or 10m"},
+		{name: "null timeout", gates: "gates: [{cmd: a, timeout: }]", wantErr: "gates[0]: timeout: must be a duration string such as 90s or 10m"},
+		{name: "sequence timeout", gates: "gates: [{cmd: a, timeout: [10m]}]", wantErr: "gates[0]: timeout: must be a duration string such as 90s or 10m"},
+		{name: "unparseable timeout", gates: "gates: [{cmd: a, timeout: soon}]", wantErr: "gates[0]: timeout: must be a duration string such as 90s or 10m"},
+		{name: "unitless timeout", gates: `gates: [{cmd: a, timeout: "30"}]`, wantErr: "gates[0]: timeout: must be a duration string such as 90s or 10m"},
+		{name: "blank timeout", gates: `gates: [{cmd: a, timeout: "  "}]`, wantErr: "gates[0]: timeout: must be a duration string such as 90s or 10m"},
+		{name: "zero timeout", gates: "gates: [{cmd: a, timeout: 0s}]", wantErr: "gates[0]: timeout: must be greater than zero"},
+		{name: "negative timeout", gates: "gates: [{cmd: a, timeout: -5m}]", wantErr: "gates[0]: timeout: must be greater than zero"},
+		{name: "duplicate timeout", gates: "gates: [{cmd: a, timeout: 1s, timeout: 2s}]", wantErr: "gates[0]: timeout: duplicate key"},
+		{name: "second gate invalid", gates: "gates: [{cmd: a}, {cmd: ''}]", wantErr: "gates[1]: cmd: must not be empty or whitespace"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			yml := "tasks:\n  - id: 1\n    name: a\n    prompt: p\n    " + tt.gates + "\n"
+			yml := tt.gates + "\ntasks:\n  - id: 1\n    name: a\n    prompt: p\n"
 			got, err := ParseTasks([]byte(yml))
 			require.Error(t, err)
-			assert.ErrorContains(t, err, tt.wantErr)
+			assert.EqualError(t, err, tt.wantErr)
 			assert.Equal(t, TaskList{}, got, "an error must return the zero TaskList, never a partial one")
+		})
+	}
+}
+
+// Gates are checked before the tasks so a file with an error in each always
+// reports the same one, whatever order the keys are in.
+func TestParseTasks_GateErrorReportedBeforeTaskError(t *testing.T) {
+	yml := "tasks:\n  - id: 1\n    prompt: p\ngates: [{}]\n"
+	_, err := ParseTasks([]byte(yml))
+	assert.EqualError(t, err, "gates[0]: cmd: is required")
+}
+
+func TestSaveTasks_KeepsGatesAbsentEmptyOrSet(t *testing.T) {
+	cases := map[string]string{
+		"absent": "tasks:\n  - id: 1\n    name: First\n    prompt: do it\n    state: pending\n",
+		"empty":  "gates: []\ntasks:\n  - id: 1\n    name: First\n    prompt: do it\n    state: pending\n",
+		"set":    "gates:\n  - cmd: make test\n    timeout: 10m\ntasks:\n  - id: 1\n    name: First\n    prompt: do it\n    state: pending\n",
+	}
+	for name, yml := range cases {
+		t.Run(name, func(t *testing.T) {
+			tl, err := ParseTasks([]byte(yml))
+			require.NoError(t, err)
+			path := filepath.Join(t.TempDir(), "tasks.yaml")
+			require.NoError(t, SaveTasks(path, tl))
+			saved, err := os.ReadFile(path)
+			require.NoError(t, err)
+			assert.Equal(t, yml, string(saved))
 		})
 	}
 }
@@ -609,12 +673,13 @@ func TestParseTasks_GateErrors(t *testing.T) {
 func TestSaveTasks_GatesRoundTrip(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "tasks.yaml")
 
-	want := TaskList{Tasks: []Task{
-		{ID: 1, Name: "First", Prompt: "p", State: PendingState, Gates: []Gate{
+	want := TaskList{
+		Gates: &[]Gate{
 			{Cmd: "go test ./..."},
 			{Cmd: "echo one\necho \"two\"\n"},
-		}},
-	}}
+		},
+		Tasks: []Task{{ID: 1, Name: "First", Prompt: "p", State: PendingState}},
+	}
 	require.NoError(t, SaveTasks(path, want))
 
 	data, err := os.ReadFile(path)
@@ -625,25 +690,26 @@ func TestSaveTasks_GatesRoundTrip(t *testing.T) {
 	assert.Equal(t, want, got, "gates must round-trip verbatim and in order")
 }
 
-func TestSaveTasks_OmitsEmptyGates(t *testing.T) {
+func TestSaveTasks_OmitsAbsentGates(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "tasks.yaml")
 
 	require.NoError(t, SaveTasks(path, TaskList{Tasks: []Task{{ID: 1, Name: "First", Prompt: "p", State: PendingState}}}))
 
 	data, err := os.ReadFile(path)
 	require.NoError(t, err)
-	assert.NotContains(t, string(data), "gates", "a task without gates must not gain a gates key on save")
+	assert.NotContains(t, string(data), "gates", "a file without a gates key must not gain one on save")
 }
 
 func TestSaveTasks_GateTimeoutKeptAsWrittenAndOmittedWhenAbsent(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "tasks.yaml")
 
-	want := TaskList{Tasks: []Task{
-		{ID: 1, Name: "First", Prompt: "p", State: PendingState, Gates: []Gate{
+	want := TaskList{
+		Gates: &[]Gate{
 			{Cmd: "go test ./...", Timeout: "90s"},
 			{Cmd: "echo one"},
-		}},
-	}}
+		},
+		Tasks: []Task{{ID: 1, Name: "First", Prompt: "p", State: PendingState}},
+	}
 	require.NoError(t, SaveTasks(path, want))
 
 	data, err := os.ReadFile(path)

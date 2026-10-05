@@ -290,7 +290,7 @@ func waitForFile(t *testing.T, path string, timeout time.Duration) []byte {
 }
 
 // taskFixture and taskListFixture mirror the on-disk tasks.yaml schema
-// (gralph's internal/tasks.Task) for e2e assertions. Tests parse the
+// (gralph's internal/tasks.TaskList) for e2e assertions. Tests parse the
 // resulting YAML rather than asserting on exact bytes, since gralph
 // re-marshals the whole file on every write-back (comments/formatting are
 // not preserved and every task gets an explicit state key).
@@ -300,15 +300,15 @@ type gateFixture struct {
 }
 
 type taskFixture struct {
-	ID     int           `yaml:"id"`
-	Name   string        `yaml:"name"`
-	Prompt string        `yaml:"prompt"`
-	State  string        `yaml:"state"`
-	Error  string        `yaml:"error,omitempty"`
-	Gates  []gateFixture `yaml:"gates,omitempty"`
+	ID     int    `yaml:"id"`
+	Name   string `yaml:"name"`
+	Prompt string `yaml:"prompt"`
+	State  string `yaml:"state"`
+	Error  string `yaml:"error,omitempty"`
 }
 
 type taskListFixture struct {
+	Gates []gateFixture `yaml:"gates,omitempty"`
 	Tasks []taskFixture `yaml:"tasks"`
 }
 

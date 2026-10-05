@@ -50,6 +50,7 @@ fixing your `PATH`, macOS notes, and upgrading are in
 gralph --install-skill   # once: installs the gralph-docs-writer skill for Claude Code
 gralph -t path/to/tasks.yaml --dry-run
 gralph --prompt path/to/prompt.md --tasks path/to/tasks.yaml --sandbox-settings path/to/sandbox.json
+gralph -d path/to/folder --sandbox-settings path/to/sandbox.json
 ```
 
 Run it in a terminal and you get a full-screen view of the run. Pipe it,
@@ -59,8 +60,13 @@ instead.
 Every real run needs either `--sandbox-settings` or `--skip-permissions`. There
 is no default.
 
+In a terminal, a bare `gralph` opens a setup wizard that asks for whatever the
+flags leave out (the run folder, the permission choice, the gates), then shows
+the command line that starts the same run without it.
+
 **The full guide is [docs/howto.md](docs/howto.md)**: the task file, sandbox
-settings, gates, `--commit`, `--log-dir`, the full-screen view, and every flag.
+settings, gates, `--commit`, `--log-dir`, the full-screen view and its setup
+wizard, and every flag.
 
 Got a question or an idea? Ask in
 [Discussions](https://github.com/twistingmercury/gralph/discussions).

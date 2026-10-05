@@ -5,12 +5,6 @@
 # - Put only task-specific content in `prompt`; the shared prompt.md already
 #   covers scope, cleanup, task-file rules, and the result line contract.
 # - Leave `state` empty; Gralph reads an empty state as pending.
-# - `gates` are run by Gralph itself after the session: one command per `cmd`.
-#   Include a `timeout` on every gate you generate (a duration string like 90s or 10m).
-#   A gate without a timeout in the file gets the built-in default 10m, unless
-#   --gate-timeout overrides all gates at run time.
-#   Repeat the agreed quality gates here and in the prompt's Verification.
-#   Drop `gates` when the task has no command to check.
 # - Comments are not passed to the agent, so drop this header from the
 #   generated file.
 tasks:
@@ -31,14 +25,9 @@ tasks:
 
       Verification:
       - Working directory: GENERATE_ACTUAL_VERIFICATION_DIRECTORY
-      - Quality gates: GENERATE_AGREED_QUALITY_GATE_COMMANDS
+      - Project checks: GENERATE_PROJECT_TEST_LINT_AND_BUILD_COMMANDS
       - Task checks: GENERATE_TASK_SPECIFIC_COMMANDS_OR_NONE
       - Expected outcome: GENERATE_OBSERVABLE_SUCCESS_CONDITION
 
       Completion criteria:
       - GENERATE_CONCRETE_DELIVERED_BEHAVIOR_AND_RELEVANT_ACCEPTANCE_CHECKS
-    gates:
-      - cmd: "GENERATE_AGREED_QUALITY_GATE_COMMAND"
-        timeout: 10m
-      - cmd: "GENERATE_TASK_SPECIFIC_CHECK_COMMAND_OR_DROP_THIS_ENTRY"
-        timeout: 10m

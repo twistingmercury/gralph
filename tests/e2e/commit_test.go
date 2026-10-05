@@ -92,17 +92,17 @@ func (r commitRepo) subjects(t *testing.T) []string {
 	return strings.Split(strings.TrimSpace(gitIn(t, r.dir, "log", "--format=%s")), "\n")
 }
 
-const twoWorkTasks = `tasks:
+// The gates are shared by both tasks, so the one gate picks its file by what
+// the first task left behind: each commit then holds exactly one new file.
+const twoWorkTasks = `gates:
+  - cmd: if [ -e one.txt ]; then echo two > two.txt; else echo one > one.txt; fi
+tasks:
   - id: 1
     name: First task
     prompt: Do the first thing.
-    gates:
-      - cmd: echo one > one.txt
   - id: 2
     name: Second task
     prompt: Do the second thing.
-    gates:
-      - cmd: echo two > two.txt
 `
 
 func TestCommit_OneCommitPerCompletedTask(t *testing.T) {
@@ -208,12 +208,12 @@ func breakRepo(t *testing.T, dir string) {
 
 func TestCommit_FailedGateLeavesNoCommitAndBlocksTheRerun(t *testing.T) {
 	t.Parallel()
-	tasksYAML := `tasks:
+	tasksYAML := `gates:
+  - cmd: echo one > one.txt; exit 1
+tasks:
   - id: 1
     name: First task
     prompt: Do the first thing.
-    gates:
-      - cmd: echo one > one.txt; exit 1
 `
 	repo := newCommitRepo(t, tasksYAML)
 

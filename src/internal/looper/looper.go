@@ -86,16 +86,15 @@ func DryRun(w io.Writer, tasksFile, gateTimeout, sandboxFile string, commit bool
 	return nil
 }
 
-// printGateLimits writes one line per gate with the timeout it would run
-// under and where that timeout came from. It writes nothing for a list with
+// printGateLimits writes one line per file gate with the timeout it would run
+// under and where that timeout came from. It writes nothing for a file with
 // no gates.
 func printGateLimits(w io.Writer, tl *tasks.TaskList, override string) {
-	for _, task := range tl.Tasks {
-		for _, gate := range task.Gates {
-			limit, source := gateLimit(gate, override)
-			gateName := firstLine(gate.Cmd)
-			_, _ = fmt.Fprintf(w, "task %d gate: %s: %s (%s)\n", task.ID, gateName, limit, source)
-		}
+	gates := tl.GateList()
+	for _, gate := range gates {
+		limit, source := gateLimit(gate, override)
+		gateName := firstLine(gate.Cmd)
+		_, _ = fmt.Fprintf(w, "gate: %s: %s (%s)\n", gateName, limit, source)
 	}
 }
 
@@ -208,6 +207,7 @@ func Run(ctx context.Context, prompt string, tl *tasks.TaskList, tasksFile, gate
 }
 
 func runLoop(ctx context.Context, p string, tl *tasks.TaskList, tasksFile, gateTimeout string, sessionArgs []string, repo *Repo, report func(Event)) error {
+	gates := tl.GateList()
 	for i := range tl.Tasks {
 		task := &tl.Tasks[i]
 
@@ -224,7 +224,7 @@ func runLoop(ctx context.Context, p string, tl *tasks.TaskList, tasksFile, gateT
 		}
 
 		start := time.Now()
-		state, errMsg, err := runTask(ctx, p, *task, gateTimeout, sessionArgs, repo, report)
+		state, errMsg, err := runTask(ctx, p, *task, gates, gateTimeout, sessionArgs, repo, report)
 		if err != nil {
 			return err
 		}
@@ -262,9 +262,9 @@ func runLoop(ctx context.Context, p string, tl *tasks.TaskList, tasksFile, gateT
 }
 
 // runTask runs one task's session on the path report selects, then, only
-// while the task is still completed, its gates and the commit into repo. It
-// returns the task's outcome, or an error when ctx was cancelled.
-func runTask(ctx context.Context, p string, task tasks.Task, gateTimeout string, sessionArgs []string, repo *Repo, report func(Event)) (state, errMsg string, err error) {
+// while the task is still completed, the file's gates and the commit into
+// repo. It returns the task's outcome, or an error when ctx was cancelled.
+func runTask(ctx context.Context, p string, task tasks.Task, gates []tasks.Gate, gateTimeout string, sessionArgs []string, repo *Repo, report func(Event)) (state, errMsg string, err error) {
 	if report == nil {
 		state, errMsg, err = runTaskPlain(ctx, p, task, sessionArgs)
 	} else {
@@ -275,7 +275,7 @@ func runTask(ctx context.Context, p string, task tasks.Task, gateTimeout string,
 		return state, errMsg, err
 	}
 
-	state, errMsg, err = runGates(ctx, task, gateTimeout, report)
+	state, errMsg, err = runGates(ctx, task, gates, gateTimeout, report)
 	if err != nil || state != tasks.CompletedState || repo == nil {
 		return state, errMsg, err
 	}

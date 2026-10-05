@@ -1,8 +1,8 @@
 # Gralph — Requirements
 
-> **Version**: v12
+> **Version**: v13
 > **Date**: 2026-10-02
-> **Notes**: Install without Go through release archives (ADR-017); maturity moved from Emerging to Basic.
+> **Notes**: A run folder and a setup wizard (ADR-018): secondary goal 6, `huh/v2` in the TUI constraint. Gates are one list per file (ADR-019): goal 8 and the non-goals follow.
 
 [Back to Overview](00_overview.md) | [Back to Project README](../../README.md)
 
@@ -40,7 +40,7 @@ Claude Code users need a way to:
 5. Exit non-zero if any task fails, so automation scripts can detect failure
 6. Be Claude Code only: no agent abstraction, no multi-provider support
 7. Run only on Unix (Linux, macOS, BSDs)
-8. Check a completed task independently: run the task's `gates` commands after the session and mark the task completed only when every one exits zero
+8. Check a completed task independently: run the file's `gates` commands after the session and mark the task completed only when every one exits zero
 9. Run sessions in Claude Code's sandbox, set up by the user's `--sandbox-settings` file; run without one only when the user asks by name with `--skip-permissions`. There is no default
 10. Commit a completed task's work itself, on request (`--commit`), only after its gates pass, one commit per task
 
@@ -51,6 +51,7 @@ Claude Code users need a way to:
 3. Support Docker-based release builds and CI testing
 4. Provide clear error messages when task files are invalid or tasks fail
 5. Keep a record of a full-screen run on request (`--log-dir`): a JSON-lines ledger of the run plus each task's activity, written by gralph itself
+6. Get from a bare `gralph` to a running loop in the full-screen view: a setup wizard asks for whatever the flags and the task file leave open (a run folder, the permission choice, the gates), checks each answer, and shows the command line that repeats the run without it
 
 ## Non-Goals
 
@@ -62,7 +63,7 @@ Claude Code users need a way to:
 - A TUI for `--dry-run`; it always prints plain text
 - Writing the TUI's `in progress` state to tasks.yaml
 - Sending a task's gates to Claude; they are gralph's check, and the stdin prompt does not include them
-- File-level gates shared by all tasks, a file-level timeout key, running a gate with no time limit, or sandboxing what a gate command does
+- Gates on a single task, a file-level timeout key, running a gate with no time limit, or sandboxing what a gate command does
 - Gralph running sessions in a container it manages, or detecting the toolchain to guess sandbox paths; the settings file is the user's to write
 - Falling back to an unsandboxed run when the sandbox cannot start
 - Re-running only the gates of a task; a task reset to `pending` runs its session again
@@ -98,7 +99,7 @@ Claude Code users need a way to:
 - **No injectable runner** — Both test suites use a fake `claude` on PATH to drive the looper; runLoop execs inline
 - **Prompt passed via stdin** — Claude is invoked as `claude --print` plus the session flags, with the prompt on stdin: `--permission-mode acceptEdits --settings <merged JSON>` for `--sandbox-settings`, or `--dangerously-skip-permissions` for `--skip-permissions`. The TUI path adds `--output-format stream-json --verbose` right after `--print`; plain mode's output stays as it is
 - **Claude Code's sandbox** — Sandboxed runs need what it needs: bubblewrap and socat on Linux, Seatbelt on macOS. On the BSDs only `--skip-permissions` works
-- **Bubble Tea v2 only** — `charm.land/bubbletea/v2`, `bubbles/v2`, `lipgloss/v2`, imported only by `internal/tui`; `cmd/main` imports `github.com/charmbracelet/x/term` for terminal detection only; never the v1 `github.com/charmbracelet/*` modules
+- **Bubble Tea v2 only** — `charm.land/bubbletea/v2`, `bubbles/v2`, `lipgloss/v2`, and `huh/v2` for the setup wizard, imported only by `internal/tui`; `cmd/main` imports `github.com/charmbracelet/x/term` for terminal detection only; never the v1 `github.com/charmbracelet/*` modules
 
 ### Business Constraints
 

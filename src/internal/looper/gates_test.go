@@ -23,7 +23,7 @@ func touchGate(path string) tasks.Gate {
 }
 
 func gatedTask(gates ...tasks.Gate) *tasks.TaskList {
-	return &tasks.TaskList{Tasks: []tasks.Task{{ID: 1, Name: "First", Prompt: "p1", Gates: gates}}}
+	return &tasks.TaskList{Gates: &gates, Tasks: []tasks.Task{{ID: 1, Name: "First", Prompt: "p1"}}}
 }
 
 func TestRunLoop_GatesPassCompletesTask(t *testing.T) {
@@ -45,7 +45,29 @@ func TestRunLoop_GatesPassCompletesTask(t *testing.T) {
 	require.Len(t, saved.Tasks, 1)
 	assert.Equal(t, tasks.CompletedState, saved.Tasks[0].State)
 	assert.Empty(t, saved.Tasks[0].Error)
-	assert.Equal(t, gates, saved.Tasks[0].Gates, "gates must survive the save")
+	assert.Equal(t, gates, saved.GateList(), "gates must survive the save")
+}
+
+func TestRunLoop_FileGatesRunAfterEveryCompletedTask(t *testing.T) {
+	useFakeClaude(t)
+	dir := t.TempDir()
+	tasksPath := filepath.Join(dir, "tasks.yaml")
+	countPath := filepath.Join(dir, "gate-runs")
+
+	tl := &tasks.TaskList{
+		Gates: &[]tasks.Gate{{Cmd: "echo ran >> '" + countPath + "'"}},
+		Tasks: []tasks.Task{
+			{ID: 1, Name: "First", Prompt: "p1"},
+			{ID: 2, Name: "Done", Prompt: "p2", State: tasks.CompletedState},
+			{ID: 3, Name: "Third", Prompt: "p3"},
+		},
+	}
+
+	require.NoError(t, runLoop(context.Background(), "prompt", tl, tasksPath, "", bypass, nil, nil))
+
+	runs, err := os.ReadFile(countPath)
+	require.NoError(t, err)
+	assert.Equal(t, "ran\nran\n", string(runs), "the file's gates run once per task that ran, and not for one already completed")
 }
 
 func TestRunLoop_GateFailureFailsTaskAndStopsRun(t *testing.T) {
@@ -56,10 +78,13 @@ func TestRunLoop_GateFailureFailsTaskAndStopsRun(t *testing.T) {
 	never := filepath.Join(dir, "never")
 	t.Setenv("FAKE_CLAUDE_RECORD", recordPath)
 
-	tl := &tasks.TaskList{Tasks: []tasks.Task{
-		{ID: 1, Name: "First", Prompt: "p1", Gates: []tasks.Gate{{Cmd: `test "a" = "b"`}, touchGate(never)}},
-		{ID: 2, Name: "Second", Prompt: "p2"},
-	}}
+	tl := &tasks.TaskList{
+		Gates: &[]tasks.Gate{{Cmd: `test "a" = "b"`}, touchGate(never)},
+		Tasks: []tasks.Task{
+			{ID: 1, Name: "First", Prompt: "p1"},
+			{ID: 2, Name: "Second", Prompt: "p2"},
+		},
+	}
 
 	const wantErr = `gate "test \"a\" = \"b\"" failed: exit status 1`
 	err := runLoop(context.Background(), "prompt", tl, tasksPath, "", bypass, nil, nil)
@@ -530,7 +555,7 @@ func TestRun_GateWithinTimeoutPasses(t *testing.T) {
 			saved := readSavedTasks(t, tasksPath)
 			require.Len(t, saved.Tasks, 1)
 			assert.Equal(t, tasks.CompletedState, saved.Tasks[0].State)
-			assert.Equal(t, tl.Tasks[0].Gates, saved.Tasks[0].Gates, "timeout must survive the save as written")
+			assert.Equal(t, tl.GateList(), saved.GateList(), "timeout must survive the save as written")
 		})
 	}
 }
@@ -627,7 +652,7 @@ func TestRun_GateTimeoutFlagIsNeverSaved(t *testing.T) {
 	assert.Contains(t, string(data), "timeout: 30s")
 	assert.NotContains(t, string(data), "45s", "the flag must not reach the tasks file")
 	assert.NotContains(t, string(data), "10m", "the default must not reach the tasks file")
-	assert.Equal(t, []tasks.Gate{{Cmd: "true", Timeout: "30s"}, {Cmd: "true"}}, readSavedTasks(t, tasksPath).Tasks[0].Gates)
+	assert.Equal(t, []tasks.Gate{{Cmd: "true", Timeout: "30s"}, {Cmd: "true"}}, readSavedTasks(t, tasksPath).GateList())
 }
 
 func TestRun_MultiLineGateErrorsNameOnlyTheFirstLine(t *testing.T) {
@@ -658,7 +683,7 @@ func TestRun_MultiLineGateErrorsNameOnlyTheFirstLine(t *testing.T) {
 
 				require.EqualError(t, err, "task 1: First failed: "+tt.wantErr)
 				assert.Equal(t, tt.wantErr, readSavedTasks(t, tasksPath).Tasks[0].Error)
-				assert.Equal(t, tt.gate.Cmd, readSavedTasks(t, tasksPath).Tasks[0].Gates[0].Cmd, "the stored command stays whole")
+				assert.Equal(t, tt.gate.Cmd, readSavedTasks(t, tasksPath).GateList()[0].Cmd, "the stored command stays whole")
 			})
 		}
 	}

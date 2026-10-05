@@ -238,7 +238,7 @@ func TestRun_CommitsEachTaskIntoTheRepo(t *testing.T) {
 	dir := initGitRepo(t)
 	tasksPath := filepath.Join(dir, "run", "tasks.yaml")
 	require.NoError(t, os.WriteFile(tasksPath, []byte(
-		"tasks:\n  - id: 1\n    name: First\n    prompt: p1\n    gates:\n      - cmd: echo work > one.txt\n"), 0o600))
+		"gates:\n  - cmd: echo work > one.txt\ntasks:\n  - id: 1\n    name: First\n    prompt: p1\n"), 0o600))
 	repo, err := looper.OpenRepo(tasksPath)
 	require.NoError(t, err)
 	require.NotNil(t, repo)
