@@ -31,7 +31,6 @@ func fixedNow() time.Time {
 var testInfo = Info{
 	Version:         "v0.10.0",
 	TasksFile:       "run/tasks.yaml",
-	PromptFile:      "run/prompt.md",
 	Permissions:     "sandbox",
 	SandboxSettings: "run/sandbox.json",
 	Commit:          true,
@@ -84,18 +83,20 @@ func TestOpen_CreatesPrivateFolderAndRunStarted(t *testing.T) {
 	assert.Equal(t, os.FileMode(0o700), mode(t, filepath.Dir(runDir)), "the log directory")
 	assert.Equal(t, os.FileMode(0o700), mode(t, runDir), "the run folder")
 	assert.Equal(t, os.FileMode(0o600), mode(t, filepath.Join(runDir, "run.jsonl")))
-	want := `{` + stampText + `,"event":"run_started","version":"v0.10.0","tasks_file":"run/tasks.yaml","prompt_file":"run/prompt.md","permissions":"sandbox","sandbox_settings":"run/sandbox.json","commit":true}`
-	assert.Equal(t, []string{want}, ledgerLines(t, runDir))
+	want := `{` + stampText + `,"event":"run_started","version":"v0.10.0","tasks_file":"run/tasks.yaml","permissions":"sandbox","sandbox_settings":"run/sandbox.json","commit":true}`
+	lines := ledgerLines(t, runDir)
+	assert.Equal(t, []string{want}, lines)
+	assert.NotContains(t, lines[0], "prompt_file", "the prompt lives in the task file now")
 }
 
 func TestOpen_LeavesOutWhatWasNotPassed(t *testing.T) {
 	runDir := filepath.Join(t.TempDir(), "run")
-	info := Info{Version: "dev", TasksFile: "t.yaml", PromptFile: "p.md", Permissions: "skip", GateTimeout: "90s"}
+	info := Info{Version: "dev", TasksFile: "t.yaml", Permissions: "skip", GateTimeout: "90s"}
 	l, err := open(runDir, info, fixedNow)
 	require.NoError(t, err)
 	require.NoError(t, l.Close())
 
-	want := `{` + stampText + `,"event":"run_started","version":"dev","tasks_file":"t.yaml","prompt_file":"p.md","permissions":"skip","gate_timeout":"90s","commit":false}`
+	want := `{` + stampText + `,"event":"run_started","version":"dev","tasks_file":"t.yaml","permissions":"skip","gate_timeout":"90s","commit":false}`
 	assert.Equal(t, []string{want}, ledgerLines(t, runDir))
 }
 

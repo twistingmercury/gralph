@@ -153,7 +153,7 @@ func TestOpenRepo_DirtyTreeIsRefused(t *testing.T) {
 
 func TestOpenRepo_IgnoredFilesAreClean(t *testing.T) {
 	dir := initRepo(t)
-	writeFile(t, filepath.Join(dir, "run", "prompt.md"), "prompt\n")
+	writeFile(t, filepath.Join(dir, "run", "notes.md"), "notes\n")
 	tasksPath := taskFile(dir)
 	writeFile(t, tasksPath, "tasks: []\n")
 
@@ -397,7 +397,7 @@ func TestRun_CommitsOneCommitPerCompletedTask(t *testing.T) {
 				report = rec.report
 			}
 
-			require.NoError(t, Run(context.Background(), "prompt", tl, tasksPath, "", bypass, openRepo(t, tasksPath), report))
+			require.NoError(t, Run(context.Background(), tl, tasksPath, "", bypass, openRepo(t, tasksPath), report))
 
 			assert.Equal(t, []string{"Second", "First", "init"}, subjects(t, dir))
 			assert.Equal(t, []string{"work-2.txt"}, headFiles(t, dir))
@@ -416,7 +416,7 @@ func TestRun_NilRepoNeverCommits(t *testing.T) {
 	tasksPath := taskFile(dir)
 	tl := gatedTask(workGate("one.txt"))
 
-	require.NoError(t, Run(context.Background(), "prompt", tl, tasksPath, "", bypass, nil, nil))
+	require.NoError(t, Run(context.Background(), tl, tasksPath, "", bypass, nil, nil))
 
 	assert.Equal(t, []string{"init"}, subjects(t, dir))
 	assert.FileExists(t, filepath.Join(dir, "one.txt"))
@@ -434,7 +434,7 @@ func TestRun_NothingToCommitStillCompletes(t *testing.T) {
 	require.NoError(t, err)
 	os.Stdout = w
 
-	runErr := Run(context.Background(), "prompt", tl, tasksPath, "", bypass, repo, nil)
+	runErr := Run(context.Background(), tl, tasksPath, "", bypass, repo, nil)
 
 	require.NoError(t, w.Close())
 	os.Stdout = origStdout
@@ -457,7 +457,7 @@ func TestRun_FailedGateLeavesChangesUncommitted(t *testing.T) {
 	tasksPath := taskFile(dir)
 	tl := gatedTask(tasks.Gate{Cmd: "echo work > one.txt; exit 1"})
 
-	err := Run(context.Background(), "prompt", tl, tasksPath, "", bypass, openRepo(t, tasksPath), nil)
+	err := Run(context.Background(), tl, tasksPath, "", bypass, openRepo(t, tasksPath), nil)
 	require.ErrorContains(t, err, `gate "echo work > one.txt; exit 1" failed`)
 
 	assert.Equal(t, []string{"init"}, subjects(t, dir))
@@ -472,7 +472,7 @@ func TestRun_SessionFailureSkipsCommit(t *testing.T) {
 	repo := openRepo(t, tasksPath)
 	writeFile(t, filepath.Join(dir, "left.txt"), "left by the session\n")
 
-	err := Run(context.Background(), "prompt", gatedTask(), tasksPath, "", bypass, repo, nil)
+	err := Run(context.Background(), gatedTask(), tasksPath, "", bypass, repo, nil)
 	require.ErrorContains(t, err, "nope")
 	assert.Equal(t, []string{"init"}, subjects(t, dir))
 }
@@ -493,7 +493,7 @@ func TestRun_CommitFailureFailsTaskAndStopsRun(t *testing.T) {
 	}
 
 	const wantErr = "commit failed: exit status 1"
-	err := Run(context.Background(), "prompt", tl, tasksPath, "", bypass, openRepo(t, tasksPath), nil)
+	err := Run(context.Background(), tl, tasksPath, "", bypass, openRepo(t, tasksPath), nil)
 	require.EqualError(t, err, "task 1: First failed: "+wantErr)
 
 	assert.Equal(t, []string{"init"}, subjects(t, dir))
@@ -518,7 +518,7 @@ func TestRun_CommitSurvivesAGateEditingGitignore(t *testing.T) {
 		workGate("one.txt"),
 	)
 
-	require.NoError(t, Run(context.Background(), "prompt", tl, tasksPath, "", bypass, openRepo(t, tasksPath), nil))
+	require.NoError(t, Run(context.Background(), tl, tasksPath, "", bypass, openRepo(t, tasksPath), nil))
 
 	assert.Equal(t, []string{"First", "init"}, subjects(t, dir))
 	assert.ElementsMatch(t, []string{".gitignore", "one.txt"}, headFiles(t, dir))
@@ -532,7 +532,7 @@ func TestRun_CommitAfterTheSessionCommittedItself(t *testing.T) {
 	tasksPath := taskFile(dir)
 	tl := gatedTask(tasks.Gate{Cmd: "echo work > one.txt && git add -A && git commit -q -m own"})
 
-	require.NoError(t, Run(context.Background(), "prompt", tl, tasksPath, "", bypass, openRepo(t, tasksPath), nil))
+	require.NoError(t, Run(context.Background(), tl, tasksPath, "", bypass, openRepo(t, tasksPath), nil))
 
 	assert.Equal(t, []string{"own", "init"}, subjects(t, dir), "gralph must add no commit of its own")
 	assert.Equal(t, tasks.CompletedState, readSavedTasks(t, tasksPath).Tasks[0].State)
@@ -547,7 +547,7 @@ func TestRun_FailedAddFailsTheTask(t *testing.T) {
 	tl := gatedTask(workGate("one.txt"), tasks.Gate{Cmd: "touch .git/index.lock"})
 
 	const wantErr = "commit failed: exit status 128"
-	err := Run(context.Background(), "prompt", tl, tasksPath, "", bypass, openRepo(t, tasksPath), nil)
+	err := Run(context.Background(), tl, tasksPath, "", bypass, openRepo(t, tasksPath), nil)
 	require.EqualError(t, err, "task 1: First failed: "+wantErr)
 
 	saved := readSavedTasks(t, tasksPath)
@@ -561,7 +561,7 @@ func TestRun_CommitWithTaskFileOutsideTheTree(t *testing.T) {
 	dir := initRepo(t)
 	tasksPath := filepath.Join(tempDir(t), "tasks.yaml")
 
-	require.NoError(t, Run(context.Background(), "prompt", gatedTask(workGate("one.txt")), tasksPath, "", bypass, openRepo(t, tasksPath), nil))
+	require.NoError(t, Run(context.Background(), gatedTask(workGate("one.txt")), tasksPath, "", bypass, openRepo(t, tasksPath), nil))
 
 	assert.Equal(t, []string{"First", "init"}, subjects(t, dir))
 	assert.Empty(t, gitRun(t, dir, "status", "--porcelain"))
@@ -580,7 +580,7 @@ func TestRun_CommitFromSubdirectoryCommitsWholeTree(t *testing.T) {
 
 	// The gate runs in sub and writes one file there and one in the root.
 	tl := gatedTask(tasks.Gate{Cmd: "echo a > here.txt; echo b > ../top.txt"})
-	require.NoError(t, Run(context.Background(), "prompt", tl, tasksPath, "", bypass, openRepo(t, tasksPath), nil))
+	require.NoError(t, Run(context.Background(), tl, tasksPath, "", bypass, openRepo(t, tasksPath), nil))
 
 	assert.ElementsMatch(t, []string{"sub/here.txt", "top.txt"}, headFiles(t, dir))
 }
@@ -605,7 +605,7 @@ func TestRun_CommitOddTaskNames(t *testing.T) {
 			tl := &tasks.TaskList{Shared: tasks.Shared{Prompt: "shared prompt", Gates: &[]tasks.Gate{workGate("one.txt")}}, Tasks: []tasks.Task{{ID: 1, Name: tt.taskName, Prompt: "p"}}}
 
 			var rec recorder
-			require.NoError(t, Run(context.Background(), "prompt", tl, tasksPath, "", bypass, openRepo(t, tasksPath), rec.report))
+			require.NoError(t, Run(context.Background(), tl, tasksPath, "", bypass, openRepo(t, tasksPath), rec.report))
 
 			assert.Equal(t, []string{tt.wantSubject, "init"}, subjects(t, dir))
 
@@ -629,7 +629,7 @@ func TestRun_PlainPrintsCommitLineAndGitOutput(t *testing.T) {
 	require.NoError(t, err)
 	os.Stdout = w
 
-	runErr := Run(context.Background(), "prompt", gatedTask(workGate("one.txt")), tasksPath, "", bypass, repo, nil)
+	runErr := Run(context.Background(), gatedTask(workGate("one.txt")), tasksPath, "", bypass, repo, nil)
 
 	require.NoError(t, w.Close())
 	os.Stdout = origStdout
@@ -661,7 +661,7 @@ func TestRun_StreamReportsCommitAsActivity(t *testing.T) {
 	}()
 
 	var rec recorder
-	runErr := Run(context.Background(), "prompt", gatedTask(workGate("one.txt")), tasksPath, "", bypass, repo, rec.report)
+	runErr := Run(context.Background(), gatedTask(workGate("one.txt")), tasksPath, "", bypass, repo, rec.report)
 	os.Stdout = orig
 	require.NoError(t, w.Close())
 	require.NoError(t, runErr)
@@ -683,7 +683,7 @@ func TestRun_ReportsCommittedWithTheNewHash(t *testing.T) {
 	repo := openRepo(t, tasksPath)
 
 	var rec recorder
-	require.NoError(t, Run(context.Background(), "prompt", gatedTask(workGate("one.txt")), tasksPath, "", bypass, repo, rec.report))
+	require.NoError(t, Run(context.Background(), gatedTask(workGate("one.txt")), tasksPath, "", bypass, repo, rec.report))
 
 	events := rec.snapshot()
 	commits := eventsOfKind(events, Committed)
@@ -703,7 +703,7 @@ func TestRun_NothingStagedReportsNoCommitted(t *testing.T) {
 	repo := openRepo(t, tasksPath)
 
 	var rec recorder
-	require.NoError(t, Run(context.Background(), "prompt", gatedTask(), tasksPath, "", bypass, repo, rec.report))
+	require.NoError(t, Run(context.Background(), gatedTask(), tasksPath, "", bypass, repo, rec.report))
 
 	assert.Empty(t, eventsOfKind(rec.snapshot(), Committed))
 }
@@ -722,7 +722,7 @@ func cancelDuringCommit(t *testing.T, dir, tasksPath, script string) (time.Durat
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- Run(ctx, "prompt", gatedTask(workGate("one.txt")), tasksPath, "", bypass, repo, nil)
+		errCh <- Run(ctx, gatedTask(workGate("one.txt")), tasksPath, "", bypass, repo, nil)
 	}()
 
 	require.Eventually(t, func() bool {
@@ -787,11 +787,10 @@ func TestStart_CommitRefusesDirtyTreeBeforeAnySession(t *testing.T) {
 	t.Setenv("FAKE_CLAUDE_RECORD", recordPath)
 	writeFile(t, filepath.Join(dir, "stray.txt"), "stray\n")
 	run := tempDir(t)
-	promptPath, tasksPath := filepath.Join(run, "prompt.md"), filepath.Join(run, "tasks.yaml")
-	writeFile(t, promptPath, "prompt\n")
+	tasksPath := filepath.Join(run, "tasks.yaml")
 	writeFile(t, tasksPath, validTasks)
 
-	err := Start(context.Background(), promptPath, tasksPath, "", bypass, true)
+	err := Start(context.Background(), tasksPath, "", bypass, true)
 	require.EqualError(t, err, "--commit needs a clean work tree; commit, stash, or remove:\n?? stray.txt")
 
 	assert.Empty(t, readFakeClaudeRecords(t, recordPath), "claude must not run")
@@ -804,11 +803,10 @@ func TestStart_CommitFlagCommitsTheTask(t *testing.T) {
 	useFakeClaude(t)
 	dir := initRepo(t)
 	run := tempDir(t)
-	promptPath, tasksPath := filepath.Join(run, "prompt.md"), filepath.Join(run, "tasks.yaml")
-	writeFile(t, promptPath, "prompt\n")
+	tasksPath := filepath.Join(run, "tasks.yaml")
 	writeFile(t, tasksPath, "shared:\n  prompt: shared prompt\n  gates:\n    - cmd: echo work > one.txt\ntasks:\n  - id: 1\n    name: First\n    prompt: p1\n")
 
-	require.NoError(t, Start(context.Background(), promptPath, tasksPath, "", bypass, true))
+	require.NoError(t, Start(context.Background(), tasksPath, "", bypass, true))
 	assert.Equal(t, []string{"First", "init"}, subjects(t, dir))
 }
 
@@ -817,11 +815,10 @@ func TestStart_WithoutCommitFlagIgnoresADirtyTree(t *testing.T) {
 	dir := initRepo(t)
 	writeFile(t, filepath.Join(dir, "stray.txt"), "stray\n")
 	run := tempDir(t)
-	promptPath, tasksPath := filepath.Join(run, "prompt.md"), filepath.Join(run, "tasks.yaml")
-	writeFile(t, promptPath, "prompt\n")
+	tasksPath := filepath.Join(run, "tasks.yaml")
 	writeFile(t, tasksPath, validTasks)
 
-	require.NoError(t, Start(context.Background(), promptPath, tasksPath, "", bypass, false))
+	require.NoError(t, Start(context.Background(), tasksPath, "", bypass, false))
 	assert.Equal(t, []string{"init"}, subjects(t, dir))
 }
 

@@ -24,12 +24,7 @@ var ErrFailedTasks = errors.New("fix the failed tasks and set their state to pen
 // that set what a session may do: SandboxArgs or BypassArgs. commit is the
 // --commit flag: each completed task is committed when gralph runs in a git
 // work tree, which must then be clean.
-func Start(ctx context.Context, promptFile, tasksFile, gateTimeout string, sessionArgs []string, commit bool) error {
-	prompt, err := LoadPrompt(promptFile)
-	if err != nil {
-		return fmt.Errorf("failed to start loop runner: %w", err)
-	}
-
+func Start(ctx context.Context, tasksFile, gateTimeout string, sessionArgs []string, commit bool) error {
 	tasklist, err := LoadTasksReport(os.Stdout, tasksFile)
 	if errors.Is(err, ErrFailedTasks) {
 		return err
@@ -44,7 +39,7 @@ func Start(ctx context.Context, promptFile, tasksFile, gateTimeout string, sessi
 		return err
 	}
 
-	if err := Run(ctx, prompt, tasklist, tasksFile, gateTimeout, sessionArgs, repo, nil); err != nil {
+	if err := Run(ctx, tasklist, tasksFile, gateTimeout, sessionArgs, repo, nil); err != nil {
 		return fmt.Errorf("loop error: %w", err)
 	}
 
@@ -166,28 +161,6 @@ func LoadTasksReport(w io.Writer, tasksFile string) (*tasks.TaskList, error) {
 	return tl, err
 }
 
-// LoadPrompt reads the prompt file at path and returns it trimmed; an empty or
-// whitespace-only prompt is an error.
-func LoadPrompt(path string) (string, error) {
-	cleanPath := filepath.Clean(path)
-	data, err := os.ReadFile(cleanPath)
-	if err != nil {
-		return "", fmt.Errorf("prompt file %q is not accessible: %w", path, err)
-	}
-
-	if len(data) == 0 {
-		return "", errors.New("the prompt file is empty")
-	}
-
-	prompt := strings.TrimSpace(string(data))
-
-	if prompt == "" {
-		return "", errors.New("the prompt file is just whitespace")
-	}
-
-	return prompt, nil
-}
-
 // Run runs the loop over tl. When report is non-nil it receives a copy of
 // each task's progress and, last, a RunDone event carrying Run's error;
 // claude then runs with stream-json output and its activity is reported
@@ -195,9 +168,9 @@ func LoadPrompt(path string) (string, error) {
 // not empty, replaces every gate's timeout for this run; it is never saved.
 // sessionArgs is as for Start. repo, when not nil, is where each completed
 // task is committed.
-func Run(ctx context.Context, prompt string, tl *tasks.TaskList, tasksFile, gateTimeout string, sessionArgs []string, repo *Repo, report func(Event)) error {
+func Run(ctx context.Context, tl *tasks.TaskList, tasksFile, gateTimeout string, sessionArgs []string, repo *Repo, report func(Event)) error {
 	start := time.Now()
-	err := runLoop(ctx, prompt, tl, tasksFile, gateTimeout, sessionArgs, repo, report)
+	err := runLoop(ctx, tl, tasksFile, gateTimeout, sessionArgs, repo, report)
 	if report != nil {
 		elapsed := time.Since(start)
 		report(Event{Kind: RunDone, Err: err, Duration: elapsed})
@@ -206,7 +179,8 @@ func Run(ctx context.Context, prompt string, tl *tasks.TaskList, tasksFile, gate
 	return err
 }
 
-func runLoop(ctx context.Context, p string, tl *tasks.TaskList, tasksFile, gateTimeout string, sessionArgs []string, repo *Repo, report func(Event)) error {
+func runLoop(ctx context.Context, tl *tasks.TaskList, tasksFile, gateTimeout string, sessionArgs []string, repo *Repo, report func(Event)) error {
+	prompt := tl.Shared.Prompt
 	gates := tl.GateList()
 	for i := range tl.Tasks {
 		task := &tl.Tasks[i]
@@ -224,7 +198,7 @@ func runLoop(ctx context.Context, p string, tl *tasks.TaskList, tasksFile, gateT
 		}
 
 		start := time.Now()
-		state, errMsg, err := runTask(ctx, p, *task, gates, gateTimeout, sessionArgs, repo, report)
+		state, errMsg, err := runTask(ctx, prompt, *task, gates, gateTimeout, sessionArgs, repo, report)
 		if err != nil {
 			return err
 		}

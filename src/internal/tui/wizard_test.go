@@ -20,7 +20,7 @@ func TestNeedsWizard(t *testing.T) {
 	gates := []tasks.Gate{}
 	decided := &tasks.TaskList{Shared: tasks.Shared{Prompt: "shared prompt", Gates: &gates}}
 	undecided := &tasks.TaskList{}
-	full := Settings{TasksPath: "t.yaml", PromptPath: "p.md", Tasks: decided, SkipPermissions: true}
+	full := Settings{TasksPath: "t.yaml", Tasks: decided, SkipPermissions: true}
 
 	cases := map[string]struct {
 		s    Settings
@@ -28,10 +28,9 @@ func TestNeedsWizard(t *testing.T) {
 	}{
 		"everything answered":      {full, false},
 		"no folder or files":       {Settings{SkipPermissions: true}, true},
-		"one file missing":         {Settings{TasksPath: "t.yaml", Tasks: decided, SkipPermissions: true}, true},
-		"no permission choice":     {Settings{TasksPath: "t.yaml", PromptPath: "p.md", Tasks: decided}, true},
-		"gates key absent":         {Settings{TasksPath: "t.yaml", PromptPath: "p.md", Tasks: undecided, SkipPermissions: true}, true},
-		"sandbox counts as chosen": {Settings{TasksPath: "t.yaml", PromptPath: "p.md", Tasks: decided, SandboxSettings: "sb.json"}, false},
+		"no permission choice":     {Settings{TasksPath: "t.yaml", Tasks: decided}, true},
+		"gates key absent":         {Settings{TasksPath: "t.yaml", Tasks: undecided, SkipPermissions: true}, true},
+		"sandbox counts as chosen": {Settings{TasksPath: "t.yaml", Tasks: decided, SandboxSettings: "sb.json"}, false},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -42,20 +41,20 @@ func TestNeedsWizard(t *testing.T) {
 }
 
 func TestStepVisibility(t *testing.T) {
-	s := Settings{Dir: "f", TasksPath: "f/tasks.yaml", PromptPath: "f/prompt.md", SkipPermissions: true}
+	s := Settings{Dir: "f", TasksPath: "f/tasks.yaml", SkipPermissions: true}
 	w := newWizard(s, Given{Commit: true})
-	assert.True(t, w.hideFolder(), "both files are known")
+	assert.True(t, w.hideFolder(), "the task file is known")
 	assert.True(t, w.hidePermissions(), "--skip-permissions was passed")
 	assert.True(t, w.hideCommit(), "--commit was passed")
 	assert.False(t, w.hideLogging(), "a folder and no --log-dir")
 	assert.False(t, w.hideTimeout())
 
-	w = newWizard(Settings{TasksPath: "t.yaml", PromptPath: "p.md"}, Given{})
+	w = newWizard(Settings{TasksPath: "t.yaml"}, Given{})
 	assert.True(t, w.hideLogging(), "no folder, so no <folder>/logs to offer")
 	assert.False(t, w.hidePermissions(), "no permission flag")
 	assert.False(t, w.hideCommit())
 
-	w = newWizard(Settings{Dir: "f", PromptPath: "f/prompt.md"}, Given{LogDir: true, GateTimeout: true})
+	w = newWizard(Settings{Dir: "f"}, Given{LogDir: true, GateTimeout: true})
 	assert.False(t, w.hideFolder(), "the task file is still missing")
 	assert.True(t, w.hideLogging(), "--log-dir was passed")
 	assert.True(t, w.hideTimeout(), "--gate-timeout was passed")
@@ -81,8 +80,8 @@ func TestStepOpen(t *testing.T) {
 	gates := []tasks.Gate{}
 	decided := &tasks.TaskList{Shared: tasks.Shared{Prompt: "shared prompt", Gates: &gates}}
 
-	assert.True(t, folderOpen(Settings{TasksPath: "t.yaml"}))
-	assert.False(t, folderOpen(Settings{TasksPath: "t.yaml", PromptPath: "p.md"}))
+	assert.True(t, folderOpen(Settings{}))
+	assert.False(t, folderOpen(Settings{TasksPath: "t.yaml"}))
 	assert.True(t, permissionsOpen(Settings{}))
 	assert.False(t, permissionsOpen(Settings{SandboxSettings: "sb.json"}))
 	assert.True(t, gatesOpen(Settings{}), "no task file loaded yet")
@@ -100,10 +99,9 @@ type wizardResult struct {
 func permissionsOnly(t *testing.T) Settings {
 	t.Helper()
 	tasksPath := writeFile(t, "tasks.yaml", "shared:\n  prompt: shared prompt\n  gates: []\ntasks:\n  - id: 1\n    name: First\n    prompt: do it\n")
-	promptPath := writeFile(t, "prompt.md", "do the work")
 	gates := []tasks.Gate{}
 	tl := &tasks.TaskList{Shared: tasks.Shared{Prompt: "shared prompt", Gates: &gates}, Tasks: []tasks.Task{{ID: 1, Name: "First", Prompt: "do it"}}}
-	return Settings{TasksPath: tasksPath, PromptPath: promptPath, Prompt: "do the work", Tasks: tl}
+	return Settings{TasksPath: tasksPath, Tasks: tl}
 }
 
 var allGiven = Given{Commit: true, LogDir: true, GateTimeout: true}
@@ -305,7 +303,7 @@ func TestWizard_ReviewCancel(t *testing.T) {
 func TestReviewText(t *testing.T) {
 	gates := []tasks.Gate{{Cmd: "make test", Timeout: "5m"}}
 	s := Settings{
-		Dir: "my_run", TasksPath: "my_run/tasks.yaml", PromptPath: "my_run/prompt.md",
+		Dir: "my_run", TasksPath: "my_run/tasks.yaml",
 		Tasks: &tasks.TaskList{Shared: tasks.Shared{Prompt: "shared prompt", Gates: &gates}}, SkipPermissions: true, GateTimeout: "90s",
 	}
 	text := reviewText(s)
@@ -323,18 +321,15 @@ func TestReviewText(t *testing.T) {
 }
 
 func TestReviewFiles(t *testing.T) {
-	s := Settings{Dir: "run", TasksPath: "run/tasks.yaml", PromptPath: "run/prompt.md"}
+	s := Settings{Dir: "run", TasksPath: "run/tasks.yaml"}
 	assert.Equal(t, []string{"Folder: run"}, reviewFiles(s))
 
-	s.TasksPath, s.PromptPath = "other/t.yaml", "other/p.md"
-	want := []string{"Folder: run", "Tasks: other/t.yaml", "Prompt: other/p.md"}
+	s.TasksPath = "other/t.yaml"
+	want := []string{"Folder: run", "Tasks: other/t.yaml"}
 	assert.Equal(t, want, reviewFiles(s), "an override must not hide behind the folder")
 
-	s.TasksPath = "run/tasks.yaml"
-	assert.Equal(t, []string{"Folder: run", "Prompt: other/p.md"}, reviewFiles(s))
-
-	s = Settings{TasksPath: "t.yaml", PromptPath: "p.md"}
-	assert.Equal(t, []string{"Tasks: t.yaml", "Prompt: p.md"}, reviewFiles(s))
+	s = Settings{TasksPath: "t.yaml"}
+	assert.Equal(t, []string{"Tasks: t.yaml"}, reviewFiles(s))
 }
 
 func TestNoteEscape(t *testing.T) {

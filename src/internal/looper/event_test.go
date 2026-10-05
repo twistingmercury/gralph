@@ -19,7 +19,7 @@ func runWithRecorder(t *testing.T, tl *tasks.TaskList) ([]Event, error) {
 	t.Setenv("FAKE_CLAUDE_RECORD", filepath.Join(dir, "record.log"))
 
 	var events []Event
-	err := Run(context.Background(), "prompt", tl, filepath.Join(dir, "tasks.yaml"), "", bypass, nil, func(e Event) {
+	err := Run(context.Background(), tl, filepath.Join(dir, "tasks.yaml"), "", bypass, nil, func(e Event) {
 		events = append(events, e)
 	})
 	return events, err

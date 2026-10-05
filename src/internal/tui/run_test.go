@@ -78,7 +78,7 @@ func startRunWith(t *testing.T, ctx context.Context, tasksPath string, repo *loo
 	t.Cleanup(func() { _ = w.Close() })
 	done := make(chan runResult, 1)
 	go func() {
-		code, summary, err := Run(ctx, "prompt", &tl, tasksPath, "", looper.BypassArgs(), repo, observe,
+		code, summary, err := Run(ctx, &tl, tasksPath, "", looper.BypassArgs(), repo, observe,
 			tea.WithInput(in), tea.WithOutput(io.Discard), tea.WithWindowSize(120, 30))
 		done <- runResult{code, summary, err}
 	}()

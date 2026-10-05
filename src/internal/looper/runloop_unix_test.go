@@ -40,7 +40,7 @@ func TestRunLoop_CancelMidTaskStopsQuickly(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- runLoop(ctx, "prompt", tl, tasksPath, "", bypass, nil, nil)
+		errCh <- runLoop(ctx, tl, tasksPath, "", bypass, nil, nil)
 	}()
 
 	require.Eventually(t, func() bool {
@@ -88,7 +88,7 @@ func TestRunLoop_SavesAfterEachCompletedTask(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- runLoop(ctx, "prompt", &tl, tasksPath, "", bypass, nil, nil)
+		errCh <- runLoop(ctx, &tl, tasksPath, "", bypass, nil, nil)
 	}()
 
 	require.Eventually(t, func() bool {
@@ -141,7 +141,7 @@ func TestRunLoop_FailedSaveAfterCompletedTaskStopsRun(t *testing.T) {
 	t.Setenv("FAKE_CLAUDE_RECORD", recordPath)
 	tasksPath, tl := unsavableTasksFile(t)
 
-	err := runLoop(context.Background(), "prompt", tl, tasksPath, "", bypass, nil, nil)
+	err := runLoop(context.Background(), tl, tasksPath, "", bypass, nil, nil)
 
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "task 1: First: failed to save task state")
@@ -159,7 +159,7 @@ func TestRunLoop_FailedSaveAfterFailedTaskReportsBoth(t *testing.T) {
 	t.Setenv("FAKE_CLAUDE_OUTPUT", `{"state":"failed","error":"boom"}`)
 	tasksPath, tl := unsavableTasksFile(t)
 
-	err := runLoop(context.Background(), "prompt", tl, tasksPath, "", bypass, nil, nil)
+	err := runLoop(context.Background(), tl, tasksPath, "", bypass, nil, nil)
 
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "task 1: First failed: boom")

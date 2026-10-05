@@ -33,7 +33,7 @@ func NeedsWizard(s Settings) bool {
 }
 
 func folderOpen(s Settings) bool {
-	return s.TasksPath == "" || s.PromptPath == ""
+	return s.TasksPath == ""
 }
 
 // permissionsOpen has no default to fall back on: a run needs one of the two
@@ -345,20 +345,16 @@ func reviewText(s Settings) string {
 	return strings.Join(lines, "\n")
 }
 
-// reviewFiles shows a -t or -p override next to the folder, because the
-// folder alone would hide that a file comes from elsewhere.
+// reviewFiles shows a -t override next to the folder, because the folder alone
+// would hide that the file comes from elsewhere.
 func reviewFiles(s Settings) []string {
 	if s.Dir == "" {
-		return []string{"Tasks: " + s.TasksPath, "Prompt: " + s.PromptPath}
+		return []string{"Tasks: " + s.TasksPath}
 	}
 
 	lines := []string{"Folder: " + s.Dir}
 	if s.TasksPath != filepath.Join(s.Dir, "tasks.yaml") {
 		lines = append(lines, "Tasks: "+s.TasksPath)
-	}
-
-	if s.PromptPath != filepath.Join(s.Dir, "prompt.md") {
-		lines = append(lines, "Prompt: "+s.PromptPath)
 	}
 
 	return lines

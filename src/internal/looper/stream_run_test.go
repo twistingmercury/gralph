@@ -43,7 +43,7 @@ func runStream(t *testing.T) ([]Event, error) {
 	tl := &tasks.TaskList{Shared: tasks.Shared{Prompt: "shared prompt"}, Tasks: []tasks.Task{{ID: 1, Name: "First", Prompt: "p1"}}}
 
 	var rec recorder
-	err := Run(context.Background(), "prompt", tl, filepath.Join(dir, "tasks.yaml"), "", bypass, nil, rec.report)
+	err := Run(context.Background(), tl, filepath.Join(dir, "tasks.yaml"), "", bypass, nil, rec.report)
 	return rec.snapshot(), err
 }
 
@@ -66,9 +66,9 @@ func TestRunTaskStream_ArgvAndStdin(t *testing.T) {
 	t.Setenv("FAKE_CLAUDE_RECORD", recordPath)
 
 	task := tasks.Task{ID: 1, Name: "First", Prompt: "Do the first thing."}
-	tl := &tasks.TaskList{Shared: tasks.Shared{Prompt: "shared prompt"}, Tasks: []tasks.Task{task}}
+	tl := &tasks.TaskList{Shared: tasks.Shared{Prompt: "Follow the runbook."}, Tasks: []tasks.Task{task}}
 	var rec recorder
-	require.NoError(t, Run(context.Background(), "Follow the runbook.", tl, filepath.Join(dir, "tasks.yaml"), "", bypass, nil, rec.report))
+	require.NoError(t, Run(context.Background(), tl, filepath.Join(dir, "tasks.yaml"), "", bypass, nil, rec.report))
 
 	args, err := os.ReadFile(argsPath)
 	require.NoError(t, err)
@@ -145,7 +145,7 @@ func TestRunTaskStream_CancelLeavesTasksFileUntouched(t *testing.T) {
 	var rec recorder
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- Run(ctx, "prompt", tl, tasksPath, "", bypass, nil, rec.report)
+		errCh <- Run(ctx, tl, tasksPath, "", bypass, nil, rec.report)
 	}()
 
 	require.Eventually(t, func() bool {
@@ -199,7 +199,7 @@ func TestRunTaskStream_ArgvWithSandboxArgs(t *testing.T) {
 	sessionArgs := []string{"--permission-mode", "acceptEdits", "--settings", `{"sandbox":{"enabled":true}}`}
 	tl := &tasks.TaskList{Shared: tasks.Shared{Prompt: "shared prompt"}, Tasks: []tasks.Task{{ID: 1, Name: "First", Prompt: "Do the first thing."}}}
 	var rec recorder
-	require.NoError(t, Run(context.Background(), "prompt", tl, filepath.Join(dir, "tasks.yaml"), "", sessionArgs, nil, rec.report))
+	require.NoError(t, Run(context.Background(), tl, filepath.Join(dir, "tasks.yaml"), "", sessionArgs, nil, rec.report))
 
 	args, err := os.ReadFile(argsPath)
 	require.NoError(t, err)

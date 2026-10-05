@@ -24,9 +24,8 @@ import (
 
 var (
 	versionFlag     = pflag.BoolP("version", "v", false, "Show the current version of gralph")
-	dirFlag         = pflag.StringP("dir", "d", "", "Run folder holding tasks.yaml and prompt.md; --tasks and --prompt override either file")
+	dirFlag         = pflag.StringP("dir", "d", "", "Run folder holding tasks.yaml; --tasks overrides the file")
 	tasksFlag       = pflag.StringP("tasks", "t", "", "Path to the tasks.yaml task list that drives the loop; required unless --dir gives it, but asked for when missing in the full-screen view")
-	promptFlag      = pflag.StringP("prompt", "p", "", "Path to the prompt.md shared prompt passed to Claude with every task; required unless --dry-run or --dir gives it, but asked for when missing in the full-screen view")
 	dryRunFlag      = pflag.Bool("dry-run", false, "Validate the tasks file and report failed tasks without running anything")
 	installFlag     = pflag.Bool("install-skill", false, "Install the gralph-docs-writer skill bundled with this binary into ~/.claude/skills")
 	gateTimeoutFlag = pflag.String("gate-timeout", "", "Limit for every gate, such as 90s or 10m; overrides each gate's own timeout (default: the gate's timeout, else 10m)")
@@ -75,7 +74,7 @@ func main() {
 		os.Exit(exitCode)
 	}
 
-	if err := looper.Start(ctx, *promptFlag, *tasksFlag, *gateTimeoutFlag, session, *commitFlag); err != nil {
+	if err := looper.Start(ctx, *tasksFlag, *gateTimeoutFlag, session, *commitFlag); err != nil {
 		fatal(err)
 	}
 }
@@ -141,7 +140,7 @@ func printCommandLine(w io.Writer, s tui.Settings) {
 // settingsFromFlags is the run as the flags and the files they name give it,
 // before the wizard fills any gap.
 func settingsFromFlags() (tui.Settings, error) {
-	prompt, tasklist, err := loadGiven(*tasksFlag, *promptFlag)
+	tasklist, err := loadGiven(*tasksFlag)
 	if err != nil {
 		return tui.Settings{}, err
 	}
@@ -149,8 +148,6 @@ func settingsFromFlags() (tui.Settings, error) {
 	return tui.Settings{
 		Dir:             *dirFlag,
 		TasksPath:       *tasksFlag,
-		PromptPath:      *promptFlag,
-		Prompt:          prompt,
 		Tasks:           tasklist,
 		SandboxSettings: *sandboxFlag,
 		SkipPermissions: *skipPermsFlag,
@@ -176,7 +173,7 @@ func askWizard(ctx context.Context, s tui.Settings) (tui.Settings, error) {
 // applySettings puts the answers where the flags live, so the rest of the run
 // reads one set of values however each was given.
 func applySettings(s tui.Settings) {
-	*tasksFlag, *promptFlag = s.TasksPath, s.PromptPath
+	*tasksFlag = s.TasksPath
 	*sandboxFlag, *skipPermsFlag = s.SandboxSettings, s.SkipPermissions
 	*commitFlag, *logDirFlag, *gateTimeoutFlag = s.Commit, s.LogDir, s.GateTimeout
 }
@@ -241,7 +238,7 @@ func runView(ctx context.Context, s tui.Settings, session []string) int {
 		return 1
 	}
 
-	info := runInfo(s.TasksPath, s.PromptPath)
+	info := runInfo(s.TasksPath)
 	runLog, err := openLog(runDir, info)
 	if err != nil {
 		_, _ = fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -250,7 +247,7 @@ func runView(ctx context.Context, s tui.Settings, session []string) int {
 
 	defer closeLog(runLog)
 
-	code, summary, err := tui.Run(ctx, s.Prompt, s.Tasks, s.TasksPath, *gateTimeoutFlag, session, repo, runLog.Record)
+	code, summary, err := tui.Run(ctx, s.Tasks, s.TasksPath, *gateTimeoutFlag, session, repo, runLog.Record)
 	if err != nil {
 		_, _ = fmt.Fprintf(os.Stderr, "error: %v\nrun with --no-tui to use plain output\n", err)
 		return 1
@@ -260,35 +257,24 @@ func runView(ctx context.Context, s tui.Settings, session []string) int {
 	return code
 }
 
-// loadGiven loads the prompt and tasks whose paths were passed by flag; an
-// empty path is left for the wizard. The prompt loads first so a bad
-// prompt fails before any failed-tasks table is printed. ErrFailedTasks is
-// returned bare because its table is the explanation; any other error is
-// wrapped like looper.Start's.
-func loadGiven(tasksPath, promptPath string) (string, *tasks.TaskList, error) {
-	var prompt string
-	if promptPath != "" {
-		var err error
-		prompt, err = looper.LoadPrompt(promptPath)
-		if err != nil {
-			return "", nil, fmt.Errorf("failed to start loop runner: %w", err)
-		}
-	}
-
+// loadGiven loads the tasks file whose path was passed by flag; an empty path
+// is left for the wizard. ErrFailedTasks is returned bare because its table
+// is the explanation; any other error is wrapped like looper.Start's.
+func loadGiven(tasksPath string) (*tasks.TaskList, error) {
 	if tasksPath == "" {
-		return prompt, nil, nil
+		return nil, nil
 	}
 
 	tasklist, err := looper.LoadTasksReport(os.Stdout, tasksPath)
 	if errors.Is(err, looper.ErrFailedTasks) {
-		return "", nil, err
+		return nil, err
 	}
 
 	if err != nil {
-		return "", nil, fmt.Errorf("failed to start loop runner: %w", err)
+		return nil, fmt.Errorf("failed to start loop runner: %w", err)
 	}
 
-	return prompt, tasklist, nil
+	return tasklist, nil
 }
 
 // openRepo opens the work tree for --commit; without the flag git is never
@@ -303,7 +289,7 @@ func openRepo(tasksPath string) (*looper.Repo, error) {
 }
 
 // runInfo is what the run's record says about how it was started.
-func runInfo(tasksPath, promptPath string) runlog.Info {
+func runInfo(tasksPath string) runlog.Info {
 	permissions := "skip"
 	if *sandboxFlag != "" {
 		permissions = "sandbox"
@@ -313,7 +299,6 @@ func runInfo(tasksPath, promptPath string) runlog.Info {
 	return runlog.Info{
 		Version:         ver,
 		TasksFile:       tasksPath,
-		PromptFile:      promptPath,
 		Permissions:     permissions,
 		SandboxSettings: *sandboxFlag,
 		GateTimeout:     *gateTimeoutFlag,
@@ -382,41 +367,31 @@ func checkInstallSkill() {
 	os.Exit(0)
 }
 
-// validateDir resolves --dir into --tasks and --prompt before any other
-// check, so every later check sees the paths the run will use.
+// validateDir resolves --dir into --tasks before any other check, so every
+// later check sees the path the run will use.
 func validateDir() {
-	tasksPath, promptPath, err := resolveDir(*dirFlag, *tasksFlag, *promptFlag, *dryRunFlag)
+	tasksPath, err := resolveDir(*dirFlag, *tasksFlag)
 	if err != nil {
 		fatal(err)
 	}
 
-	*tasksFlag, *promptFlag = tasksPath, promptPath
+	*tasksFlag = tasksPath
 }
 
-// resolveDir turns a run folder into the two file paths. The names are fixed
+// resolveDir turns a run folder into the task file's path. The name is fixed
 // so a folder written by the skill needs no other flag; a path passed by flag
-// always wins (ADR-018). A dry run never reads the prompt, so it does not
-// require one.
-func resolveDir(dir, tasksPath, promptPath string, dryRun bool) (string, string, error) {
-	if dir == "" {
-		return tasksPath, promptPath, nil
+// always wins (ADR-018).
+func resolveDir(dir, tasksPath string) (string, error) {
+	if dir == "" || tasksPath != "" {
+		return tasksPath, nil
 	}
 
-	if tasksPath == "" {
-		tasksPath = filepath.Join(dir, "tasks.yaml")
-		if err := requireFile(tasksPath, dir, "tasks.yaml"); err != nil {
-			return "", "", err
-		}
+	tasksPath = filepath.Join(dir, "tasks.yaml")
+	if err := requireFile(tasksPath, dir, "tasks.yaml"); err != nil {
+		return "", err
 	}
 
-	if promptPath == "" && !dryRun {
-		promptPath = filepath.Join(dir, "prompt.md")
-		if err := requireFile(promptPath, dir, "prompt.md"); err != nil {
-			return "", "", err
-		}
-	}
-
-	return tasksPath, promptPath, nil
+	return tasksPath, nil
 }
 
 func requireFile(path, dir, name string) error {
@@ -459,8 +434,7 @@ func validateLogDir(plain bool) {
 // checkLogDir refuses --log-dir in plain mode. The record is built from
 // events only the full-screen view's path produces, and a run that was asked
 // for a record must not quietly leave none (ADR-016). An empty value counts
-// as not passed. A dry run records nothing and ignores the flag, as it
-// ignores --prompt.
+// as not passed. A dry run records nothing and ignores the flag.
 func checkLogDir(logDir string, plain, dryRun bool) error {
 	if logDir == "" || dryRun || !plain {
 		return nil
@@ -507,23 +481,11 @@ func sessionArgs(sandboxFile string, skip, dryRun, wizard bool) ([]string, error
 }
 
 func validateRequiredFlags() {
-	var missing []string
-	if *promptFlag == "" && !*dryRunFlag {
-		missing = append(missing, "--prompt")
-	}
-
-	if *tasksFlag == "" {
-		missing = append(missing, "--tasks")
-	}
-
-	if len(missing) == 0 {
+	if *tasksFlag != "" {
 		return
 	}
 
-	for _, f := range missing {
-		_, _ = fmt.Fprintf(os.Stderr, "error: required flag %s not set\n", f)
-	}
-
+	_, _ = fmt.Fprintln(os.Stderr, "error: required flag --tasks not set")
 	_, _ = fmt.Fprintln(os.Stderr)
 	pflag.Usage()
 	os.Exit(1)

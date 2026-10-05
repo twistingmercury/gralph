@@ -12,7 +12,6 @@ type runStarted struct {
 	stamp
 	Version         string `json:"version"`
 	TasksFile       string `json:"tasks_file"`
-	PromptFile      string `json:"prompt_file"`
 	Permissions     string `json:"permissions"`
 	SandboxSettings string `json:"sandbox_settings,omitempty"`
 	GateTimeout     string `json:"gate_timeout,omitempty"`

@@ -88,32 +88,17 @@ func TestSaveGates_OnlyWhenEdited(t *testing.T) {
 	assert.Equal(t, gates, *saved.Shared.Gates)
 }
 
-func TestLoadGiven_BothEmpty(t *testing.T) {
-	prompt, tasklist, err := loadGiven("", "")
+func TestLoadGiven_Empty(t *testing.T) {
+	tasklist, err := loadGiven("")
 
 	require.NoError(t, err)
-	assert.Empty(t, prompt)
-	assert.Nil(t, tasklist)
-}
-
-func TestLoadGiven_MissingPrompt(t *testing.T) {
-	dir := t.TempDir()
-	tasksPath := filepath.Join(dir, "tasks.yaml")
-	require.NoError(t, os.WriteFile(tasksPath, []byte(validTasksYAML), 0o600))
-	promptPath := filepath.Join(dir, "missing.md")
-
-	prompt, tasklist, err := loadGiven(tasksPath, promptPath)
-
-	require.Error(t, err)
-	assert.True(t, strings.HasPrefix(err.Error(), "failed to start loop runner: "), err.Error())
-	assert.Empty(t, prompt)
 	assert.Nil(t, tasklist)
 }
 
 func TestLoadGiven_BadTasks(t *testing.T) {
 	tasksPath := filepath.Join(t.TempDir(), "missing.yaml")
 
-	_, tasklist, err := loadGiven(tasksPath, "")
+	tasklist, err := loadGiven(tasksPath)
 
 	require.Error(t, err)
 	assert.True(t, strings.HasPrefix(err.Error(), "failed to start loop runner: "), err.Error())
@@ -126,7 +111,7 @@ func TestLoadGiven_FailedTask(t *testing.T) {
 	failedYAML := "shared:\n  prompt: shared prompt\ntasks:\n  - id: 1\n    name: first\n    prompt: do it\n    state: failed\n"
 	require.NoError(t, os.WriteFile(tasksPath, []byte(failedYAML), 0o600))
 
-	_, _, err := loadGiven(tasksPath, "")
+	_, err := loadGiven(tasksPath)
 
 	require.ErrorIs(t, err, looper.ErrFailedTasks)
 	assert.False(t, strings.HasPrefix(err.Error(), "failed to start loop runner"), err.Error())
@@ -136,14 +121,12 @@ func TestLoadGiven_Valid(t *testing.T) {
 	dir := t.TempDir()
 	tasksPath := filepath.Join(dir, "tasks.yaml")
 	require.NoError(t, os.WriteFile(tasksPath, []byte(validTasksYAML), 0o600))
-	promptPath := filepath.Join(dir, "prompt.md")
-	require.NoError(t, os.WriteFile(promptPath, []byte("  shared prompt\n"), 0o600))
 
-	prompt, tasklist, err := loadGiven(tasksPath, promptPath)
+	tasklist, err := loadGiven(tasksPath)
 
 	require.NoError(t, err)
-	assert.Equal(t, "shared prompt", prompt)
 	require.NotNil(t, tasklist)
+	assert.Equal(t, "shared prompt", tasklist.Shared.Prompt)
 	require.Len(t, tasklist.Tasks, 1)
 	assert.Equal(t, "first", tasklist.Tasks[0].Name)
 }
@@ -221,29 +204,22 @@ func TestCheckLogDir(t *testing.T) {
 func TestResolveDir(t *testing.T) {
 	full := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(full, "tasks.yaml"), []byte("x"), 0o600))
-	require.NoError(t, os.WriteFile(filepath.Join(full, "prompt.md"), []byte("x"), 0o600))
-	noPrompt := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(noPrompt, "tasks.yaml"), []byte("x"), 0o600))
 	empty := t.TempDir()
 
 	cases := map[string]struct {
-		dir, tasks, prompt string
-		dryRun             bool
-		wantTasks          string
-		wantPrompt         string
-		wantErr            string
+		dir, tasks string
+		wantTasks  string
+		wantErr    string
 	}{
-		"no folder leaves the flags alone": {tasks: "a.yaml", prompt: "b.md", wantTasks: "a.yaml", wantPrompt: "b.md"},
-		"folder fills both":                {dir: full, wantTasks: filepath.Join(full, "tasks.yaml"), wantPrompt: filepath.Join(full, "prompt.md")},
-		"flag wins over the folder":        {dir: full, tasks: "other.yaml", wantTasks: "other.yaml", wantPrompt: filepath.Join(full, "prompt.md")},
-		"missing tasks.yaml":               {dir: empty, wantErr: "--dir: no tasks.yaml in " + empty},
-		"missing prompt.md":                {dir: noPrompt, wantErr: "--dir: no prompt.md in " + noPrompt},
-		"dry run needs no prompt.md":       {dir: noPrompt, dryRun: true, wantTasks: filepath.Join(noPrompt, "tasks.yaml"), wantPrompt: ""},
-		"a flag fills the missing file":    {dir: noPrompt, prompt: "p.md", wantTasks: filepath.Join(noPrompt, "tasks.yaml"), wantPrompt: "p.md"},
+		"no folder leaves the flag alone": {tasks: "a.yaml", wantTasks: "a.yaml"},
+		"folder fills tasks.yaml alone":   {dir: full, wantTasks: filepath.Join(full, "tasks.yaml")},
+		"flag wins over the folder":       {dir: full, tasks: "other.yaml", wantTasks: "other.yaml"},
+		"flag wins over an empty folder":  {dir: empty, tasks: "other.yaml", wantTasks: "other.yaml"},
+		"missing tasks.yaml":              {dir: empty, wantErr: "--dir: no tasks.yaml in " + empty},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			gotTasks, gotPrompt, err := resolveDir(tc.dir, tc.tasks, tc.prompt, tc.dryRun)
+			gotTasks, err := resolveDir(tc.dir, tc.tasks)
 			if tc.wantErr != "" {
 				assert.EqualError(t, err, tc.wantErr)
 				return
@@ -251,7 +227,6 @@ func TestResolveDir(t *testing.T) {
 
 			require.NoError(t, err)
 			assert.Equal(t, tc.wantTasks, gotTasks)
-			assert.Equal(t, tc.wantPrompt, gotPrompt)
 		})
 	}
 }
@@ -337,9 +312,9 @@ func TestRecheck_RefusesABadWizardAnswer(t *testing.T) {
 func TestPrintCommandLine(t *testing.T) {
 	var out bytes.Buffer
 
-	printCommandLine(&out, tui.Settings{TasksPath: "f/tasks.yaml", PromptPath: "f/prompt.md", SkipPermissions: true})
+	printCommandLine(&out, tui.Settings{TasksPath: "f/tasks.yaml", SkipPermissions: true})
 
-	want := "Same run, no wizard: gralph -t f/tasks.yaml -p f/prompt.md --skip-permissions\n"
+	want := "Same run, no wizard: gralph -t f/tasks.yaml --skip-permissions\n"
 	assert.Equal(t, want, out.String())
 }
 

@@ -112,13 +112,6 @@ func readSavedTasks(t *testing.T, path string) tasks.TaskList {
 	return tl
 }
 
-func writePromptFile(t *testing.T, dir, content string) string {
-	t.Helper()
-	path := filepath.Join(dir, "prompt.md")
-	require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
-	return path
-}
-
 func writeTasksFile(t *testing.T, dir, content string) string {
 	t.Helper()
 	path := filepath.Join(dir, "tasks.yaml")
@@ -126,69 +119,31 @@ func writeTasksFile(t *testing.T, dir, content string) string {
 	return path
 }
 
-func TestStart_MissingPromptFile(t *testing.T) {
-	dir := t.TempDir()
-	tasksPath := writeTasksFile(t, dir, validTasksYAML)
-
-	err := Start(context.Background(), filepath.Join(dir, "missing.md"), tasksPath, "", bypass, false)
-	require.Error(t, err)
-	assert.ErrorContains(t, err, "failed to start loop runner")
-	assert.ErrorContains(t, err, "prompt file")
-}
-
 func TestStart_MissingTasksFile(t *testing.T) {
 	dir := t.TempDir()
-	promptPath := writePromptFile(t, dir, "Do the task.\n")
 
-	err := Start(context.Background(), promptPath, filepath.Join(dir, "missing.yaml"), "", bypass, false)
+	err := Start(context.Background(), filepath.Join(dir, "missing.yaml"), "", bypass, false)
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "failed to start loop runner")
 	assert.ErrorContains(t, err, "tasks file")
 }
 
-func TestStart_EmptyPrompt(t *testing.T) {
-	dir := t.TempDir()
-	promptPath := writePromptFile(t, dir, "")
-	tasksPath := writeTasksFile(t, dir, validTasksYAML)
-
-	err := Start(context.Background(), promptPath, tasksPath, "", bypass, false)
-	require.Error(t, err)
-	assert.ErrorContains(t, err, "the prompt file is empty")
-}
-
-func TestStart_WhitespaceOnlyPrompt(t *testing.T) {
-	dir := t.TempDir()
-	promptPath := writePromptFile(t, dir, "  \t\n  ")
-	tasksPath := writeTasksFile(t, dir, validTasksYAML)
-
-	err := Start(context.Background(), promptPath, tasksPath, "", bypass, false)
-	require.Error(t, err)
-	assert.ErrorContains(t, err, "the prompt file is just whitespace")
-}
-
 func TestStart_InvalidTasksYAML(t *testing.T) {
 	dir := t.TempDir()
-	promptPath := writePromptFile(t, dir, "Do the task.\n")
 	tasksPath := writeTasksFile(t, dir, "shared:\n  prompt: shared prompt\ntasks:\n  - {id: 1, name: a, prompt: p, state: bogus}\n")
 
-	err := Start(context.Background(), promptPath, tasksPath, "", bypass, false)
+	err := Start(context.Background(), tasksPath, "", bypass, false)
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "failed to parse tasks yaml")
 }
 
-// TestStart_LoadFailuresKeepTheErrorChain pins that Start wraps LoadPrompt
-// and LoadTasks failures with %w, so the underlying error is reachable via
+// TestStart_LoadFailuresKeepTheErrorChain pins that Start wraps
+// LoadTasks failures with %w, so the underlying error is reachable via
 // errors.Is/As through Start.
 func TestStart_LoadFailuresKeepTheErrorChain(t *testing.T) {
 	dir := t.TempDir()
-	promptPath := writePromptFile(t, dir, "Do the task.\n")
-	tasksPath := writeTasksFile(t, dir, validTasksYAML)
 
-	err := Start(context.Background(), filepath.Join(dir, "missing.md"), tasksPath, "", bypass, false)
-	require.Error(t, err)
-	assert.ErrorIs(t, err, os.ErrNotExist)
-
-	err = Start(context.Background(), promptPath, filepath.Join(dir, "missing.yaml"), "", bypass, false)
+	err := Start(context.Background(), filepath.Join(dir, "missing.yaml"), "", bypass, false)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, os.ErrNotExist)
 }
@@ -196,11 +151,9 @@ func TestStart_LoadFailuresKeepTheErrorChain(t *testing.T) {
 func TestStart_RunLoopFailureIsWrappedWithLoopErrorPrefix(t *testing.T) {
 	dir := t.TempDir() // empty directory: no claude binary anywhere on PATH
 	t.Setenv("PATH", dir)
-
-	promptPath := writePromptFile(t, dir, "Do the task.\n")
 	tasksPath := writeTasksFile(t, dir, validTasksYAML)
 
-	err := Start(context.Background(), promptPath, tasksPath, "", bypass, false)
+	err := Start(context.Background(), tasksPath, "", bypass, false)
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "loop error")
 	assert.ErrorContains(t, err, "task 1: First task failed")
@@ -209,62 +162,16 @@ func TestStart_RunLoopFailureIsWrappedWithLoopErrorPrefix(t *testing.T) {
 func TestStart_Success(t *testing.T) {
 	useFakeClaude(t)
 	dir := t.TempDir()
-	promptPath := writePromptFile(t, dir, "Follow the plan.\n")
 	tasksPath := writeTasksFile(t, dir, validTasksYAML)
 
 	recordPath := filepath.Join(dir, "record.log")
 	t.Setenv("FAKE_CLAUDE_RECORD", recordPath)
 
-	err := Start(context.Background(), promptPath, tasksPath, "", bypass, false)
+	err := Start(context.Background(), tasksPath, "", bypass, false)
 	require.NoError(t, err)
 
 	records := readFakeClaudeRecords(t, recordPath)
 	assert.Len(t, records, 2, "expected claude invoked once per task")
-}
-
-func TestLoadPrompt_MissingFile(t *testing.T) {
-	dir := t.TempDir()
-
-	_, err := LoadPrompt(filepath.Join(dir, "missing.md"))
-	require.Error(t, err)
-	assert.ErrorContains(t, err, "prompt file")
-	assert.ErrorContains(t, err, "not accessible")
-}
-
-func TestLoadPrompt_ReadError(t *testing.T) {
-	// A directory exists but cannot be read as a file.
-	dir := t.TempDir()
-
-	_, err := LoadPrompt(dir)
-	require.Error(t, err)
-	assert.ErrorContains(t, err, "not accessible")
-}
-
-func TestLoadPrompt_Empty(t *testing.T) {
-	dir := t.TempDir()
-	path := writePromptFile(t, dir, "")
-
-	_, err := LoadPrompt(path)
-	require.Error(t, err)
-	assert.ErrorContains(t, err, "the prompt file is empty")
-}
-
-func TestLoadPrompt_WhitespaceOnly(t *testing.T) {
-	dir := t.TempDir()
-	path := writePromptFile(t, dir, " \t\n ")
-
-	_, err := LoadPrompt(path)
-	require.Error(t, err)
-	assert.ErrorContains(t, err, "the prompt file is just whitespace")
-}
-
-func TestLoadPrompt_Success(t *testing.T) {
-	dir := t.TempDir()
-	path := writePromptFile(t, dir, "  Follow the plan.  \n")
-
-	got, err := LoadPrompt(path)
-	require.NoError(t, err)
-	assert.Equal(t, "Follow the plan.", got)
 }
 
 func TestLoadTasks_MissingFile(t *testing.T) {
@@ -361,13 +268,13 @@ func TestRunLoop_HappyPathInvokesInOrderWithExactStdin(t *testing.T) {
 	t.Setenv("FAKE_CLAUDE_RECORD", recordPath)
 
 	p := "Follow the runbook."
-	tl := &tasks.TaskList{Shared: tasks.Shared{Prompt: "shared prompt"}, Tasks: []tasks.Task{
+	tl := &tasks.TaskList{Shared: tasks.Shared{Prompt: p}, Tasks: []tasks.Task{
 		{ID: 1, Name: "First", Prompt: "Do the first thing."},
 		{ID: 2, Name: "Second", Prompt: "Do the second thing."},
 		{ID: 3, Name: "Third", Prompt: "Do the third thing."},
 	}}
 
-	err := runLoop(context.Background(), p, tl, tasksPath, "", bypass, nil, nil)
+	err := runLoop(context.Background(), tl, tasksPath, "", bypass, nil, nil)
 	require.NoError(t, err)
 
 	records := readFakeClaudeRecords(t, recordPath)
@@ -384,6 +291,21 @@ func TestRunLoop_HappyPathInvokesInOrderWithExactStdin(t *testing.T) {
 	}
 }
 
+func TestRunLoop_SendsTheSharedPromptOnStdin(t *testing.T) {
+	useFakeClaude(t)
+	dir := t.TempDir()
+	recordPath := filepath.Join(dir, "record.log")
+	t.Setenv("FAKE_CLAUDE_RECORD", recordPath)
+
+	tl := &tasks.TaskList{Shared: tasks.Shared{Prompt: "SHARED"}, Tasks: []tasks.Task{{ID: 1, Name: "name", Prompt: "body"}}}
+
+	require.NoError(t, runLoop(context.Background(), tl, filepath.Join(dir, "tasks.yaml"), "", bypass, nil, nil))
+
+	records := readFakeClaudeRecords(t, recordPath)
+	require.Len(t, records, 1)
+	assert.Equal(t, "SHARED\n\n1: name\n\nbody\n", records[0])
+}
+
 func TestRunLoop_NonZeroExitStopsAtFirstTask(t *testing.T) {
 	useFakeClaude(t)
 	dir := t.TempDir()
@@ -397,7 +319,7 @@ func TestRunLoop_NonZeroExitStopsAtFirstTask(t *testing.T) {
 		{ID: 2, Name: "Second", Prompt: "p2"},
 	}}
 
-	err := runLoop(context.Background(), "prompt", tl, tasksPath, "", bypass, nil, nil)
+	err := runLoop(context.Background(), tl, tasksPath, "", bypass, nil, nil)
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "task 1: First failed")
 	assert.ErrorContains(t, err, "exit status 1")
@@ -418,7 +340,7 @@ func TestRunLoop_ClaudeMissingFromPath(t *testing.T) {
 
 	tl := &tasks.TaskList{Shared: tasks.Shared{Prompt: "shared prompt"}, Tasks: []tasks.Task{{ID: 1, Name: "Only", Prompt: "p"}}}
 
-	err := runLoop(context.Background(), "prompt", tl, tasksPath, "", bypass, nil, nil)
+	err := runLoop(context.Background(), tl, tasksPath, "", bypass, nil, nil)
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "task")
 	assert.ErrorContains(t, err, "failed")
@@ -441,7 +363,7 @@ func TestRunLoop_ContextAlreadyCancelled(t *testing.T) {
 
 	tl := &tasks.TaskList{Shared: tasks.Shared{Prompt: "shared prompt"}, Tasks: []tasks.Task{{ID: 1, Name: "Only", Prompt: "p"}}}
 
-	err := runLoop(ctx, "prompt", tl, tasksPath, "", bypass, nil, nil)
+	err := runLoop(ctx, tl, tasksPath, "", bypass, nil, nil)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, context.Canceled)
 
@@ -468,7 +390,7 @@ func TestRunLoop_PrintsPromptToStdout(t *testing.T) {
 	require.NoError(t, err)
 	os.Stdout = w
 
-	runErr := runLoop(context.Background(), "Follow the runbook.", tl, tasksPath, "", bypass, nil, nil)
+	runErr := runLoop(context.Background(), tl, tasksPath, "", bypass, nil, nil)
 
 	require.NoError(t, w.Close())
 	os.Stdout = origStdout
@@ -491,7 +413,7 @@ func TestRunLoop_EmptyTaskList(t *testing.T) {
 	tasksPath := filepath.Join(dir, "tasks.yaml")
 	t.Setenv("FAKE_CLAUDE_RECORD", recordPath)
 
-	err := runLoop(context.Background(), "prompt", &tasks.TaskList{}, tasksPath, "", bypass, nil, nil)
+	err := runLoop(context.Background(), &tasks.TaskList{}, tasksPath, "", bypass, nil, nil)
 	require.NoError(t, err)
 
 	records := readFakeClaudeRecords(t, recordPath)
@@ -517,7 +439,7 @@ func TestRunLoop_SkipsCompletedTasks(t *testing.T) {
 	require.NoError(t, err)
 	os.Stdout = w
 
-	runErr := runLoop(context.Background(), "prompt", tl, tasksPath, "", bypass, nil, nil)
+	runErr := runLoop(context.Background(), tl, tasksPath, "", bypass, nil, nil)
 
 	require.NoError(t, w.Close())
 	os.Stdout = origStdout
@@ -548,8 +470,6 @@ func TestStart_RefusesWhenAnyTaskFailed(t *testing.T) {
 	dir := t.TempDir()
 	recordPath := filepath.Join(dir, "record.log")
 	t.Setenv("FAKE_CLAUDE_RECORD", recordPath)
-
-	promptPath := writePromptFile(t, dir, "Follow the plan.\n")
 	content := `shared:
   prompt: shared prompt
 tasks:
@@ -568,7 +488,7 @@ tasks:
 `
 	tasksPath := writeTasksFile(t, dir, content)
 
-	err := Start(context.Background(), promptPath, tasksPath, "", bypass, false)
+	err := Start(context.Background(), tasksPath, "", bypass, false)
 	require.Error(t, err)
 	assert.EqualError(t, err, "fix the failed tasks and set their state to pending before running")
 	assert.ErrorIs(t, err, ErrFailedTasks)
@@ -738,7 +658,7 @@ func TestRunTaskPlain_ArgvIsPrintThenSessionArgs(t *testing.T) {
 
 	sessionArgs := []string{"--permission-mode", "acceptEdits", "--settings", `{"sandbox":{"enabled":true}}`}
 	tl := &tasks.TaskList{Shared: tasks.Shared{Prompt: "shared prompt"}, Tasks: []tasks.Task{{ID: 1, Name: "First", Prompt: "Do the first thing."}}}
-	require.NoError(t, runLoop(context.Background(), "prompt", tl, filepath.Join(dir, "tasks.yaml"), "", sessionArgs, nil, nil))
+	require.NoError(t, runLoop(context.Background(), tl, filepath.Join(dir, "tasks.yaml"), "", sessionArgs, nil, nil))
 
 	args, err := os.ReadFile(argsPath)
 	require.NoError(t, err)
