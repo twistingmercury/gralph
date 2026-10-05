@@ -208,9 +208,18 @@ spaces), and a `prompt`. `state` is optional:
 ```yaml
 shared:
   prompt: |
-    You are running one task. It follows this prompt, starting with a line
-    `<id>: <name>`. Do that task and nothing else. When you finish, end your
-    output with one JSON line: {"state": "completed", "error": ""}
+    Project:
+    - Context documents: none
+    - Build and test: go test ./...
+    - Commits: do not commit
+    - Never edit or commit `tasks.yaml`.
+
+    The last non-blank line of your output must be this JSON object, on a
+    single line, with nothing else on that line:
+
+    {"state": "completed", "error": ""}
+
+    If the task did not succeed, use `"state": "failed"` and a one-line `error`.
   gates:
     - cmd: go test ./...
       timeout: 10m
