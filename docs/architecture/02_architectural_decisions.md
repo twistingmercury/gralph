@@ -1,8 +1,8 @@
 # Gralph — Architectural Decisions
 
-> **Version**: v21
+> **Version**: v22
 > **Date**: 2026-10-05
-> **Notes**: ADR-011, ADR-016, and ADR-018 consequences now say which full-screen behaviour the pty e2e tests pin (wizard happy path, `--log-dir` record of a stopped run) instead of saying the suite has no terminal.
+> **Notes**: Added ADR-020 (proposed): the shared prompt moves into `tasks.yaml` under a `shared` block with the gates, and `-p/--prompt` and `prompt.md` are removed.
 
 [Back to Overview](00_overview.md) | [Back to Project README](../../README.md)
 
@@ -45,6 +45,7 @@ Each architectural decision is recorded as an ADR with the following structure:
 | ADR-017 | Release archives, built by a workflow started by hand         | Accepted | 2026-10-02 |
 | ADR-018 | A run folder and a setup wizard                               | Accepted | 2026-10-02 |
 | ADR-019 | One gate list per task file                                   | Accepted | 2026-10-02 |
+| ADR-020 | The shared prompt and gates live in the task file             | Proposed | 2026-10-05 |
 
 ## Decisions
 
@@ -856,11 +857,71 @@ _Negative:_
 
 ---
 
+### ADR-020: The shared prompt and gates live in the task file
+
+**Status:** Proposed
+
+**Context:**
+
+A run has needed two files: `tasks.yaml` for the list and `prompt.md` for the shared prompt. That split came from the original bash script, where a prompt was a file handed to a loop. It buys nothing now. The two files always travel together (ADR-018 gives them fixed names in one folder), the skill writes both in one pass, and every consumer has to find, load, and report two paths: the `-p` flag, `--dir`'s second file and its error, the wizard, the review screen's reproducing command, and the run log's `prompt_file`. Gates (ADR-019) already moved into the task file as a top-level key, so the run's shared settings are split three ways: a file, a key, and a flag.
+
+**Decision:**
+
+The shared prompt moves into `tasks.yaml`. It joins the gates under one top-level `shared` block, and `-p/--prompt` and `prompt.md` are removed with no compatibility path.
+
+- **Format.**
+
+  ```yaml
+  shared:
+    prompt: |
+      You are working on the widget service...
+      End your output with a JSON result line...
+    gates:
+      - cmd: go test ./...
+        timeout: 10m
+  tasks:
+    - id: 1
+      name: Add the widget repository
+      prompt: |
+        Objective: ...
+  ```
+
+- **`shared.prompt` is required.** A missing `shared` block, or a `shared.prompt` that is missing, empty, or only whitespace, fails parsing, as a missing or empty `prompt.md` did. The text is trimmed on load, as `LoadPrompt` trimmed the file.
+- **`shared.gates` is optional, with ADR-019's rules unchanged.** Absent means not decided (the wizard's gates step opens), `[]` means no gates, and a save keeps whichever the file had. The entry shape, validation, and `gates[<j>]` error names are the same; they now read `shared.gates[<j>]`.
+- **A top-level `gates` key is an error**, as is a task-level `gates`, with a message that says where gates live now. Quietly ignoring an old top-level list would leave a run with no checks, the same reason ADR-019 rejects per-task gates. Other unknown top-level keys are rejected too, so a typo in `shared` or a leftover old key cannot hide.
+- **`-p/--prompt` is removed.** Passing it is the unknown-flag error, as `--iterations` is (a pinned e2e test). `LoadPrompt`, the `promptFile` parameter of `looper.Start`, and the prompt path in the wizard's settings, summary, and reproducing command go away. `--dry-run` no longer has a prompt carve-out to describe, since no second file exists to skip.
+- **`-d <folder>` means `<folder>/tasks.yaml`.** Its "no prompt.md" error goes. `-t` stays as the override for a folder holding two task files, so `-d foo -t foo/tasks-v2.yaml` still works. In plain mode the required-flags check loses `--prompt`; the startup check order is otherwise unchanged. The wizard's folder step is hidden by `-d` or by `-t` alone, since one file now supplies everything.
+- **The run log drops `prompt_file`** from `run_started` and the ledger. `tasks_file` stays. The record's format changes, with no migration, since a log is written once per run and never read back by gralph (ADR-016).
+- **The wire contract is unchanged.** Claude gets `shared.prompt`, a blank line, then the task, then a newline. Gates and the `error` field are still never sent. The golden assertions in both suites keep their expected bytes; only their fixtures change.
+- **A cancel changes nothing on disk, and a save keeps `shared`.** `SaveTasks` writes `shared` above `tasks`, with the prompt intact, so a state update never drops or reorders it.
+- **The skill.** `prompt_template.md` is deleted. Its content moves into `tasks_template.yaml` as `shared.prompt`, and the template's field rules and `SKILL.md` describe one file. The stale-skill check (ADR-010) makes anyone with the old skill reinstall it. The advice to keep the shared prompt out of git (ADR-015) now covers only the task file, which it already named.
+
+**Changes to earlier ADRs on acceptance:** ADR-002's "YAML task file + shared prompt" becomes one file holding both; its strict-parsing rules gain the `shared` ones above. ADR-018's `-d` means `tasks.yaml` alone, the wizard has no prompt path, and its "later change" note is fulfilled. ADR-019's top-level `gates:` becomes `shared.gates`. ADR-015's two-file ignore advice shrinks to one. ADR-016's `run_started` loses `prompt_file`.
+
+Alternatives not taken: keeping `-p` as an override or fallback (keeps the two-file code path this removes, and the version is young enough for a clean break); a top-level `prompt:` key beside `gates:` (two meanings of `prompt` at different levels, and the shared settings stay scattered); `shared_prompt` as a flat key (clunkier than a block, and gates would still sit apart); an optional `shared.prompt` (a file could forget the result-line contract that ADR-005 depends on); migrating old pairs automatically (ADR-002 already says no migration, and gralph never edits files it was not asked to).
+
+**Consequences:**
+
+_Positive:_
+
+- One file is the whole run: prompt, gates, and tasks; one path to name, load, and report
+- A fixed set of shared settings has one home, with room to grow without new flags
+- The `-p` flag, the second-file errors, and the prompt halves of the wizard, review command, and log go away
+
+_Negative:_
+
+- A breaking change: every existing `tasks.yaml` and `prompt.md` pair must be merged by hand, and any top-level `gates` moved under `shared`, before it runs again
+- The shared prompt is YAML now: indentation matters, and it loses Markdown editor support
+- A save rewrites the file, which already loses comments and custom formatting (ADR-004); that now includes the shared prompt's own formatting
+- One file to ignore or keep out of git, where there were two; a prompt kept for reuse across runs must be copied between files
+
+---
+
 ### Build order and future work for ADR-018 and ADR-019
 
 ADR-019 goes first: the wizard's gates step needs the top-level list. Then `-d`, then the wizard. The breaking task-file change suggests v0.10.0; the owner picks the version at release.
 
-A later change may fold the shared prompt into `tasks.yaml` and then deprecate `-t` and `-p`. The run folder survives it: `-d` would then name a folder holding `tasks.yaml` and `logs/`, and the wizard still starts by picking it. Nothing in either ADR depends on there being two files, and the wizard has no code that serves only `-t` or `-p`: they stay in this round as overrides, which is path resolution alone.
+ADR-020 is that later change: it folds the shared prompt into `tasks.yaml`, removes `-p`, and keeps `-t` as the override for a folder holding two task files.
 
 ---
 
