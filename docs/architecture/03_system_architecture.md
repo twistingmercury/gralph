@@ -1,8 +1,8 @@
 # Gralph — System Architecture
 
-> **Version**: v23
+> **Version**: v25
 > **Date**: 2026-10-05
-> **Notes**: One task file holds the shared prompt and the gates under `shared` (ADR-020): `LoadPrompt`, `--prompt`, `PromptPath`, and `prompt_file` are gone, and the tasks section describes `Shared` and the root-key checks.
+> **Notes**: Gralph no longer checks the installed skill (ADR-022): removed the skill check from the startup order, added the `internal/skillinstall` section describing only the `Install` function; the startup order no longer names the skill check. Earlier: ADR-021 made `-d` resolve the run folder's `sandbox.json`.
 
 [Back to Overview](00_overview.md) | [Back to Project README](../../README.md)
 
@@ -64,11 +64,11 @@ graph TB
 **Responsibilities:**
 
 - Parse command-line flags (--dir, --tasks, --sandbox-settings, --skip-permissions, --dry-run, --no-tui, --gate-timeout, --commit, --log-dir, --install-skill, --version)
-- Resolve `--dir` first (ADR-018): `validateDir` calls `resolveDir`, which fills an unset `--tasks` with `<folder>/tasks.yaml` and writes the result back into the flag so every later check sees the resolved path. `--tasks` always wins over the folder's file. A folder with no `tasks.yaml` and no `--tasks` exits 1 with `--dir: no tasks.yaml in <folder>`, in both modes
+- Resolve `--dir` first (ADR-018, ADR-021): `validateDir` calls `resolveDir` (fills an unset `--tasks` with `<folder>/tasks.yaml`, `--tasks` always wins over the folder's file, a folder with no `tasks.yaml` and no `--tasks` exits 1 with `--dir: no tasks.yaml in <folder>`) and `resolveSandbox` (fills an unset `--sandbox-settings` from `<folder>/sandbox.json` if it exists as a regular file and neither permission flag was passed, ADR-021; an explicit flag wins, and `--skip-permissions` opts out with no error). Every later check sees the resolved paths
 - Validate `--gate-timeout` (if set) before any load or run; bad value exits 1. `validateGateTimeout` uses `tasks.ParseTimeout`, the same parser and rules as a gate's `timeout` field
-- Startup order: `--dir`, `--gate-timeout` check, mode selection, plain mode's required flags, `validateLogDir`, `validateSessionFlags`, the skill check, then the dry run, plain run, or TUI. Every startup error in `main` goes through `fatal` (`error: ` prefix, exit 1)
+- Startup order: `--dir`, `--gate-timeout` check, mode selection, plain mode's required flags, `validateLogDir`, `validateSessionFlags`, then the dry run, plain run, or TUI. Every startup error in `main` goes through `fatal` (`error: ` prefix, exit 1)
 - Choose the mode: plain when `--dry-run`, `--no-tui`, or stdin or stdout is not a terminal (`github.com/charmbracelet/x/term`); otherwise the TUI
-- Pick the session flags (`validateSessionFlags`/`sessionArgs`), after the `--gate-timeout` check and plain mode's required flags and before the skill check: `looper.SandboxArgs` for `--sandbox-settings`, `looper.BypassArgs` for `--skip-permissions`. Both flags together exits 1; so does neither on a real run in plain mode. In TUI mode neither passes with no session args (`sessionArgs`'s `wizard` argument), because the wizard asks; `recheck` runs `sessionArgs` again, strict, on its answer. An empty `--sandbox-settings=` counts as not passed. A dry run needs neither, but a settings file it is given is still checked. The result goes to `looper.Start` and `tui.Run`
+- Pick the session flags (`validateSessionFlags`/`sessionArgs`), after the `--gate-timeout` check and plain mode's required flags: `looper.SandboxArgs` for `--sandbox-settings`, `looper.BypassArgs` for `--skip-permissions`. Both flags together exits 1; so does neither on a real run in plain mode. In TUI mode neither passes with no session args (`sessionArgs`'s `wizard` argument), because the wizard asks; `recheck` runs `sessionArgs` again, strict, on its answer. An empty `--sandbox-settings=` counts as not passed. A dry run needs neither, but a settings file it is given is still checked. The result goes to `looper.Start` and `tui.Run`
 - Plain mode: validate required flags and `--gate-timeout`, then route to `looper.Start` (normal run) or `looper.DryRun` (validation only)
 - TUI mode (`runTUI`), split along its seams:
   1. Load the given path with `loadGiven` (`looper.LoadTasksReport`; a failed task prints the `PrintTasks` table and exits 1, as in plain mode) and build a `tui.Settings` from the flags and what loaded
@@ -95,10 +95,10 @@ graph TB
 
 **Responsibilities:**
 
-- `Settings` (`command.go`): the run as `cmd/main` will use it, however each value was given: the folder and task file paths, the loaded task list (shared prompt and gates included), the permission choice, commit, log folder, gate timeout, and `GatesEdited`. `CommandLine` turns it into the command that starts the same run without the wizard: `-d` when there is a folder, plus `-t` only for a file that is not the folder's fixed name, then the permission flag, `--commit`, `--log-dir`, `--gate-timeout`. A value that is not a plain shell word is single-quoted (`shellQuote`), so the line pastes into zsh or bash; gates are not on it
-- `NeedsWizard` (`wizard.go`): true when the folder (`TasksPath` empty), the permission choice (no sandbox file and no skip), or the gates (no task list, or `Shared.Gates == nil`) are open; commit, logging, and the timeout never open the wizard alone
+- `Settings` (`command.go`): the run as `cmd/main` will use it, however each value was given: the folder and task file paths, the loaded task list (shared prompt and gates included), the permission choice, commit, log folder, gate timeout, and `GatesEdited`. `CommandLine` turns it into the command that starts the same run without the wizard: `-d` when there is a folder, plus `-t` only for a file that is not the folder's fixed name, then the permission flag (or nothing if `appendSandbox` finds the settings file is the folder's fixed name, as `cmd/main`'s `resolveSandbox` filled it, ADR-021), `--commit`, `--log-dir`, `--gate-timeout`. A value that is not a plain shell word is single-quoted (`shellQuote`), so the line pastes into zsh or bash; gates are not on it
+- `NeedsWizard` (`wizard.go`): true when the folder (`TasksPath` empty), the permission choice (no sandbox file set in `Settings` and no skip), or the gates (no task list, or `Shared.Gates == nil`) are open; `checkFolder`'s `findSandbox` may fill the sandbox file from the folder's `sandbox.json` (ADR-021), which can then hide the permission choice step; commit, logging, and the timeout never open the wizard alone
 - `Wizard(ctx, s, given, opts...)`: takes a cancellable context first. One `huh.Form` with a group per step, each hidden by a method on the `wizard` struct (`WithHideFunc`): folder (`huh.FilePicker`, folders only, hidden entries shown, from `.`, paths shown relative to working directory when possible), permissions (`Select` starting on a `Choose one` placeholder), sandbox file (`.json` picker, shown only for the sandbox choice, also starting from `.` with relative paths), commit and logging (`Confirm`, starting on No; logging only with a folder, and its title names `<folder>/logs`), gate time limit (`Select`, Default first) and a custom limit (`Input`, shown only for that choice). `Given` hides the optional steps a flag answered, because a false or empty value cannot tell "no" from "not asked". The form is skipped when none of its steps is shown. `fold` then moves the answers held outside `Settings` into it. When the gates are open, `editGates(ctx, ...)` follows with a context; then the review loop
-- Step checks (`wizard_checks.go`), run by each field's `Validate` so an error keeps the user on the step: `checkFolder` (`<folder>/tasks.yaml` exists unless `-t` gave the file, `looper.LoadTasks` succeeds, and `looper.ErrFailedTasks` becomes a pointer to `gralph -d <folder> --dry-run`; only a folder that passes is written into `Settings`), `checkPermission` (refuses the placeholder, so Enter without moving chooses nothing, ADR-014), `checkSandboxFile` (`looper.SandboxArgs`), `checkCommit` (on yes, `looper.OpenRepo`: clean work tree, task file ignored), `checkLogging` (on yes with commit by flag or answer, `Repo.CheckLogDir` on a stand-in run folder under `<folder>/logs`), `checkCustomTimeout` (`tasks.ParseTimeout`)
+- Step checks (`wizard_checks.go`), run by each field's `Validate` so an error keeps the user on the step: `checkFolder` (`<folder>/tasks.yaml` exists unless `-t` gave the file, `looper.LoadTasks` succeeds, and `looper.ErrFailedTasks` becomes a pointer to `gralph -d <folder> --dry-run`; `findSandbox` looks for the folder's `sandbox.json` and fills `SandboxSettings` if found, like `cmd/main`'s `resolveSandbox` (ADR-021); only a folder that passes is written into `Settings`), `checkPermission` (refuses the placeholder, so Enter without moving chooses nothing, ADR-014), `checkSandboxFile` (`looper.SandboxArgs`), `checkCommit` (on yes, `looper.OpenRepo`: clean work tree, task file ignored), `checkLogging` (on yes with commit by flag or answer, `Repo.CheckLogDir` on a stand-in run folder under `<folder>/logs`), `checkCustomTimeout` (`tasks.ParseTimeout`)
 - The gate editor (`wizard_gates.go`): `editGates(ctx, ...)` takes a cancellable context. It loops small huh forms on a copy of the list: a picker of the gates plus `Add a gate` and `Done`; a picked gate offers Edit, Delete, Back; each gate is a command (nonblank, a multi-line field for pipes and shell syntax) and an optional timeout (`tasks.ParseTimeout`). It starts from a non-nil list, so Done on an empty one gives `gates: []`. The wizard sets `GatesEdited` when the key was absent or the list changed
 - The review screen: a `huh.Note` listing the files or folder, permissions, commit, logging, gate limit, the gates or `no gates`, and `CommandLine`, with markup escaped so paths show as typed; a `Select` of Start, Edit gates (back to the editor, then the review again), and Cancel (`ErrCancelled`)
 - Keys: every wizard form uses huh's default key map with Quit bound to ctrl+c and Esc; huh's `ErrUserAborted` becomes `ErrCancelled`. The wizard writes nothing; `cmd/main` saves an edited gate list after Start
@@ -130,7 +130,7 @@ graph TB
   - `report != nil` → `runTaskStream`: spawn `claude --print --output-format stream-json --verbose <session flags>` in a process group, write nothing to gralph's stdout/stderr, report `TaskStarted`, `Activity` (parsed stdout events and raw stderr lines), and `TaskFinished` events, then `RunDone` from `Run`. The same path reports what the run log needs (ADR-016): `SessionFinished` (outcome and duration), `GateFinished` per gate (the gate, its timeout, its error, its duration), and `Committed` (the new hash); `TaskFinished` and `RunDone` carry a duration; a cancelled session or gate reports none of the new kinds. The looper measures the durations and knows nothing about the log
 - Resolve the outcome on both paths with `finishTask`, so the argv, stdin text, cancellation rule, and outcome rule live in one place
 - Build every claude command in `claudeCmd`: `--print`, then the stream flags on the TUI path, then the `sessionArgs` it was handed
-- Build the session flags (`sandbox.go`): `SandboxArgs` reads the settings file, forces `sandbox.enabled: true`, `sandbox.allowUnsandboxedCommands: false`, and `sandbox.failIfUnavailable: true`, keeps every other key as raw JSON, and returns `--permission-mode acceptEdits --settings <merged JSON>`; `BypassArgs` returns `--dangerously-skip-permissions`
+- Build the session flags (`sandbox.go`): `FolderSandbox` finds the settings file a run folder carries by its fixed name (like `tasks.yaml`), as `cmd/main`'s `resolveSandbox` calls it (ADR-021); `SandboxArgs` reads the settings file (whether from a flag, the folder's fixed name, or the wizard), forces `sandbox.enabled: true`, `sandbox.allowUnsandboxedCommands: false`, and `sandbox.failIfUnavailable: true`, keeps every other key as raw JSON, and returns `--permission-mode acceptEdits --settings <merged JSON>`; `BypassArgs` returns `--dangerously-skip-permissions`
 - Capture output, parse result line, determine the session's outcome
 - After a `completed` session, run the file's gates (`runGates`); a failing gate makes the task `failed`
 - Update task state and save atomically after every task
@@ -301,6 +301,22 @@ graph TB
 | Output              | `run.jsonl` (one JSON object per line, each with `time` and `event`) and one `task-<id>.log` per task that ran |
 | Used in             | TUI mode only; plain mode and `--dry-run` never open a log                                                     |
 | Error Handling      | `Open` errors exit 1 before the view opens (`--log-dir: ...`); a `Record` error stops the run                  |
+
+### Skill Installer (internal/skillinstall)
+
+**Responsibilities:**
+
+- `Install()`: copy the embedded `gralph-docs-writer` skill from the binary into `~/.claude/skills/gralph-docs-writer/`, replacing any existing copy (ADR-009). Returns the path, or an error if `os.UserHomeDir`, `RemoveAll`, or `WalkDir` fails. Does not write a version file. Called by `--install-skill` (see `cmd/main`'s `checkInstallSkill`)
+- Gralph does not check for the installed skill: a missing, edited, or stale skill never stops a run or `--dry-run` (ADR-022). The skill is a helper only; if a stale version generates a task file the current parser rejects, the error message names the field, and a user can fix it manually or run `--install-skill` again
+
+**Key Characteristics:**
+
+| Characteristic      | Value                                                           |
+| ------------------- | --------------------------------------------------------------- |
+| Used by             | `cmd/main` only (when `--install-skill` is passed)              |
+| Imports             | `io/fs`, `os`, `path/filepath`, and `internal/skills` (embedded) |
+| Execution           | Runs at startup if `--install-skill` is set; exits 0 on success |
+| Error Handling      | Any I/O error exits 1 with `fatal` prefix                       |
 
 ## Test Seam
 

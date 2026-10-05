@@ -37,7 +37,7 @@ type gralphResult struct {
 // claudeDir prepended to PATH (so gralph's own `exec.Command("claude", ...)`
 // PATH lookup resolves to the fixture there) plus any extra FAKECLAUDE_* (or
 // other) variables, which flow through to the claude child since gralph
-// never overrides cmd.Env for that child. HOME is skillHome unless extra
+// never overrides cmd.Env for that child. HOME is testHome unless extra
 // sets its own.
 func gralphEnv(claudeDir string, extra map[string]string) []string {
 	return gralphEnvWithPath(claudeDir+string(os.PathListSeparator)+os.Getenv("PATH"), extra)
@@ -56,7 +56,7 @@ func gralphEnvWithPath(pathValue string, extra map[string]string) []string {
 
 		env = append(env, kv)
 	}
-	env = append(env, "PATH="+pathValue, "HOME="+skillHome)
+	env = append(env, "PATH="+pathValue, "HOME="+testHome)
 	for k, v := range extra {
 		env = append(env, k+"="+v)
 	}

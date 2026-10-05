@@ -96,3 +96,29 @@ func TestSandboxArgs_UnreadablePath(t *testing.T) {
 		assert.Nil(t, args)
 	}
 }
+
+func TestFolderSandbox(t *testing.T) {
+	withFile := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(withFile, "sandbox.json"), []byte("{}"), 0o600))
+	empty := t.TempDir()
+	withDir := t.TempDir()
+	require.NoError(t, os.Mkdir(filepath.Join(withDir, "sandbox.json"), 0o700))
+
+	cases := map[string]struct {
+		dir  string
+		want string
+		ok   bool
+	}{
+		"regular file":               {dir: withFile, want: filepath.Join(withFile, "sandbox.json"), ok: true},
+		"missing":                    {dir: empty},
+		"a directory is ignored":     {dir: withDir},
+		"folder that does not exist": {dir: filepath.Join(empty, "nope")},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			got, ok := FolderSandbox(tc.dir)
+			assert.Equal(t, tc.ok, ok)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}

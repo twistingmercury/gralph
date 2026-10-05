@@ -54,10 +54,6 @@ func main() {
 	validateLogDir(plain)
 	session := validateSessionFlags(plain)
 
-	if err := skillinstall.Check(); err != nil {
-		fatal(err)
-	}
-
 	if *dryRunFlag {
 		if err := looper.DryRun(os.Stdout, *tasksFlag, *gateTimeoutFlag, *sandboxFlag, *commitFlag); err != nil {
 			fatal(err)
@@ -367,8 +363,8 @@ func checkInstallSkill() {
 	os.Exit(0)
 }
 
-// validateDir resolves --dir into --tasks before any other check, so every
-// later check sees the path the run will use.
+// validateDir resolves --dir into --tasks and --sandbox-settings before any
+// other check, so every later check sees the paths the run will use.
 func validateDir() {
 	tasksPath, err := resolveDir(*dirFlag, *tasksFlag)
 	if err != nil {
@@ -376,6 +372,25 @@ func validateDir() {
 	}
 
 	*tasksFlag = tasksPath
+	*sandboxFlag = resolveSandbox(*dirFlag, *sandboxFlag, *skipPermsFlag)
+}
+
+// resolveSandbox fills the sandbox settings from the run folder's sandbox.json
+// the way resolveDir fills the task file. Either permission flag wins, with no
+// error: --skip-permissions is how a run opts out of a folder's sandbox. The
+// file is only read later, by sessionArgs, so a bad one fails loud and never
+// falls back to an unsandboxed run (ADR-014).
+func resolveSandbox(dir, sandboxFile string, skip bool) string {
+	if dir == "" || sandboxFile != "" || skip {
+		return sandboxFile
+	}
+
+	found, ok := looper.FolderSandbox(dir)
+	if !ok {
+		return sandboxFile
+	}
+
+	return found
 }
 
 // resolveDir turns a run folder into the task file's path. The name is fixed

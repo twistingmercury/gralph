@@ -31,9 +31,9 @@ var testBinaryPath string
 // child process's PATH.
 var fakeClaudeDir string
 
-// skillHome is set by TestMain to a HOME in which `gralph --install-skill`
-// has already run; the env helpers give every gralph run this HOME.
-var skillHome string
+// testHome is set by TestMain to an empty directory; the env helpers give
+// every gralph run this HOME.
+var testHome string
 
 // cliResult captures the result of executing the CLI binary.
 type cliResult struct {
@@ -107,13 +107,9 @@ func runTests(m *testing.M) int {
 		return 1
 	}
 
-	skillHome = filepath.Join(tmpDir, "home")
-	install := exec.Command(testBinaryPath, "--install-skill")
-	install.Env = append(os.Environ(), "HOME="+skillHome)
-	install.Stdout = os.Stdout
-	install.Stderr = os.Stderr
-	if err := install.Run(); err != nil {
-		fmt.Fprintf(os.Stderr, "failed to install skill into test HOME: %v\n", err)
+	testHome = filepath.Join(tmpDir, "home")
+	if err := os.Mkdir(testHome, 0o755); err != nil {
+		fmt.Fprintf(os.Stderr, "failed to create test HOME: %v\n", err)
 		return 1
 	}
 
