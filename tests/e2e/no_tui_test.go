@@ -16,21 +16,20 @@ import (
 // cmd/main's isPlain unit test covers that.
 func TestNonTerminal_DefaultsToPlain(t *testing.T) {
 	t.Parallel()
-	promptPath := writePrompt(t, t.TempDir(), "Follow the runbook.\n")
 
-	tasksYAML := `tasks:
+	tasksYAML := withShared("Follow the runbook.", "", `tasks:
   - id: 1
     name: First task
     prompt: Do the first thing.
   - id: 2
     name: Second task
     prompt: Do the second thing.
-`
+`)
 	env := gralphEnv(fakeClaudeDir, nil)
 
 	run := func(extra ...string) (gralphResult, string) {
 		tasksPath := writeTasksYAML(t, t.TempDir(), tasksYAML)
-		args := append([]string{"--skip-permissions", "-p", promptPath, "-t", tasksPath}, extra...)
+		args := append([]string{"--skip-permissions", "-t", tasksPath}, extra...)
 		res := runGralph(t, 15*time.Second, args, env)
 		saved, err := os.ReadFile(tasksPath)
 		require.NoError(t, err)

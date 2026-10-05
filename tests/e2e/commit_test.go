@@ -50,7 +50,6 @@ func gitIn(t *testing.T, dir string, args ...string) string {
 // the prompt and task file live, as the HOWTO recommends.
 type commitRepo struct {
 	dir        string
-	promptPath string
 	tasksPath  string
 	attemptLog string
 	env        []string
@@ -70,7 +69,6 @@ func newCommitRepo(t *testing.T, tasksYAML string) commitRepo {
 	require.NoError(t, os.Mkdir(run, 0o750))
 	repo := commitRepo{
 		dir:        dir,
-		promptPath: writePrompt(t, run, "Body.\n"),
 		tasksPath:  writeTasksYAML(t, run, tasksYAML),
 		attemptLog: filepath.Join(run, "attempts.log"),
 	}
@@ -83,7 +81,7 @@ func newCommitRepo(t *testing.T, tasksYAML string) commitRepo {
 
 func (r commitRepo) run(t *testing.T, flags ...string) gralphResult {
 	t.Helper()
-	args := append([]string{"--skip-permissions", "--prompt=" + r.promptPath, "--tasks=" + r.tasksPath}, flags...)
+	args := append([]string{"--skip-permissions", "--tasks=" + r.tasksPath}, flags...)
 	return runGralphIn(t, r.dir, 20*time.Second, args, r.env)
 }
 
@@ -94,8 +92,11 @@ func (r commitRepo) subjects(t *testing.T) []string {
 
 // The gates are shared by both tasks, so the one gate picks its file by what
 // the first task left behind: each commit then holds exactly one new file.
-const twoWorkTasks = `gates:
-  - cmd: if [ -e one.txt ]; then echo two > two.txt; else echo one > one.txt; fi
+const twoWorkTasks = `shared:
+  prompt: |
+    Body.
+  gates:
+    - cmd: if [ -e one.txt ]; then echo two > two.txt; else echo one > one.txt; fi
 tasks:
   - id: 1
     name: First task
@@ -208,13 +209,11 @@ func breakRepo(t *testing.T, dir string) {
 
 func TestCommit_FailedGateLeavesNoCommitAndBlocksTheRerun(t *testing.T) {
 	t.Parallel()
-	tasksYAML := `gates:
-  - cmd: echo one > one.txt; exit 1
-tasks:
+	tasksYAML := withShared("Body.", "    - cmd: echo one > one.txt; exit 1\n", `tasks:
   - id: 1
     name: First task
     prompt: Do the first thing.
-`
+`)
 	repo := newCommitRepo(t, tasksYAML)
 
 	res := repo.run(t, "--commit")
@@ -258,11 +257,10 @@ func TestCommit_OutsideARepositoryRunsWithoutCommitting(t *testing.T) {
 	t.Parallel()
 	dir, err := filepath.EvalSymlinks(t.TempDir())
 	require.NoError(t, err)
-	promptPath := writePrompt(t, dir, "Body.\n")
 	tasksPath := writeTasksYAML(t, dir, twoWorkTasks)
 	env := gralphEnv(fakeClaudeDir, gitEnv(dir))
 
-	res := runGralphIn(t, dir, 20*time.Second, []string{"--skip-permissions", "--commit", "--prompt=" + promptPath, "--tasks=" + tasksPath}, env)
+	res := runGralphIn(t, dir, 20*time.Second, []string{"--skip-permissions", "--commit", "--tasks=" + tasksPath}, env)
 
 	require.Equal(t, 0, res.exitCode, "stdout:\n%s\nstderr:\n%s", res.stdout, res.stderr)
 	assert.Contains(t, res.stdout, "commit: not a git repository, nothing will be committed\n")

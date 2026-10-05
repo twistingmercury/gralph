@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// runDryRun writes tasksYAML to a temp dir, runs gralph with the args built
+// runDryRun writes the task file tasksYAML to a temp dir, runs gralph with the args built
 // from its path, and asserts claude is never invoked and the task file is
 // left byte-for-byte unchanged with no temp file behind.
 func runDryRun(t *testing.T, tasksYAML string, args func(tasksPath string) []string) (gralphResult, string) {
@@ -50,7 +50,7 @@ func TestDryRun_ValidFile(t *testing.T) {
 
 func TestDryRun_InvalidFile(t *testing.T) {
 	t.Parallel()
-	tasksYAML := "tasks:\n  - {id: 1, name: a, prompt: p, state: bogus}\n"
+	tasksYAML := withShared("Body.", "", "tasks:\n  - {id: 1, name: a, prompt: p, state: bogus}\n")
 	res, tasksPath := runDryRun(t, tasksYAML, func(p string) []string {
 		return []string{"--tasks=" + p, "--dry-run"}
 	})
@@ -62,7 +62,7 @@ func TestDryRun_InvalidFile(t *testing.T) {
 
 func TestDryRun_FlagsFailedTaskAndExitsZero(t *testing.T) {
 	t.Parallel()
-	tasksYAML := `tasks:
+	tasksYAML := withShared("Body.", "", `tasks:
   - id: 1
     name: First task
     prompt: Do the first thing.
@@ -71,7 +71,7 @@ func TestDryRun_FlagsFailedTaskAndExitsZero(t *testing.T) {
     prompt: Do the second thing.
     state: failed
     error: boom
-`
+`)
 	res, _ := runDryRun(t, tasksYAML, func(p string) []string {
 		return []string{"-t", p, "--dry-run"}
 	})
@@ -85,33 +85,18 @@ func TestDryRun_FlagsFailedTaskAndExitsZero(t *testing.T) {
 	assert.Equal(t, want, res.stdout)
 }
 
-func TestDryRun_IgnoresNonexistentPrompt(t *testing.T) {
-	t.Parallel()
-	res, tasksPath := runDryRun(t, validTasksYAML(), func(p string) []string {
-		return []string{"-t", p, "-p", "/nonexistent/prompt.md", "--dry-run"}
-	})
-
-	require.Equal(t, 0, res.exitCode, "stdout:\n%s\nstderr:\n%s", res.stdout, res.stderr)
-	want := "   ID  STATE      NAME\n" +
-		"   --  ---------  ----\n" +
-		"    1  PENDING    First task\n" +
-		tasksPath + " is valid\n"
-	assert.Equal(t, want, res.stdout)
-}
-
 func TestDryRun_MissingTasksFlag(t *testing.T) {
 	t.Parallel()
 	result := runCLI(t, "--dry-run")
 	require.Equal(t, 1, result.exitCode, "stderr: %s", result.stderr)
 	// Usage follows the error and names every flag, so match the error line.
 	assert.Contains(t, result.stderr, "error: required flag --tasks not set\n")
-	assert.NotContains(t, result.stderr, "required flag --prompt not set")
 }
 
 func TestDryRun_ValidGatesAreNotRun(t *testing.T) {
 	t.Parallel()
 	marker := filepath.Join(t.TempDir(), "gate-ran")
-	tasksYAML := "gates:\n  - cmd: touch '" + marker + "'\ntasks:\n  - id: 1\n    name: First task\n    prompt: p\n"
+	tasksYAML := withShared("Body.", "    - cmd: touch '"+marker+"'\n", "tasks:\n  - id: 1\n    name: First task\n    prompt: p\n")
 
 	res, tasksPath := runDryRun(t, tasksYAML, func(p string) []string {
 		return []string{"-t", p, "--dry-run"}
@@ -124,13 +109,13 @@ func TestDryRun_ValidGatesAreNotRun(t *testing.T) {
 
 func TestDryRun_InvalidGates(t *testing.T) {
 	t.Parallel()
-	tasksYAML := "gates:\n  - command: go test ./...\ntasks:\n  - id: 1\n    name: First task\n    prompt: p\n"
+	tasksYAML := withShared("Body.", "    - command: go test ./...\n", "tasks:\n  - id: 1\n    name: First task\n    prompt: p\n")
 
 	res, tasksPath := runDryRun(t, tasksYAML, func(p string) []string {
 		return []string{"--tasks=" + p, "--dry-run"}
 	})
 
 	require.NotEqual(t, 0, res.exitCode, "stdout:\n%s\nstderr:\n%s", res.stdout, res.stderr)
-	assert.Contains(t, res.stderr, "failed to parse tasks yaml: gates[0]: command: unknown key; a gate has only cmd")
+	assert.Contains(t, res.stderr, "failed to parse tasks yaml: shared.gates[0]: command: unknown key; a gate has only cmd")
 	assert.NotContains(t, res.stdout, tasksPath+" is valid")
 }

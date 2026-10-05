@@ -11,7 +11,7 @@ import (
 )
 
 // TestInstallSkill verifies --install-skill writes the embedded skill folder
-// under $HOME/.claude/skills without --prompt or --tasks, and that a second
+// under $HOME/.claude/skills without --tasks, and that a second
 // run replaces the folder.
 func TestInstallSkill(t *testing.T) {
 	t.Parallel()

@@ -45,13 +45,12 @@ func runTasksWithFlags(t *testing.T, tasksYAML string, flags ...string) sandboxR
 		attemptLog: filepath.Join(dir, "attempts.log"),
 		tasksPath:  writeTasksYAML(t, dir, tasksYAML),
 	}
-	promptPath := writePrompt(t, dir, "Follow the runbook.\n")
 	env := gralphEnv(fakeClaudeDir, map[string]string{
 		"FAKECLAUDE_RECORD_FILE":      run.recordFile,
 		"FAKECLAUDE_ATTEMPT_LOG_FILE": run.attemptLog,
 	})
 
-	args := append([]string{"--prompt=" + promptPath, "--tasks=" + run.tasksPath}, flags...)
+	args := append([]string{"--tasks=" + run.tasksPath}, flags...)
 	run.res = runGralph(t, 15*time.Second, args, env)
 	return run
 }
@@ -85,14 +84,14 @@ func TestSandbox_ArgvCarriesForcedSettings(t *testing.T) {
 func TestSandbox_EveryTaskGetsTheSameSettings(t *testing.T) {
 	t.Parallel()
 	settings := writeSandboxSettings(t, t.TempDir(), `{"sandbox":{"filesystem":{"denyRead":["~/"]}}}`)
-	tasksYAML := `tasks:
+	tasksYAML := withShared("Follow the runbook.", "", `tasks:
   - id: 1
     name: First task
     prompt: Do the first thing.
   - id: 2
     name: Second task
     prompt: Do the second thing.
-`
+`)
 
 	run := runTasksWithFlags(t, tasksYAML, "--sandbox-settings="+settings)
 	require.Equal(t, 0, run.res.exitCode, "stdout:\n%s\nstderr:\n%s", run.res.stdout, run.res.stderr)

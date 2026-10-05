@@ -43,12 +43,11 @@ func testWizardSignal(t *testing.T, name string, sig syscall.Signal) {
 	runDir := filepath.Join(workDir, ".local", "run")
 	require.NoError(t, os.MkdirAll(runDir, 0o755))
 
-	writePrompt(t, runDir, "Body.\n")
-	tasksPath := writeTasksYAML(t, runDir, `tasks:
+	tasksPath := writeTasksYAML(t, runDir, withShared("Body.", "", `tasks:
   - id: 1
     name: First task
     prompt: Do the thing.
-`)
+`))
 
 	original, err := os.ReadFile(tasksPath)
 	require.NoError(t, err)

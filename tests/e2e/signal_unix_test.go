@@ -34,15 +34,14 @@ func testLoopSignal(t *testing.T, sig os.Signal) {
 
 	dir := t.TempDir()
 
-	promptPath := writePrompt(t, dir, "Body.\n")
-	tasksPath := writeTasksYAML(t, dir, `tasks:
+	tasksPath := writeTasksYAML(t, dir, withShared("Body.", "", `tasks:
   - id: 1
     name: First task
     prompt: Block forever.
   - id: 2
     name: Second task
     prompt: Should never start.
-`)
+`))
 
 	original, err := os.ReadFile(tasksPath)
 	require.NoError(t, err)
@@ -59,7 +58,7 @@ func testLoopSignal(t *testing.T, sig os.Signal) {
 	// Generous safety-net timeout: if the signal never terminates gralph
 	// (a real bug, not expected flakiness), the process is still killed and
 	// the test still fails via waitExit rather than hanging the suite.
-	gp := startGralph(t, 30*time.Second, []string{"--skip-permissions", "--prompt=" + promptPath, "--tasks=" + tasksPath}, env)
+	gp := startGralph(t, 30*time.Second, []string{"--skip-permissions", "--tasks=" + tasksPath}, env)
 
 	// Wait for the fake claude fixture to spawn its descendant and signal
 	// it's set up and blocking before sending the signal.

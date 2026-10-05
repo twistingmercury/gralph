@@ -26,7 +26,6 @@ func TestLoop_RunsEveryTaskInOrder(t *testing.T) {
 	dir := t.TempDir()
 
 	promptBody := "PROMPT BODY MARKER\nFollow the runbook.\n"
-	promptPath := writePrompt(t, dir, promptBody)
 	sharedPrompt := strings.TrimSpace(promptBody)
 
 	tasksYAML := `tasks:
@@ -42,14 +41,14 @@ func TestLoop_RunsEveryTaskInOrder(t *testing.T) {
     prompt: Do the third thing.
     state: pending
 `
-	tasksPath := writeTasksYAML(t, dir, tasksYAML)
+	tasksPath := writeTasksYAML(t, dir, withShared(promptBody, "", tasksYAML))
 
 	recordFile := filepath.Join(dir, "record.ndjson")
 	env := gralphEnv(fakeClaudeDir, map[string]string{
 		"FAKECLAUDE_RECORD_FILE": recordFile,
 	})
 
-	res := runGralph(t, 15*time.Second, []string{"--skip-permissions", "--prompt=" + promptPath, "--tasks=" + tasksPath}, env)
+	res := runGralph(t, 15*time.Second, []string{"--skip-permissions", "--tasks=" + tasksPath}, env)
 	require.Equal(t, 0, res.exitCode, "stdout:\n%s\nstderr:\n%s", res.stdout, res.stderr)
 
 	assert.Contains(t, res.stdout, "task 20: First task already completed, skipping")
@@ -90,8 +89,7 @@ func TestLoop_FailedTaskRefusesToRun(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 
-	promptPath := writePrompt(t, dir, "Body.\n")
-	tasksYAML := `tasks:
+	tasksYAML := withShared("Body.", "", `tasks:
   - id: 1
     name: First task
     prompt: Do the first thing.
@@ -100,7 +98,7 @@ func TestLoop_FailedTaskRefusesToRun(t *testing.T) {
     prompt: Do the second thing.
     state: failed
     error: boom
-`
+`)
 	tasksPath := writeTasksYAML(t, dir, tasksYAML)
 
 	attemptLog := filepath.Join(dir, "attempts.log")
@@ -108,7 +106,7 @@ func TestLoop_FailedTaskRefusesToRun(t *testing.T) {
 		"FAKECLAUDE_ATTEMPT_LOG_FILE": attemptLog,
 	})
 
-	res := runGralph(t, 15*time.Second, []string{"--skip-permissions", "--prompt=" + promptPath, "--tasks=" + tasksPath}, env)
+	res := runGralph(t, 15*time.Second, []string{"--skip-permissions", "--tasks=" + tasksPath}, env)
 
 	require.Equal(t, 1, res.exitCode, "stdout:\n%s\nstderr:\n%s", res.stdout, res.stderr)
 	assert.Contains(t, res.stdout, "Some tasks failed previous runs:\n")
@@ -134,7 +132,6 @@ func TestLoop_StopsOnFirstFailure(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 
-	promptPath := writePrompt(t, dir, "Body.\n")
 	tasksYAML := `tasks:
   - id: 1
     name: First task
@@ -143,7 +140,7 @@ func TestLoop_StopsOnFirstFailure(t *testing.T) {
     name: Second task
     prompt: Do the second thing.
 `
-	tasksPath := writeTasksYAML(t, dir, tasksYAML)
+	tasksPath := writeTasksYAML(t, dir, withShared("Body.", "", tasksYAML))
 
 	attemptLog := filepath.Join(dir, "attempts.log")
 	env := gralphEnv(fakeClaudeDir, map[string]string{
@@ -152,7 +149,7 @@ func TestLoop_StopsOnFirstFailure(t *testing.T) {
 		"FAKECLAUDE_STDERR_MSG":       "claude-stderr-marker",
 	})
 
-	res := runGralph(t, 15*time.Second, []string{"--skip-permissions", "--prompt=" + promptPath, "--tasks=" + tasksPath}, env)
+	res := runGralph(t, 15*time.Second, []string{"--skip-permissions", "--tasks=" + tasksPath}, env)
 
 	require.NotEqual(t, 0, res.exitCode, "stdout:\n%s\nstderr:\n%s", res.stdout, res.stderr)
 	assert.Contains(t, res.stderr, "task 1: First task failed: exit status 3")
@@ -177,7 +174,6 @@ func TestLoop_PromptEchoedToStdout(t *testing.T) {
 	dir := t.TempDir()
 
 	promptBody := "Follow the runbook.\n"
-	promptPath := writePrompt(t, dir, promptBody)
 	sharedPrompt := strings.TrimSpace(promptBody)
 
 	tasksYAML := `tasks:
@@ -188,9 +184,9 @@ func TestLoop_PromptEchoedToStdout(t *testing.T) {
     name: Second task
     prompt: Do the second thing.
 `
-	tasksPath := writeTasksYAML(t, dir, tasksYAML)
+	tasksPath := writeTasksYAML(t, dir, withShared(promptBody, "", tasksYAML))
 
-	res := runGralph(t, 15*time.Second, []string{"--skip-permissions", "--prompt=" + promptPath, "--tasks=" + tasksPath}, gralphEnv(fakeClaudeDir, nil))
+	res := runGralph(t, 15*time.Second, []string{"--skip-permissions", "--tasks=" + tasksPath}, gralphEnv(fakeClaudeDir, nil))
 	require.Equal(t, 0, res.exitCode, "stdout:\n%s\nstderr:\n%s", res.stdout, res.stderr)
 
 	assert.Contains(t, res.stdout, expectedStdin(sharedPrompt, 1, "First task", "Do the first thing."))
@@ -205,15 +201,14 @@ func TestLoop_ClaudeMissingFromPath(t *testing.T) {
 	dir := t.TempDir()
 	emptyPathDir := t.TempDir()
 
-	promptPath := writePrompt(t, dir, "Body.\n")
-	tasksPath := writeTasksYAML(t, dir, `tasks:
+	tasksPath := writeTasksYAML(t, dir, withShared("Body.", "", `tasks:
   - id: 1
     name: Only task
     prompt: Do the thing.
-`)
+`))
 
 	env := gralphEnvWithPath(emptyPathDir, nil)
-	res := runGralph(t, 15*time.Second, []string{"--skip-permissions", "--prompt=" + promptPath, "--tasks=" + tasksPath}, env)
+	res := runGralph(t, 15*time.Second, []string{"--skip-permissions", "--tasks=" + tasksPath}, env)
 
 	require.NotEqual(t, 0, res.exitCode, "stdout:\n%s\nstderr:\n%s", res.stdout, res.stderr)
 	assert.Contains(t, res.stderr, "task 1: Only task failed")
@@ -223,7 +218,7 @@ func TestLoop_ClaudeMissingFromPath(t *testing.T) {
 // TestIterationsFlagRejected verifies that --iterations no longer exists as
 // a flag: gralph must reject it as unknown rather than silently accepting or
 // ignoring it. If the flag came back, this run would still exit non-zero for
-// the missing --prompt and usage would list the flag, so the unknown-flag
+// the missing --tasks and usage would list the flag, so the unknown-flag
 // line and pflag's exit code 2 are what pin it.
 func TestIterationsFlagRejected(t *testing.T) {
 	t.Parallel()
@@ -233,28 +228,37 @@ func TestIterationsFlagRejected(t *testing.T) {
 	assert.NotContains(t, result.stderr, "required flag")
 }
 
-// TestStart_EmptyPrompt verifies that an empty prompt file fails startup
+// TestStart_EmptyPrompt verifies that an empty shared prompt fails startup
 // before claude is ever invoked.
 func TestStart_EmptyPrompt(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 
-	promptPath := writePrompt(t, dir, "")
-	tasksPath := writeTasksYAML(t, dir, validTasksYAML())
+	tasksPath := writeTasksYAML(t, dir, "shared:\n  prompt: \"\"\n"+validTasks)
 
-	assertStartupFailure(t, dir, promptPath, tasksPath, "the prompt file is empty")
+	assertStartupFailure(t, dir, tasksPath, "shared.prompt: must not be empty or whitespace")
 }
 
-// TestStart_WhitespacePrompt verifies that a whitespace-only prompt file
+// TestStart_WhitespacePrompt verifies that a whitespace-only shared prompt
 // fails startup before claude is ever invoked.
 func TestStart_WhitespacePrompt(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 
-	promptPath := writePrompt(t, dir, "   \t\n  ")
-	tasksPath := writeTasksYAML(t, dir, validTasksYAML())
+	tasksPath := writeTasksYAML(t, dir, "shared:\n  prompt: \"   \\t\\n  \"\n"+validTasks)
 
-	assertStartupFailure(t, dir, promptPath, tasksPath, "the prompt file is just whitespace")
+	assertStartupFailure(t, dir, tasksPath, "shared.prompt: must not be empty or whitespace")
+}
+
+// TestStart_MissingSharedBlock verifies that a task file without a shared
+// block fails startup before claude is ever invoked.
+func TestStart_MissingSharedBlock(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	tasksPath := writeTasksYAML(t, dir, validTasks)
+
+	assertStartupFailure(t, dir, tasksPath, "shared: is required")
 }
 
 // TestStart_AbandonedStateRejected verifies that "abandoned" -- a state
@@ -265,20 +269,19 @@ func TestStart_AbandonedStateRejected(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 
-	promptPath := writePrompt(t, dir, "Body.\n")
-	tasksPath := writeTasksYAML(t, dir, `tasks:
+	tasksPath := writeTasksYAML(t, dir, withShared("Body.", "", `tasks:
   - id: 1
     name: First task
     prompt: Do the thing.
     state: abandoned
-`)
+`))
 
 	attemptLog := filepath.Join(dir, "attempts.log")
 	env := gralphEnv(fakeClaudeDir, map[string]string{
 		"FAKECLAUDE_ATTEMPT_LOG_FILE": attemptLog,
 	})
 
-	res := runGralph(t, 15*time.Second, []string{"--skip-permissions", "--prompt=" + promptPath, "--tasks=" + tasksPath}, env)
+	res := runGralph(t, 15*time.Second, []string{"--skip-permissions", "--tasks=" + tasksPath}, env)
 
 	require.NotEqual(t, 0, res.exitCode, "stdout:\n%s\nstderr:\n%s", res.stdout, res.stderr)
 	assert.Contains(t, res.stderr, "failed to start loop runner")
@@ -292,17 +295,16 @@ func TestStart_EmptyTaskList(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 
-	promptPath := writePrompt(t, dir, "Body.\n")
-	tasksPath := writeTasksYAML(t, dir, "tasks: []\n")
+	tasksPath := writeTasksYAML(t, dir, withShared("Body.", "", "tasks: []\n"))
 
-	assertStartupFailure(t, dir, promptPath, tasksPath, "tasks: must contain at least one task")
+	assertStartupFailure(t, dir, tasksPath, "tasks: must contain at least one task")
 }
 
-// assertStartupFailure runs gralph with the given prompt/tasks files and
+// assertStartupFailure runs gralph with the given task file and
 // asserts the shared startup-failure contract: stderr mentions the loop
 // runner failed to start and the given reason, gralph exits non-zero, and
 // claude is never invoked.
-func assertStartupFailure(t *testing.T, dir, promptPath, tasksPath, want string) {
+func assertStartupFailure(t *testing.T, dir, tasksPath, want string) {
 	t.Helper()
 
 	attemptLog := filepath.Join(dir, "attempts.log")
@@ -310,7 +312,7 @@ func assertStartupFailure(t *testing.T, dir, promptPath, tasksPath, want string)
 		"FAKECLAUDE_ATTEMPT_LOG_FILE": attemptLog,
 	})
 
-	res := runGralph(t, 15*time.Second, []string{"--skip-permissions", "--prompt=" + promptPath, "--tasks=" + tasksPath}, env)
+	res := runGralph(t, 15*time.Second, []string{"--skip-permissions", "--tasks=" + tasksPath}, env)
 
 	require.NotEqual(t, 0, res.exitCode, "stdout:\n%s\nstderr:\n%s", res.stdout, res.stderr)
 	assert.Contains(t, res.stderr, "failed to start loop runner")
@@ -318,12 +320,16 @@ func assertStartupFailure(t *testing.T, dir, promptPath, tasksPath, want string)
 	assert.Equal(t, 0, countAttempts(t, attemptLog), "expected claude never invoked")
 }
 
-// validTasksYAML returns a minimal, well-formed single-task tasks.yaml body
-// for startup-failure tests where the tasks file itself is not under test.
-func validTasksYAML() string {
-	return `tasks:
+// validTasks is the single task every fixture shares; validTasksYAML puts a
+// shared prompt above it.
+const validTasks = `tasks:
   - id: 1
     name: First task
     prompt: Do the thing.
 `
+
+// validTasksYAML returns a minimal, well-formed single-task tasks.yaml for
+// tests where the task file itself is not under test.
+func validTasksYAML() string {
+	return withShared("Follow the runbook.", "", validTasks)
 }
