@@ -58,7 +58,9 @@ redirect it, run it in CI, or pass `--no-tui`, and you get plain text output
 instead.
 
 Every real run needs either `--sandbox-settings` or `--skip-permissions`. There
-is no default.
+is no default. A `sandbox.json` in the run folder you name with `-d` counts as
+`--sandbox-settings`, so `gralph -d path/to/folder` needs no flag when the folder
+holds one.
 
 In a terminal, a bare `gralph` opens a setup wizard that asks for whatever the
 flags leave out (the run folder, the permission choice, the gates), then shows
@@ -95,10 +97,10 @@ Want the background? The idea behind gralph is in
 - **Don't run gralph from inside a Claude session.** It starts Claude itself, as
   a subprocess, so run it from a normal terminal.
 - **You need the `claude` CLI on your `PATH`.** Gralph calls it directly.
-- **Only run task files you trust.** The prompt and task files are code you're
-  about to run. A sandbox settings file in the run folder (named `sandbox.json`)
-  is treated the same way. Gate commands and, with `--commit`, git and the repository's
-  hooks are run by gralph itself, with no sandbox.
+- **Only run task files you trust.** The task file, with its shared prompt, is
+  code you're about to run, and so is a `sandbox.json` that `-d` finds in the run
+  folder. Gate commands and, with `--commit`, git and the repository's hooks are
+  run by gralph itself, with no sandbox.
 - **A failed task stops everything until you deal with it.** There's no retry.
   Fix whatever went wrong, set that task's `state` back to `pending` (or
   `completed`) by hand, and run again.

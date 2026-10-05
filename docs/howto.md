@@ -251,7 +251,8 @@ tasks:
 
 A task file usually sits in a folder of its own, with that run's other files
 (a `logs` folder, say, or a `sandbox.json`). Name the folder with `-d` (`--dir`)
-instead of the file's path:
+instead of the file's path. If `.local/widgets/sandbox.json` exists, you don't
+need a permission flag:
 
 ```bash
 gralph -d .local/widgets
@@ -367,6 +368,9 @@ A run needs exactly one of these two flags:
 - `--sandbox-settings <path>`: sessions run inside Claude Code's sandbox, set up
   by the file at that path.
 - `--skip-permissions`: sessions run with no sandbox at all.
+
+A `sandbox.json` in the run folder you name with `-d` counts as the first one
+(see [Run folders](#run-folders)).
 
 With neither, the full-screen view asks you to choose (see
 [Setup wizard](#setup-wizard)); nothing is chosen for you there either. Plain
@@ -890,7 +894,8 @@ prints the task table and exits 1 before the wizard or the view opens.
   its own task, nothing else. If a task depends on earlier work, say so in the
   task's prompt, or make sure the repository shows it.
 - **Only run task files you trust.** The sandbox limits what a session can
-  reach, but the task file's prompts are still code you're about to run. With
+  reach, but the task file's prompts are still code you're about to run, and so
+  is a `sandbox.json` that `-d` finds in the run folder. With
   `--skip-permissions` there's no limit at all. Gate commands and, with
   `--commit`, git and the repository's hooks are run by gralph itself, with no
   sandbox either way.
@@ -919,7 +924,7 @@ gralph --tasks path/to/tasks.yaml --sandbox-settings path/to/sandbox.json
 | -------------------- | ---------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
 | `--dir` / `-d`       | No; gives `--tasks` when it is not passed; may also give `--sandbox-settings` when the folder holds `sandbox.json` | Run folder holding `tasks.yaml` and optionally `sandbox.json` (see [Run folders](#run-folders)) |
 | `--tasks` / `-t`     | Yes, unless `--dir` gives it; the full-screen view asks for a folder instead                   | Path to the YAML task list that drives the loop                                                                             |
-| `--sandbox-settings` | One of these two for any real run, not both; the full-screen view asks when neither is passed  | Path to a Claude Code settings file; sessions run in Claude's sandbox with it. A file at `<folder>/sandbox.json` when using `-d` is picked up automatically (see [Run folders](#run-folders)) |
+| `--sandbox-settings` | One of these two for any real run, not both (a run folder's `sandbox.json` counts as this one); the full-screen view asks when neither is passed | Path to a Claude Code settings file; sessions run in Claude's sandbox with it. A file at `<folder>/sandbox.json` when using `-d` is picked up automatically (see [Run folders](#run-folders)) |
 | `--skip-permissions` | One of these two for any real run, not both; the full-screen view asks when neither is passed  | Run sessions with no sandbox and no permission checks. You're on your own (see [Sandboxing sessions](#sandboxing-sessions)). Also opts out of a `sandbox.json` in the run folder (see [Run folders](#run-folders)) |
 | `--gate-timeout`     | No                                                                                             | Time limit for every gate, like `90s`; overrides the task file's                                                            |
 | `--commit`           | No                                                                                             | Commit each completed task with git, after the gates pass                                                                   |
@@ -935,6 +940,7 @@ CI, or pass `--no-tui`, and you get plain text output instead. `--dry-run` is
 always plain.
 
 Every real run needs either `--sandbox-settings` or `--skip-permissions`. There
-is no default: see [Sandboxing sessions](#sandboxing-sessions). In the
+is no default: see [Sandboxing sessions](#sandboxing-sessions). A `sandbox.json`
+in the run folder named with `-d` counts as `--sandbox-settings`. In the
 full-screen view, whatever a run needs and the flags leave out is asked for by
 the [setup wizard](#setup-wizard).
