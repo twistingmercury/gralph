@@ -54,10 +54,6 @@ func main() {
 	validateLogDir(plain)
 	session := validateSessionFlags(plain)
 
-	if err := skillinstall.Check(); err != nil {
-		fatal(err)
-	}
-
 	if *dryRunFlag {
 		if err := looper.DryRun(os.Stdout, *tasksFlag, *gateTimeoutFlag, *sandboxFlag, *commitFlag); err != nil {
 			fatal(err)
