@@ -1,8 +1,8 @@
 # Gralph — System Architecture
 
-> **Version**: v21
-> **Date**: 2026-10-02
-> **Notes**: Documented `wizard_signal_linux_test.go` e2e test running under pseudo-terminal to pin signal handling of wizard cancellation; added note to Test Seam section about creack/pty test-only dependency.
+> **Version**: v22
+> **Date**: 2026-10-05
+> **Notes**: Test Seam section now lists all pty e2e tests (wizard signals, wizard happy path, `--log-dir` record, run stop confirmation) instead of one exception.
 
 [Back to Overview](00_overview.md) | [Back to Project README](../../README.md)
 
@@ -305,7 +305,7 @@ graph TB
 
 ## Test Seam
 
-There is no injectable runner; `runLoop` execs inline. Both test suites (`internal/looper`, `tests/e2e`) build a fake `claude` into a temp dir, put it first on `PATH` for the gralph process only, and drive it with environment variables, because gralph passes fixed argv. `internal/tui` tests drive `Model` directly, or `tui.Run` and `tui.Wizard` with test program options; `NeedsWizard`, `CommandLine`, and each step's check are plain functions tested without a terminal. The e2e tests are black-box and have no terminal, so they always run plain mode. Exception: `wizard_signal_linux_test.go` runs the real gralph binary under a pseudo-terminal (using creack/pty, a test-only dependency) to verify that SIGTERM and SIGINT cancel the open wizard; the test driver must keep reading output or gralph blocks on exit.
+There is no injectable runner; `runLoop` execs inline. Both test suites (`internal/looper`, `tests/e2e`) build a fake `claude` into a temp dir, put it first on `PATH` for the gralph process only, and drive it with environment variables, because gralph passes fixed argv. `internal/tui` tests drive `Model` directly, or `tui.Run` and `tui.Wizard` with test program options; `NeedsWizard`, `CommandLine`, and each step's check are plain functions tested without a terminal. The e2e tests are black-box and, unless a test gives gralph a terminal, run plain mode. The pty tests (`wizard_signal_linux_test.go`, `wizard_pty_linux_test.go`, `log_dir_pty_linux_test.go`, `run_stop_pty_linux_test.go`, sharing the harness in `pty_linux_test.go`) run the real gralph binary under a pseudo-terminal (using creack/pty, a test-only dependency). They verify that SIGTERM and SIGINT cancel the open wizard, the wizard's happy path, the `--log-dir` ledger and task log of a stopped run, and the run view's stop confirmation. Each waits on anchor words in the raw output and asserts on exit codes, files, and printed lines, not layout; the test driver must keep reading output or gralph blocks on exit.
 
 ## Data Flow
 

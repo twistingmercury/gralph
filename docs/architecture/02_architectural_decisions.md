@@ -1,8 +1,8 @@
 # Gralph — Architectural Decisions
 
-> **Version**: v20
-> **Date**: 2026-10-02
-> **Notes**: Added e2e test `wizard_signal_linux_test.go` running under pseudo-terminal to pin signal handling of wizard forms; amended ADR-018 negative consequence and cancelling description to document forms running with `tea.WithoutSignalHandler()` and signal context control.
+> **Version**: v21
+> **Date**: 2026-10-05
+> **Notes**: ADR-011, ADR-016, and ADR-018 consequences now say which full-screen behaviour the pty e2e tests pin (wizard happy path, `--log-dir` record of a stopped run) instead of saying the suite has no terminal.
 
 [Back to Overview](00_overview.md) | [Back to Project README](../../README.md)
 
@@ -395,7 +395,7 @@ _Positive:_
 - A run is easy to follow live: what Claude is doing, which task is running, which are done
 - Plain mode, its tests, and every script or CI job that uses gralph are unchanged
 - One copy of the loop rules; the two task paths differ only in how they talk to claude
-- The e2e suite needs no change: it has no terminal, so it always runs plain mode
+- The plain-mode e2e tests need no change: with no terminal they run plain mode; the full-screen view has its own pty tests
 
 _Negative:_
 
@@ -694,7 +694,7 @@ _Negative:_
 - With `--commit`, a log folder inside the repository needs an ignore rule first
 - A stop by the user and a stop by signal read the same in the ledger
 - A write error cancels the running task; its work so far stays in the work tree, uncommitted
-- The e2e suite has no terminal, so it can pin only the two plain-mode rules; the logging path itself is covered by unit tests
+- Without a terminal the e2e suite can pin only the two plain-mode rules; one test under a pseudo-terminal (`log_dir_pty_linux_test.go`) pins the ledger and the task log of a stopped run, and the rest of the logging path is covered by unit tests
 
 ---
 
@@ -800,7 +800,7 @@ _Negative:_
 
 - A new third-party dependency to track and scan
 - A run without `--commit` or `--log-dir` still shows those steps whenever the wizard opens for anything else; "No" is pre-selected, so each costs one Enter
-- One e2e test, `wizard_signal_linux_test.go`, runs the binary under a pseudo-terminal to pin that SIGTERM and SIGINT cancel the open wizard; the wizard's steps are otherwise covered by unit tests and checked by hand
+- Two e2e tests run the binary under a pseudo-terminal: `wizard_signal_linux_test.go` pins that SIGTERM and SIGINT cancel the open wizard, and `wizard_pty_linux_test.go` walks the happy path with real keystrokes; the other wizard steps are covered by unit tests and checked by hand
 - Fixed names mean a folder holding two task files still needs `-t`
 
 ---
