@@ -980,7 +980,13 @@ _Negative:_
 
 **Context:**
 
-ADR-010 made every run and every `--dry-run` refuse to start unless the installed `gralph-docs-writer` skill matched the binary's embedded copy by content hash. It listed its own costs: every run needs the skill installed even for someone who never generates a task file with it, local edits to the installed skill make every run fail until `--install-skill` overwrites them, and every test that runs gralph needs a `HOME` with the skill installed. The skill is a helper, and people adapt it to their own projects: their commit rules, their gates, their wording. A check that treats any edit as damage works against that, and it gates a program that does not need the skill at all.
+ADR-010 made every run and every `--dry-run` refuse to start unless the installed `gralph-docs-writer` skill matched the binary's embedded copy. The check compared a stamp: `--install-skill` wrote a `VERSION` file holding a SHA-256 hash of the embedded skill, and the check compared that hash with the running binary's. It never read the skill's own files, so editing the installed skill in place did not trip it (ADR-010's cost "local edits make every run fail" was wrong, and a test of an edited skill passes against the old code). It tripped in three other cases:
+
+- **An upgrade that changes the embedded skill.** The stamp no longer matches, the run refuses to start, and the only fix it offers, `--install-skill`, replaces the whole folder and discards the user's tweaks. A tweaked skill therefore survives only until the next such upgrade.
+- **A skill installed any other way.** A customized copy put in place by hand, or by `scripts/install_skill.sh`, has no stamp and fails the check.
+- **A user who never uses the skill.** Every run and dry run needs it installed anyway, and so does every test that runs gralph (the e2e suite's shared `HOME`).
+
+The skill is a helper, and people adapt it to their own projects: their commit rules, their gates, their wording. A check that ties every run to one exact copy of it works against that, and gates a program that does not need the skill at all.
 
 **Decision:**
 
