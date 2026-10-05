@@ -14,7 +14,7 @@ import (
 // sessionArgs and repo are as for looper.Run. observe, when not nil, is
 // called with every event before the view gets it; its first error stops the
 // run. opts are extra program options, for tests.
-func Run(ctx context.Context, prompt string, tl *tasks.TaskList, tasksFile, gateTimeout string, sessionArgs []string, repo *looper.Repo, observe func(looper.Event) error, opts ...tea.ProgramOption) (exitCode int, summary string, err error) {
+func Run(ctx context.Context, tl *tasks.TaskList, tasksFile, gateTimeout string, sessionArgs []string, repo *looper.Repo, observe func(looper.Event) error, opts ...tea.ProgramOption) (exitCode int, summary string, err error) {
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -26,7 +26,7 @@ func Run(ctx context.Context, prompt string, tl *tasks.TaskList, tasksFile, gate
 	loopDone, progDone := make(chan struct{}), make(chan struct{})
 	go func() {
 		defer close(loopDone)
-		_ = looper.Run(runCtx, prompt, tl, tasksFile, gateTimeout, sessionArgs, repo, fwd.report)
+		_ = looper.Run(runCtx, tl, tasksFile, gateTimeout, sessionArgs, repo, fwd.report)
 	}()
 	go forwardSignal(ctx, p, progDone)
 

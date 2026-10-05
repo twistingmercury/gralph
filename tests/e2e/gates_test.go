@@ -12,30 +12,28 @@ import (
 )
 
 // This file covers gates (ADR-013, ADR-019): commands in the task file's
-// top-level gates list that gralph runs itself, through sh, after each
+// shared.gates list that gralph runs itself, through sh, after each
 // session reports completed. A task is completed only when every gate exits
 // zero, and gates are never sent to claude.
 
 func TestGates_PassingGatesCompleteTheTask(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	promptPath := writePrompt(t, dir, "Body.\n")
 	marker := filepath.Join(dir, "gate-ran")
 
-	tasksYAML := fmt.Sprintf(`gates:
-  - cmd: echo gate-output
-  - cmd: touch '%s'
-tasks:
+	tasksYAML := withShared("Body.", fmt.Sprintf(`    - cmd: echo gate-output
+    - cmd: touch '%s'
+`, marker), `tasks:
   - id: 1
     name: First task
     prompt: Do the first thing.
-`, marker)
+`)
 	tasksPath := writeTasksYAML(t, dir, tasksYAML)
 
 	recordFile := filepath.Join(dir, "record.ndjson")
 	env := gralphEnv(fakeClaudeDir, map[string]string{"FAKECLAUDE_RECORD_FILE": recordFile})
 
-	res := runGralph(t, 15*time.Second, []string{"--skip-permissions", "--prompt=" + promptPath, "--tasks=" + tasksPath}, env)
+	res := runGralph(t, 15*time.Second, []string{"--skip-permissions", "--tasks=" + tasksPath}, env)
 
 	require.Equal(t, 0, res.exitCode, "stdout:\n%s\nstderr:\n%s", res.stdout, res.stderr)
 	assert.Contains(t, res.stdout, "gate: echo gate-output\ngate-output\n")
@@ -49,7 +47,7 @@ tasks:
 	after := readTasksYAML(t, tasksPath)
 	require.Len(t, after.Tasks, 1)
 	assert.Equal(t, "completed", after.Tasks[0].State)
-	assert.Equal(t, []gateFixture{{Cmd: "echo gate-output"}, {Cmd: "touch '" + marker + "'"}}, after.Gates,
+	assert.Equal(t, []gateFixture{{Cmd: "echo gate-output"}, {Cmd: "touch '" + marker + "'"}}, after.Shared.Gates,
 		"gates must survive the save")
 	assertNoTmpFile(t, tasksPath)
 }
@@ -57,25 +55,23 @@ tasks:
 func TestGates_FailingGateFailsTheTaskAndBlocksTheNextRun(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	promptPath := writePrompt(t, dir, "Body.\n")
 	never := filepath.Join(dir, "never")
 
-	tasksYAML := fmt.Sprintf(`gates:
-  - cmd: test "a" = "b"
-  - cmd: touch '%s'
-tasks:
+	tasksYAML := withShared("Body.", fmt.Sprintf(`    - cmd: test "a" = "b"
+    - cmd: touch '%s'
+`, never), `tasks:
   - id: 1
     name: First task
     prompt: Do the first thing.
   - id: 2
     name: Second task
     prompt: Do the second thing.
-`, never)
+`)
 	tasksPath := writeTasksYAML(t, dir, tasksYAML)
 
 	recordFile := filepath.Join(dir, "record.ndjson")
 	env := gralphEnv(fakeClaudeDir, map[string]string{"FAKECLAUDE_RECORD_FILE": recordFile})
-	args := []string{"--skip-permissions", "--prompt=" + promptPath, "--tasks=" + tasksPath}
+	args := []string{"--skip-permissions", "--tasks=" + tasksPath}
 
 	res := runGralph(t, 15*time.Second, args, env)
 
@@ -102,23 +98,21 @@ tasks:
 func TestGates_SkippedWhenTheSessionFails(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	promptPath := writePrompt(t, dir, "Body.\n")
 	marker := filepath.Join(dir, "gate-ran")
 
-	tasksYAML := fmt.Sprintf(`gates:
-  - cmd: touch '%s'
-tasks:
+	tasksYAML := withShared("Body.", fmt.Sprintf(`    - cmd: touch '%s'
+`, marker), `tasks:
   - id: 1
     name: First task
     prompt: Do the first thing.
-`, marker)
+`)
 	tasksPath := writeTasksYAML(t, dir, tasksYAML)
 
 	env := gralphEnv(fakeClaudeDir, map[string]string{
 		"FAKE_CLAUDE_OUTPUT": `{"state":"failed","error":"something broke"}` + "\n",
 	})
 
-	res := runGralph(t, 15*time.Second, []string{"--skip-permissions", "--prompt=" + promptPath, "--tasks=" + tasksPath}, env)
+	res := runGralph(t, 15*time.Second, []string{"--skip-permissions", "--tasks=" + tasksPath}, env)
 
 	require.NotEqual(t, 0, res.exitCode, "stdout:\n%s\nstderr:\n%s", res.stdout, res.stderr)
 	assert.Contains(t, res.stderr, "task 1: First task failed: something broke")
@@ -130,23 +124,21 @@ tasks:
 func TestGates_TimedOutGateFailsTheTask(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	promptPath := writePrompt(t, dir, "Body.\n")
 	never := filepath.Join(dir, "never")
 
-	tasksYAML := fmt.Sprintf(`gates:
-  - cmd: sleep 30
-    timeout: 200ms
-  - cmd: touch '%s'
-tasks:
+	tasksYAML := withShared("Body.", fmt.Sprintf(`    - cmd: sleep 30
+      timeout: 200ms
+    - cmd: touch '%s'
+`, never), `tasks:
   - id: 1
     name: First task
     prompt: Do the first thing.
-`, never)
+`)
 	tasksPath := writeTasksYAML(t, dir, tasksYAML)
 	env := gralphEnv(fakeClaudeDir, nil)
 
 	start := time.Now()
-	res := runGralph(t, 20*time.Second, []string{"--skip-permissions", "--prompt=" + promptPath, "--tasks=" + tasksPath}, env)
+	res := runGralph(t, 20*time.Second, []string{"--skip-permissions", "--tasks=" + tasksPath}, env)
 
 	const gateErr = `gate "sleep 30" timed out after 200ms`
 	require.NotEqual(t, 0, res.exitCode, "stdout:\n%s\nstderr:\n%s", res.stdout, res.stderr)
@@ -157,29 +149,27 @@ tasks:
 	after := readTasksYAML(t, tasksPath)
 	assert.Equal(t, "failed", taskStates(after)[1])
 	assert.Equal(t, gateErr, taskErrors(after)[1])
-	require.NotEmpty(t, after.Gates)
-	assert.Equal(t, "200ms", after.Gates[0].Timeout, "timeout must survive the save as written")
+	require.NotEmpty(t, after.Shared.Gates)
+	assert.Equal(t, "200ms", after.Shared.Gates[0].Timeout, "timeout must survive the save as written")
 	assertNoTmpFile(t, tasksPath)
 }
 
 func TestGates_GateTimeoutFlagOverridesTheGateTimeout(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	promptPath := writePrompt(t, dir, "Body.\n")
 
-	tasksPath := writeTasksYAML(t, dir, `gates:
-  - cmd: sleep 30
-    timeout: 30s
-  - cmd: echo no-timeout
-tasks:
+	tasksPath := writeTasksYAML(t, dir, withShared("Body.", `    - cmd: sleep 30
+      timeout: 30s
+    - cmd: echo no-timeout
+`, `tasks:
   - id: 1
     name: First task
     prompt: Do the first thing.
-`)
+`))
 	env := gralphEnv(fakeClaudeDir, nil)
 
 	start := time.Now()
-	res := runGralph(t, 20*time.Second, []string{"--skip-permissions", "--prompt=" + promptPath, "--tasks=" + tasksPath, "--gate-timeout", "200ms"}, env)
+	res := runGralph(t, 20*time.Second, []string{"--skip-permissions", "--tasks=" + tasksPath, "--gate-timeout", "200ms"}, env)
 
 	const gateErr = `gate "sleep 30" timed out after 200ms`
 	require.NotEqual(t, 0, res.exitCode, "stdout:\n%s\nstderr:\n%s", res.stdout, res.stderr)
@@ -188,21 +178,20 @@ tasks:
 
 	after := readTasksYAML(t, tasksPath)
 	assert.Equal(t, gateErr, taskErrors(after)[1])
-	assert.Equal(t, []gateFixture{{Cmd: "sleep 30", Timeout: "30s"}, {Cmd: "echo no-timeout"}}, after.Gates,
+	assert.Equal(t, []gateFixture{{Cmd: "sleep 30", Timeout: "30s"}, {Cmd: "echo no-timeout"}}, after.Shared.Gates,
 		"the flag must never be written to the tasks file")
 }
 
 func TestGates_DryRunListsEffectiveTimeouts(t *testing.T) {
 	t.Parallel()
-	tasksYAML := `gates:
-  - cmd: go test ./...
-    timeout: 30s
-  - cmd: make lint
-tasks:
+	tasksYAML := withShared("Body.", `    - cmd: go test ./...
+      timeout: 30s
+    - cmd: make lint
+`, `tasks:
   - id: 1
     name: First task
     prompt: p
-`
+`)
 	tests := []struct {
 		name string
 		args []string
@@ -243,13 +232,12 @@ func TestGates_BadGateTimeoutFlagRunsNothing(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			dir := t.TempDir()
-			promptPath := writePrompt(t, dir, "Body.\n")
-			tasksYAML := "tasks:\n  - id: 1\n    name: First task\n    prompt: p\n"
+			tasksYAML := withShared("Body.", "", "tasks:\n  - id: 1\n    name: First task\n    prompt: p\n")
 			tasksPath := writeTasksYAML(t, dir, tasksYAML)
 			recordFile := filepath.Join(dir, "record.ndjson")
 			env := gralphEnv(fakeClaudeDir, map[string]string{"FAKECLAUDE_RECORD_FILE": recordFile})
 
-			args := []string{"--skip-permissions", "--prompt=" + promptPath, "--tasks=" + tasksPath, "--gate-timeout=" + tt.value}
+			args := []string{"--skip-permissions", "--tasks=" + tasksPath, "--gate-timeout=" + tt.value}
 			if tt.dryRun {
 				args = append(args, "--dry-run")
 			}
@@ -268,7 +256,7 @@ func TestGates_BadGateTimeoutFlagRunsNothing(t *testing.T) {
 	}
 }
 
-// The flag is passed alone: with --prompt and --tasks also missing, only a
+// The flag is passed alone: with --tasks also missing, only a
 // check that runs before the required-flag check reports the bad value.
 func TestGates_BadGateTimeoutFlagIsReportedBeforeAnythingElse(t *testing.T) {
 	t.Parallel()
@@ -295,20 +283,18 @@ func TestGates_BadGateTimeoutFlagIsReportedBeforeAnythingElse(t *testing.T) {
 func TestGates_MultiLineGateErrorNamesOnlyTheFirstLine(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	promptPath := writePrompt(t, dir, "Body.\n")
 
-	tasksPath := writeTasksYAML(t, dir, `gates:
-  - cmd: |
-      echo first-line
-      exit 3
-tasks:
+	tasksPath := writeTasksYAML(t, dir, withShared("Body.", `    - cmd: |
+        echo first-line
+        exit 3
+`, `tasks:
   - id: 1
     name: First task
     prompt: Do the first thing.
-`)
+`))
 	env := gralphEnv(fakeClaudeDir, nil)
 
-	res := runGralph(t, 15*time.Second, []string{"--skip-permissions", "--prompt=" + promptPath, "--tasks=" + tasksPath}, env)
+	res := runGralph(t, 15*time.Second, []string{"--skip-permissions", "--tasks=" + tasksPath}, env)
 
 	const gateErr = `gate "echo first-line" failed: exit status 3`
 	require.NotEqual(t, 0, res.exitCode, "stdout:\n%s\nstderr:\n%s", res.stdout, res.stderr)
@@ -318,7 +304,7 @@ tasks:
 func TestGates_TaskLevelGatesAreRejected(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	tasksYAML := "tasks:\n  - id: 1\n    name: First task\n    prompt: do it\n    gates:\n      - cmd: \"true\"\n"
+	tasksYAML := withShared("Body.", "", "tasks:\n  - id: 1\n    name: First task\n    prompt: do it\n    gates:\n      - cmd: \"true\"\n")
 	tasksPath := writeTasksYAML(t, dir, tasksYAML)
 
 	env := gralphEnv(fakeClaudeDir, nil)
@@ -326,7 +312,7 @@ func TestGates_TaskLevelGatesAreRejected(t *testing.T) {
 	res := runGralph(t, 20*time.Second, []string{"--dry-run", "--tasks=" + tasksPath}, env)
 
 	assert.Equal(t, 1, res.exitCode, "stdout:\n%s\nstderr:\n%s", res.stdout, res.stderr)
-	assert.Contains(t, res.stderr, "tasks[0] (id 1): gates: gates are set once for the whole file now, as a top-level gates: list; see the HOWTO")
+	assert.Contains(t, res.stderr, "tasks[0] (id 1): gates: gates are set once for the whole file, as shared.gates; see the HOWTO")
 	raw, err := os.ReadFile(tasksPath)
 	require.NoError(t, err)
 	assert.Equal(t, tasksYAML, string(raw), "a rejected file must not be rewritten")
@@ -335,25 +321,23 @@ func TestGates_TaskLevelGatesAreRejected(t *testing.T) {
 func TestGates_SharedGatesRunForEveryTask(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	promptPath := writePrompt(t, dir, "Body.\n")
 	marker := filepath.Join(dir, "gate-runs")
 
-	tasksYAML := fmt.Sprintf(`gates:
-  - cmd: echo ran >> '%s'
-tasks:
+	tasksYAML := withShared("Body.", fmt.Sprintf(`    - cmd: echo ran >> '%s'
+`, marker), `tasks:
   - id: 1
     name: First task
     prompt: Do the first thing.
   - id: 2
     name: Second task
     prompt: Do the second thing.
-`, marker)
+`)
 	tasksPath := writeTasksYAML(t, dir, tasksYAML)
 
 	recordFile := filepath.Join(dir, "record.ndjson")
 	env := gralphEnv(fakeClaudeDir, map[string]string{"FAKECLAUDE_RECORD_FILE": recordFile})
 
-	res := runGralph(t, 15*time.Second, []string{"--skip-permissions", "--prompt=" + promptPath, "--tasks=" + tasksPath}, env)
+	res := runGralph(t, 15*time.Second, []string{"--skip-permissions", "--tasks=" + tasksPath}, env)
 
 	require.Equal(t, 0, res.exitCode, "stdout:\n%s\nstderr:\n%s", res.stdout, res.stderr)
 	runs, err := os.ReadFile(marker)
@@ -369,5 +353,5 @@ tasks:
 
 	after := readTasksYAML(t, tasksPath)
 	assert.Equal(t, map[int]string{1: "completed", 2: "completed"}, taskStates(after))
-	assert.Equal(t, []gateFixture{{Cmd: "echo ran >> '" + marker + "'"}}, after.Gates, "gates must survive the save")
+	assert.Equal(t, []gateFixture{{Cmd: "echo ran >> '" + marker + "'"}}, after.Shared.Gates, "gates must survive the save")
 }

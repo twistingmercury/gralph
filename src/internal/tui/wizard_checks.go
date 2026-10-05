@@ -17,24 +17,16 @@ const (
 	timeoutCustom = "custom"
 )
 
-// checkFolder loads the folder's files with the loaders a run uses, so a bad
+// checkFolder loads the folder's task file with the loader a run uses, so a bad
 // folder is refused on the step instead of after the review screen. A path
 // given by flag wins over the folder's file. Settings change only on success.
 func (w *wizard) checkFolder(dir string) error {
-	tasksPath, promptPath := w.s.TasksPath, w.s.PromptPath
+	tasksPath := w.s.TasksPath
 	if tasksPath == "" {
 		tasksPath = filepath.Join(dir, "tasks.yaml")
 	}
 
-	if promptPath == "" {
-		promptPath = filepath.Join(dir, "prompt.md")
-	}
-
 	if err := requireIn(tasksPath, dir, "tasks.yaml"); err != nil {
-		return err
-	}
-
-	if err := requireIn(promptPath, dir, "prompt.md"); err != nil {
 		return err
 	}
 
@@ -48,13 +40,7 @@ func (w *wizard) checkFolder(dir string) error {
 		return err
 	}
 
-	prompt, err := looper.LoadPrompt(promptPath)
-	if err != nil {
-		return err
-	}
-
-	w.s.Dir, w.s.TasksPath, w.s.PromptPath = dir, tasksPath, promptPath
-	w.s.Tasks, w.s.Prompt = tl, prompt
+	w.s.Dir, w.s.TasksPath, w.s.Tasks = dir, tasksPath, tl
 	return nil
 }
 

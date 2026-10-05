@@ -22,13 +22,11 @@ import (
 // full-screen view, which is why this runs under a pty.
 func TestLogDirPty(t *testing.T) {
 	dir := t.TempDir()
-	promptPath := writePrompt(t, dir, "Body.\n")
-	tasksPath := writeTasksYAML(t, dir, `gates: []
-tasks:
+	tasksPath := writeTasksYAML(t, dir, withShared("Body.", "    []\n", `tasks:
   - id: 1
     name: First task
     prompt: Do the thing.
-`)
+`))
 	logDir := filepath.Join(dir, "logs")
 	readyFile := filepath.Join(dir, "ready")
 
@@ -41,7 +39,7 @@ tasks:
 		"FAKECLAUDE_BLOCK":      "1",
 		"FAKECLAUDE_READY_FILE": readyFile,
 	})
-	run := startPty(t, dir, env, "--skip-permissions", "-p", promptPath, "-t", tasksPath, "--log-dir="+logDir)
+	run := startPty(t, dir, env, "--skip-permissions", "-t", tasksPath, "--log-dir="+logDir)
 
 	waitForOutput(t, run.out, "quit", 10*time.Second)
 	waitForFile(t, readyFile, 10*time.Second)

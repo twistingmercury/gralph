@@ -1,12 +1,29 @@
 # Template for tasks.yaml. SKILL.md holds the field rules and task-scoping
 # guidance; this header covers only how to fill in this file.
 #
-# - Copy the task entry once per task and replace every GENERATE_* token.
-# - Put only task-specific content in `prompt`; the shared prompt.md already
-#   covers scope, cleanup, task-file rules, and the result line contract.
+# - Replace every GENERATE_* token. Copy the task entry once per task.
+# - The shared prompt below covers the project, the task-file rule, and the
+#   result line contract; put only task-specific content in each task's `prompt`.
 # - Leave `state` empty; Gralph reads an empty state as pending.
 # - Comments are not passed to the agent, so drop this header from the
 #   generated file.
+shared:
+  prompt: |
+    ## Project
+
+    - Context documents: GENERATE_RELEVANT_PROJECT_DOCUMENT_PATHS_OR_NONE
+    - Build and test: GENERATE_TOOLCHAIN_BUILD_AND_TEST_COMMANDS
+    - Commits: GENERATE_COMMIT_RULES_OR_DO_NOT_COMMIT
+    - Never edit or commit `tasks.yaml`.
+
+    ## Finish
+
+    The last non-blank line of your output must be this JSON object, on a single
+    line, with nothing else on that line:
+
+    {"state": "completed", "error": ""}
+
+    If the task did not succeed, use `"state": "failed"` and a one-line `error`.
 tasks:
   - id: 1
     name: "GENERATE_SHORT_TASK_TITLE"

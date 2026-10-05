@@ -24,14 +24,12 @@ const logDirPlainError = "error: --log-dir only works with the full-screen view\
 func runWithLogDir(t *testing.T, logDirArg func(logDir string) string, extra ...string) (res gralphResult, tasksPath, logDir, attemptLog string) {
 	t.Helper()
 	dir := t.TempDir()
-	promptPath := writePrompt(t, dir, "Body.\n")
-	tasksYAML := validTasksYAML()
-	tasksPath = writeTasksYAML(t, dir, tasksYAML)
+	tasksPath = writeTasksYAML(t, dir, validTasksYAML())
 	logDir = filepath.Join(dir, "logs")
 	attemptLog = filepath.Join(dir, "attempts.log")
 	env := gralphEnv(fakeClaudeDir, map[string]string{"FAKECLAUDE_ATTEMPT_LOG_FILE": attemptLog})
 	logArg := logDirArg(logDir)
-	args := append([]string{"--skip-permissions", "-p", promptPath, "-t", tasksPath, logArg}, extra...)
+	args := append([]string{"--skip-permissions", "-t", tasksPath, logArg}, extra...)
 
 	res = runGralph(t, 15*time.Second, args, env)
 	return res, tasksPath, logDir, attemptLog

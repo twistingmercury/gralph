@@ -1,8 +1,8 @@
 # Gralph — System Architecture
 
-> **Version**: v22
+> **Version**: v23
 > **Date**: 2026-10-05
-> **Notes**: Test Seam section now lists all pty e2e tests (wizard signals, wizard happy path, `--log-dir` record, run stop confirmation) instead of one exception.
+> **Notes**: One task file holds the shared prompt and the gates under `shared` (ADR-020): `LoadPrompt`, `--prompt`, `PromptPath`, and `prompt_file` are gone, and the tasks section describes `Shared` and the root-key checks.
 
 [Back to Overview](00_overview.md) | [Back to Project README](../../README.md)
 
@@ -17,7 +17,7 @@
 
 ## Architecture Overview
 
-Gralph is organized into four layers: CLI entry point, terminal UI, looper orchestration, and task/state management. Dependencies point one way: `cmd/main` → `internal/tui` → `internal/looper` → `internal/tasks` (`cmd/main` also calls `internal/looper` directly). Beside them sits the run log writer, `internal/runlog` (ADR-016), used only with `--log-dir`: `cmd/main` → `internal/runlog` → `internal/looper`. The looper loads both input files (prompt.md and tasks.yaml), validates preconditions, then walks each pending task, spawning a fresh Claude session with the combined prompt and reading the result to determine outcome. When the session reports `completed`, the looper runs the file's gates (ADR-013, ADR-019), one list of commands at the top of the task file, and the task is completed only if every one exits zero. With `--commit` (ADR-015), inside a git work tree, the looper then commits the task's changes under the task's name; a commit git refuses fails the task.
+Gralph is organized into four layers: CLI entry point, terminal UI, looper orchestration, and task/state management. Dependencies point one way: `cmd/main` → `internal/tui` → `internal/looper` → `internal/tasks` (`cmd/main` also calls `internal/looper` directly). Beside them sits the run log writer, `internal/runlog` (ADR-016), used only with `--log-dir`: `cmd/main` → `internal/runlog` → `internal/looper`. The looper loads the task file (tasks.yaml, which holds the shared prompt, the gates, and the tasks), validates preconditions, then walks each pending task, spawning a fresh Claude session with the combined prompt and reading the result to determine outcome. When the session reports `completed`, the looper runs the file's gates (ADR-013, ADR-019), one list of commands under `shared` in the task file, and the task is completed only if every one exits zero. With `--commit` (ADR-015), inside a git work tree, the looper then commits the task's changes under the task's name; a commit git refuses fails the task.
 
 Every session's argv is `claude --print` plus the **session flags** (ADR-014), which `cmd/main` picks once from the two permission flags and passes down as `sessionArgs`:
 
@@ -42,7 +42,6 @@ graph TB
     CLI -->|"--log-dir: Open"| RunLog["internal/runlog<br/>(Open, Record, Close)"]
     TUI -.->|each event via observe| RunLog
     RunLog -->|writes| LogFiles["log-dir/run/<br/>run.jsonl, task-N.log"]
-    Looper -->|reads| Prompt["prompt.md"]
     Looper -->|reads/writes| TaskFile["tasks.yaml"]
     Looper -->|ParseTasks| TaskParser["internal/tasks"]
     Looper -->|plain: runTaskPlain| ClaudePlain["claude --print<br/>session flags"]
@@ -64,15 +63,15 @@ graph TB
 
 **Responsibilities:**
 
-- Parse command-line flags (--dir, --prompt, --tasks, --sandbox-settings, --skip-permissions, --dry-run, --no-tui, --gate-timeout, --commit, --log-dir, --install-skill, --version)
-- Resolve `--dir` first (ADR-018): `validateDir` calls `resolveDir`, which fills an unset `--tasks` with `<folder>/tasks.yaml` and an unset `--prompt` with `<folder>/prompt.md` (not on `--dry-run`, which never reads the prompt), and writes the results back into the two flags so every later check sees resolved paths. A flag always wins over the folder's file. A file the folder lacks and no flag gives exits 1 with `--dir: no tasks.yaml in <folder>` (or `prompt.md`), in both modes
+- Parse command-line flags (--dir, --tasks, --sandbox-settings, --skip-permissions, --dry-run, --no-tui, --gate-timeout, --commit, --log-dir, --install-skill, --version)
+- Resolve `--dir` first (ADR-018): `validateDir` calls `resolveDir`, which fills an unset `--tasks` with `<folder>/tasks.yaml` and writes the result back into the flag so every later check sees the resolved path. `--tasks` always wins over the folder's file. A folder with no `tasks.yaml` and no `--tasks` exits 1 with `--dir: no tasks.yaml in <folder>`, in both modes
 - Validate `--gate-timeout` (if set) before any load or run; bad value exits 1. `validateGateTimeout` uses `tasks.ParseTimeout`, the same parser and rules as a gate's `timeout` field
 - Startup order: `--dir`, `--gate-timeout` check, mode selection, plain mode's required flags, `validateLogDir`, `validateSessionFlags`, the skill check, then the dry run, plain run, or TUI. Every startup error in `main` goes through `fatal` (`error: ` prefix, exit 1)
 - Choose the mode: plain when `--dry-run`, `--no-tui`, or stdin or stdout is not a terminal (`github.com/charmbracelet/x/term`); otherwise the TUI
 - Pick the session flags (`validateSessionFlags`/`sessionArgs`), after the `--gate-timeout` check and plain mode's required flags and before the skill check: `looper.SandboxArgs` for `--sandbox-settings`, `looper.BypassArgs` for `--skip-permissions`. Both flags together exits 1; so does neither on a real run in plain mode. In TUI mode neither passes with no session args (`sessionArgs`'s `wizard` argument), because the wizard asks; `recheck` runs `sessionArgs` again, strict, on its answer. An empty `--sandbox-settings=` counts as not passed. A dry run needs neither, but a settings file it is given is still checked. The result goes to `looper.Start` and `tui.Run`
 - Plain mode: validate required flags and `--gate-timeout`, then route to `looper.Start` (normal run) or `looper.DryRun` (validation only)
 - TUI mode (`runTUI`), split along its seams:
-  1. Load given paths with `loadGiven` (`looper.LoadPrompt`/`looper.LoadTasksReport`; a failed task prints the `PrintTasks` table and exits 1, as in plain mode) and build a `tui.Settings` from the flags and what loaded
+  1. Load the given path with `loadGiven` (`looper.LoadTasksReport`; a failed task prints the `PrintTasks` table and exits 1, as in plain mode) and build a `tui.Settings` from the flags and what loaded
   2. Wizard: when `tui.NeedsWizard` reports an open folder, permission, or gates step, run `tui.Wizard(ctx, s, given, opts...)` (taking a cancellable context first) with a `tui.Given` read from `pflag.CommandLine.Changed` (`--commit`, `--log-dir`, `--gate-timeout`), since a flag set to its zero value still answers its step. `tui.ErrCancelled` prints `error: setup cancelled`; any other error prints the `--no-tui` hint; both exit 1
   3. Apply settings: write the answers back into the flag variables, so the rest of the run reads one set of values
   4. Recheck: run `main`'s checks again in `main`'s order on those values (`checkGateTimeout` when set, `checkLogDir`, strict `sessionArgs`); the wizard's own checks are never trusted in their place
@@ -96,10 +95,10 @@ graph TB
 
 **Responsibilities:**
 
-- `Settings` (`command.go`): the run as `cmd/main` will use it, however each value was given: paths, the loaded prompt and task list, the permission choice, commit, log folder, gate timeout, and `GatesEdited`. `CommandLine` turns it into the command that starts the same run without the wizard: `-d` when there is a folder, plus `-t`/`-p` only for a file that is not the folder's fixed name, then the permission flag, `--commit`, `--log-dir`, `--gate-timeout`. A value that is not a plain shell word is single-quoted (`shellQuote`), so the line pastes into zsh or bash; gates are not on it
-- `NeedsWizard` (`wizard.go`): true when the folder (`TasksPath` or `PromptPath` empty), the permission choice (no sandbox file and no skip), or the gates (no task list, or `Gates == nil`) are open; commit, logging, and the timeout never open the wizard alone
+- `Settings` (`command.go`): the run as `cmd/main` will use it, however each value was given: the folder and task file paths, the loaded task list (shared prompt and gates included), the permission choice, commit, log folder, gate timeout, and `GatesEdited`. `CommandLine` turns it into the command that starts the same run without the wizard: `-d` when there is a folder, plus `-t` only for a file that is not the folder's fixed name, then the permission flag, `--commit`, `--log-dir`, `--gate-timeout`. A value that is not a plain shell word is single-quoted (`shellQuote`), so the line pastes into zsh or bash; gates are not on it
+- `NeedsWizard` (`wizard.go`): true when the folder (`TasksPath` empty), the permission choice (no sandbox file and no skip), or the gates (no task list, or `Shared.Gates == nil`) are open; commit, logging, and the timeout never open the wizard alone
 - `Wizard(ctx, s, given, opts...)`: takes a cancellable context first. One `huh.Form` with a group per step, each hidden by a method on the `wizard` struct (`WithHideFunc`): folder (`huh.FilePicker`, folders only, hidden entries shown, from `.`, paths shown relative to working directory when possible), permissions (`Select` starting on a `Choose one` placeholder), sandbox file (`.json` picker, shown only for the sandbox choice, also starting from `.` with relative paths), commit and logging (`Confirm`, starting on No; logging only with a folder, and its title names `<folder>/logs`), gate time limit (`Select`, Default first) and a custom limit (`Input`, shown only for that choice). `Given` hides the optional steps a flag answered, because a false or empty value cannot tell "no" from "not asked". The form is skipped when none of its steps is shown. `fold` then moves the answers held outside `Settings` into it. When the gates are open, `editGates(ctx, ...)` follows with a context; then the review loop
-- Step checks (`wizard_checks.go`), run by each field's `Validate` so an error keeps the user on the step: `checkFolder` (both fixed files exist unless a flag gave one, `looper.LoadTasks` and `looper.LoadPrompt` succeed, and `looper.ErrFailedTasks` becomes a pointer to `gralph -d <folder> --dry-run`; only a folder that passes is written into `Settings`), `checkPermission` (refuses the placeholder, so Enter without moving chooses nothing, ADR-014), `checkSandboxFile` (`looper.SandboxArgs`), `checkCommit` (on yes, `looper.OpenRepo`: clean work tree, task file ignored), `checkLogging` (on yes with commit by flag or answer, `Repo.CheckLogDir` on a stand-in run folder under `<folder>/logs`), `checkCustomTimeout` (`tasks.ParseTimeout`)
+- Step checks (`wizard_checks.go`), run by each field's `Validate` so an error keeps the user on the step: `checkFolder` (`<folder>/tasks.yaml` exists unless `-t` gave the file, `looper.LoadTasks` succeeds, and `looper.ErrFailedTasks` becomes a pointer to `gralph -d <folder> --dry-run`; only a folder that passes is written into `Settings`), `checkPermission` (refuses the placeholder, so Enter without moving chooses nothing, ADR-014), `checkSandboxFile` (`looper.SandboxArgs`), `checkCommit` (on yes, `looper.OpenRepo`: clean work tree, task file ignored), `checkLogging` (on yes with commit by flag or answer, `Repo.CheckLogDir` on a stand-in run folder under `<folder>/logs`), `checkCustomTimeout` (`tasks.ParseTimeout`)
 - The gate editor (`wizard_gates.go`): `editGates(ctx, ...)` takes a cancellable context. It loops small huh forms on a copy of the list: a picker of the gates plus `Add a gate` and `Done`; a picked gate offers Edit, Delete, Back; each gate is a command (nonblank, a multi-line field for pipes and shell syntax) and an optional timeout (`tasks.ParseTimeout`). It starts from a non-nil list, so Done on an empty one gives `gates: []`. The wizard sets `GatesEdited` when the key was absent or the list changed
 - The review screen: a `huh.Note` listing the files or folder, permissions, commit, logging, gate limit, the gates or `no gates`, and `CommandLine`, with markup escaped so paths show as typed; a `Select` of Start, Edit gates (back to the editor, then the review again), and Cancel (`ErrCancelled`)
 - Keys: every wizard form uses huh's default key map with Quit bound to ctrl+c and Esc; huh's `ErrUserAborted` becomes `ErrCancelled`. The wizard writes nothing; `cmd/main` saves an edited gate list after Start
@@ -122,11 +121,10 @@ graph TB
 
 **Responsibilities:**
 
-- Load and validate prompt file (`LoadPrompt`: must exist, readable, non-empty after trimming)
-- Load and parse task file via `tasks.ParseTasks` (`LoadTasks`)
+- Load and parse the task file via `tasks.ParseTasks` (`LoadTasks`); the shared prompt comes from `tl.Shared.Prompt`, already trimmed and known to be non-empty
 - Check preconditions (`LoadTasks` returns the list plus `ErrFailedTasks` if any task is `failed`; `LoadTasksReport` then prints the failed-task notice and table, and `Start` refuses to run)
 - Iterate pending tasks in file order (`Run` → `runLoop`)
-- Combine shared prompt with each task: stdin is `fmt.Sprintf("%s\n\n%s\n", prompt, task.String())` on both paths (the wire contract; both test suites golden-assert it)
+- Combine `shared.prompt` with each task: stdin is `fmt.Sprintf("%s\n\n%s\n", prompt, task.String())` on both paths (the wire contract; both test suites golden-assert it)
 - Run each task on one of two paths, picked by the `report` hook:
   - `report == nil` → `runTaskPlain`: spawn `claude --print <session flags>` in a process group, echo the combined prompt, tee claude's stdout, inherit stderr
   - `report != nil` → `runTaskStream`: spawn `claude --print --output-format stream-json --verbose <session flags>` in a process group, write nothing to gralph's stdout/stderr, report `TaskStarted`, `Activity` (parsed stdout events and raw stderr lines), and `TaskFinished` events, then `RunDone` from `Run`. The same path reports what the run log needs (ADR-016): `SessionFinished` (outcome and duration), `GateFinished` per gate (the gate, its timeout, its error, its duration), and `Committed` (the new hash); `TaskFinished` and `RunDone` carry a duration; a cancelled session or gate reports none of the new kinds. The looper measures the durations and knows nothing about the log
@@ -136,7 +134,7 @@ graph TB
 - Capture output, parse result line, determine the session's outcome
 - After a `completed` session, run the file's gates (`runGates`); a failing gate makes the task `failed`
 - Update task state and save atomically after every task
-- `DryRun` (always plain; `--prompt` ignored) loads and prints the task table, lists each of the file's gates once with its effective timeout and source (`printGateLimits`: `gate: <first line of cmd>: <timeout> (flag|gate|default)`), prints `sandbox settings: <path>` when given a settings file, applies the `--commit` work tree check through `repoFor` (printing `commit: <root>`; a dirty tree exits 1), and never execs claude or writes a file
+- `DryRun` (always plain) loads and prints the task table, lists each of the file's gates once with its effective timeout and source (`printGateLimits`: `gate: <first line of cmd>: <timeout> (flag|gate|default)`), prints `sandbox settings: <path>` when given a settings file, applies the `--commit` work tree check through `repoFor` (printing `commit: <root>`; a dirty tree exits 1), and never execs claude or writes a file
 - Block on first failure
 - Handle SIGINT/SIGTERM via context cancellation (kills the claude or gate process group)
 
@@ -145,7 +143,7 @@ graph TB
 | Characteristic      | Value                                                                                                                                                                                                                                                                                                                             |
 | ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Language            | Go 1.27.1+                                                                                                                                                                                                                                                                                                                        |
-| Core Function       | `Run(ctx, prompt, tl, tasksFile, gateTimeout, sessionArgs, repo, report)` runs the loop; `Start(ctx, promptFile, tasksFile, gateTimeout, sessionArgs, commit)` is plain mode's load + `Run(..., repo, nil)` where `repo` comes from `repoFor` and `gateTimeout` is the flag value as given (`""` when not passed); `DryRun(w, tasksFile, gateTimeout, sandboxFile, commit)` validates without running |
+| Core Function       | `Run(ctx, tl, tasksFile, gateTimeout, sessionArgs, repo, report)` runs the loop with `tl.Shared.Prompt` as the shared prompt; `Start(ctx, tasksFile, gateTimeout, sessionArgs, commit)` is plain mode's load + `Run(..., repo, nil)` where `repo` comes from `repoFor` and `gateTimeout` is the flag value as given (`""` when not passed); `DryRun(w, tasksFile, gateTimeout, sandboxFile, commit)` validates without running |
 | Scaling Model       | Sequential tasks; on the TUI path stdout and stderr are read concurrently, so `report` may be called from more than one goroutine                                                                                                                                                                                                 |
 | Communication       | Reads files, spawns subprocess, reads stdout (plain text or stream-json)                                                                                                                                                                                                                                                          |
 | UI dependency       | None; never imports `internal/tui` or Bubble Tea                                                                                                                                                                                                                                                                                  |
@@ -155,15 +153,16 @@ graph TB
 
 **Responsibilities:**
 
-- Unmarshal into a `yaml.Node` and reject non-core tags anywhere, before decoding; check each `tasks` element in file order (it must be a mapping)
-- Validate the optional top-level `gates` (ADR-019): a sequence (else `gates: must be a sequence`; a repeated key is `gates: duplicate key`); each element a mapping with keys `cmd` (required, nonblank string) and `timeout` (optional, a duration string like `90s` or `10m`); unknown keys are rejected (errors read `gates[<j>]: <field>: <problem>`). `TaskList.Gates` is a `*[]Gate`: nil when the key is absent (not decided yet), non-nil and empty for `gates: []` (decided: none). `SaveTasks` keeps whichever the file had, written above `tasks`. `GateList()` returns the list, empty when the key is absent. Cmd and timeout are stored unaltered
+- Unmarshal into a `yaml.Node` and reject non-core tags anywhere, before decoding. `rootNodes` then walks the top-level mapping once: `takeRootKey` files each key as `shared` or `tasks` (a repeated one is `<key>: duplicate key`), rejects a top-level `gates` with `gates: gates are set under shared now, as shared.gates; see the HOWTO`, and rejects any other key with `<key>: unknown key; a task file has only shared and tasks`; `checkRoot` requires both (`shared: is required`, `tasks: is required`), `tasks` a non-empty sequence. `shared` is checked before the tasks, so a file with an error in each reports the same one whatever its key order. Each `tasks` element is then checked in file order (it must be a mapping)
+- Validate `shared` (ADR-020) with `decodeShared`: it must be a mapping (`shared: must be a mapping`), and `prompt` and `gates` are its only keys (`shared.<key>: unknown key; shared has only prompt and gates`). `checkSharedPrompt` requires `prompt` to be a string that is not blank (`shared.prompt: is required`, `must be a string`, `must not be empty or whitespace`); `Shared.Prompt` is stored trimmed
+- Validate the optional `shared.gates` (ADR-019, ADR-020) with `decodeGates`: a sequence (else `shared.gates: must be a sequence`; a repeated key is `shared.gates: duplicate key`); each element a mapping with keys `cmd` (required, nonblank string) and `timeout` (optional, a duration string like `90s` or `10m`); unknown keys are rejected (errors read `shared.gates[<j>]: <field>: <problem>`). `Shared.Gates` is a `*[]Gate`: nil when the key is absent (not decided yet), non-nil and empty for `gates: []` (decided: none). `SaveTasks` keeps whichever the file had, writing `shared` above `tasks`, with the prompt intact. `GateList()` returns the list, empty when the key is absent. Cmd and timeout are stored unaltered
 - Validate each task element in sequence:
   - `id`: required, a positive int16 YAML integer, unique
   - `name`: required, non-empty string, unique (case-insensitive, whitespace trimmed)
   - `prompt`: required, non-empty string
   - `state`: optional string, must be exactly "pending", "completed", or "failed" (no trimming or case folding)
   - `error`: optional string, written by gralph only
-  - `gates`: not allowed on a task; fails with `tasks[<i>] (id <id>): gates: gates are set once for the whole file now, as a top-level gates: list; see the HOWTO`. Other unknown task keys are ignored and dropped on save
+  - `gates`: not allowed on a task; fails with `tasks[<i>] (id <id>): gates: gates are set once for the whole file, as shared.gates; see the HOWTO`. Other unknown task keys are ignored and dropped on save
 - Normalize `state`: empty → `pending`
 - Gate `timeout` is checked by `tasks.ParseTimeout` (a duration greater than zero), shared with the `--gate-timeout` flag
 - Error text reads `tasks[<index>] (id <id>): <field>: <problem>`; the id is omitted when missing or invalid, and file-level errors name no task
@@ -284,7 +283,7 @@ graph TB
 
 - Exists only for `--log-dir` (ADR-016); without the flag it is never called and gralph writes nothing but the task file
 - `RunDir(logDir, start)`: name the run folder, `<logDir>/<YYYYMMDDTHHMMSS>` (local start time). It is separate from `Open` so `cmd/main` can have the repository check the path (`(*Repo).CheckLogDir`) before anything is created
-- `Open(runDir, info)`: create the log directory if needed and then the run folder (folders `0700`, files `0600`; an existing run folder is an error), open the folder as an `os.Root` so every file is confined to it, create `run.jsonl`, and write the `run_started` line from `info` (version, task and prompt file paths, permission mode, sandbox settings path, gate timeout, commit)
+- `Open(runDir, info)`: create the log directory if needed and then the run folder (folders `0700`, files `0600`; an existing run folder is an error), open the folder as an `os.Root` so every file is confined to it, create `run.jsonl`, and write the `run_started` line from `info` (version, task file path, permission mode, sandbox settings path, gate timeout, commit)
 - `Record(event) error`: turn one `looper.Event` into output. `TaskStarted`, `SessionFinished`, `GateFinished`, `Committed`, `TaskFinished`, and `RunDone` each append one line to the ledger (`task_started`, `session_finished`, `gate_finished`, `committed`, `task_finished`, `run_finished`); `Activity` appends `HH:MM:SS <line>` to that task's `task-<id>.log`, opened on its `TaskStarted`
 - `run_finished` carries `completed` when the run had no error; otherwise `failed` when the last `task_finished` was a failed task, and `stopped` for any other error
 - `Record` and `Close` do nothing on a nil `*Log`, which is what a run without the flag has
@@ -322,19 +321,18 @@ sequenceDiagram
     participant Git
     participant Filesystem
 
-    User->>CLI: gralph -p prompt.md -t tasks.yaml --sandbox-settings sandbox.json
+    User->>CLI: gralph -t tasks.yaml --sandbox-settings sandbox.json
     CLI->>Looper: SandboxArgs(sandbox.json)
     Looper->>Filesystem: read sandbox.json
     Looper-->>CLI: session flags
-    CLI->>Looper: Start(ctx, prompt.md, tasks.yaml, gateTimeout, sessionArgs, commit)
-    Looper->>Filesystem: read prompt.md
+    CLI->>Looper: Start(ctx, tasks.yaml, gateTimeout, sessionArgs, commit)
     Looper->>Filesystem: read tasks.yaml
     Looper->>TaskParser: ParseTasks(yaml bytes)
     TaskParser->>TaskParser: validate all elements
-    TaskParser-->>Looper: TaskList{Tasks: [...]}
+    TaskParser-->>Looper: TaskList{Shared, Tasks: [...]}
     Looper->>Looper: check for failed tasks (none)
     loop For each task in order
-        Looper->>Looper: build prompt = shared + task
+        Looper->>Looper: build prompt = shared.prompt + task
         Looper->>Claude: exec with prompt on stdin
         Claude-->>Looper: stdout, stderr, exit code
         Looper->>Looper: parseResult(last line)
@@ -367,15 +365,15 @@ sequenceDiagram
     participant Looper
     participant Claude
 
-    User->>CLI: gralph [-d folder] [-p prompt.md] [-t tasks.yaml] [flags] (in a terminal)
-    CLI->>Looper: LoadPrompt / LoadTasksReport for the given paths
+    User->>CLI: gralph [-d folder] [-t tasks.yaml] [flags] (in a terminal)
+    CLI->>Looper: LoadTasksReport for the given path
     opt NeedsWizard: folder, permissions, or gates open
         CLI->>TUI: Wizard(settings, given)
-        TUI->>Looper: LoadTasks / LoadPrompt, SandboxArgs, OpenRepo as each step is answered
+        TUI->>Looper: LoadTasks, SandboxArgs, OpenRepo as each step is answered
         TUI-->>CLI: settings (Start), or ErrCancelled
         CLI->>CLI: recheck, then SaveTasks if the gates were edited
     end
-    CLI->>TUI: Run(ctx, prompt, tl, tasksFile, gateTimeout, sessionArgs, repo, observe)
+    CLI->>TUI: Run(ctx, tl, tasksFile, gateTimeout, sessionArgs, repo, observe)
     TUI->>Looper: Run(runCtx, ..., report) in a goroutine
     loop For each pending task
         Looper-->>TUI: TaskStarted
@@ -411,8 +409,8 @@ sequenceDiagram
     participant Looper
     participant Filesystem
 
-    User->>CLI: gralph -p prompt.md -t tasks.yaml --skip-permissions
-    CLI->>Looper: Start(ctx, prompt.md, tasks.yaml, gateTimeout, sessionArgs, commit)
+    User->>CLI: gralph -t tasks.yaml --skip-permissions
+    CLI->>Looper: Start(ctx, tasks.yaml, gateTimeout, sessionArgs, commit)
     Looper->>Filesystem: read tasks.yaml
     Looper->>Looper: ParseTasks
     Looper->>Looper: scan for failed tasks
@@ -446,7 +444,7 @@ sequenceDiagram
 
 ### Trust Boundary: Gralph Process vs. Filesystem
 
-Gralph reads the prompt and task files. Both must be treated as user-provided code: they are executed by Claude, and the file's `gates` commands are run by gralph itself through `sh -c`. Gralph does not sanitize or sandbox them; the user is responsible for not running gralph against untrusted prompts or task files.
+Gralph reads the task file. It must be treated as user-provided code: its prompts are executed by Claude, and the file's `shared.gates` commands are run by gralph itself through `sh -c`. Gralph does not sanitize or sandbox them; the user is responsible for not running gralph against untrusted prompts or task files.
 
 The sandbox settings file (`--sandbox-settings`, ADR-014) is a third input. Gralph reads it once at startup and never writes it. It must hold a JSON object; gralph forces `sandbox.enabled: true`, `sandbox.allowUnsandboxedCommands: false`, and `sandbox.failIfUnavailable: true` on top and passes every other key to Claude untouched, so the file cannot turn the sandbox off, but whatever else it opens up is opened. The sandbox limits what a session's shell commands can read, write, and reach; it does not cover gates or commits. With `--skip-permissions` there is no settings file and no limit on the session.
 
@@ -454,7 +452,6 @@ The sandbox settings file (`--sandbox-settings`, ADR-014) is a third input. Gral
 graph LR
     subgraph TrustZone["Trust Zone: Gralph User"]
         Gralph["gralph process"]
-        PromptFile["prompt.md"]
         TaskFile["tasks.yaml"]
         SettingsFile["sandbox settings file"]
         Git["git repository<br/>(with hooks)"]
@@ -462,7 +459,6 @@ graph LR
     subgraph External["Untrusted External"]
         Claude["claude --print"]
     end
-    Gralph -->|reads| PromptFile
     Gralph -->|reads/writes| TaskFile
     Gralph -->|reads once| SettingsFile
     Gralph -->|executes|Claude
@@ -475,7 +471,7 @@ graph LR
 
 | Boundary                              | What Crosses                         | Rules                                                                                                                                                                                                                                                           |
 | ------------------------------------- | ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Gralph → Filesystem (read)            | Prompt, task files                   | Files must be readable; content is not sanitized                                                                                                                                                                                                                |
+| Gralph → Filesystem (read)            | Task file                            | Files must be readable; content is not sanitized                                                                                                                                                                                                                |
 | Gralph → Filesystem (read)            | Sandbox settings file                | Read once at startup, never written; must be a JSON object; three sandbox keys forced, the rest passed through                                                                                                                                                  |
 | Gralph ← Filesystem (write)           | Task state                           | Atomic writes; temp-file + rename ensures consistency                                                                                                                                                                                                           |
 | Gralph ← Filesystem (write)           | Run log (`--log-dir`)                | Written only when asked, only in the TUI; a new folder per run, `0700`, files `0600`; holds what sessions, gates, and git printed; with `--commit`, must be git-ignored or outside the work tree; never read back, rotated, or deleted                          |

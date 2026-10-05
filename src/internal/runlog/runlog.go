@@ -33,7 +33,6 @@ const appendOnly = os.O_CREATE | os.O_WRONLY | os.O_APPEND
 type Info struct {
 	Version         string
 	TasksFile       string
-	PromptFile      string
 	Permissions     string // "sandbox" or "skip"
 	SandboxSettings string // the settings file's path, "" when not passed
 	GateTimeout     string // the --gate-timeout value, "" when not passed
@@ -115,7 +114,6 @@ func (l *Log) start(info Info) error {
 		stamp:           st,
 		Version:         info.Version,
 		TasksFile:       info.TasksFile,
-		PromptFile:      info.PromptFile,
 		Permissions:     info.Permissions,
 		SandboxSettings: info.SandboxSettings,
 		GateTimeout:     info.GateTimeout,

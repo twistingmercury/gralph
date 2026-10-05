@@ -33,7 +33,7 @@ func NeedsWizard(s Settings) bool {
 }
 
 func folderOpen(s Settings) bool {
-	return s.TasksPath == "" || s.PromptPath == ""
+	return s.TasksPath == ""
 }
 
 // permissionsOpen has no default to fall back on: a run needs one of the two
@@ -45,7 +45,7 @@ func permissionsOpen(s Settings) bool {
 // gatesOpen treats gates: [] as a decision and only an absent key as a gap, so
 // a file that chose no gates is never asked again.
 func gatesOpen(s Settings) bool {
-	return s.Tasks == nil || s.Tasks.Gates == nil
+	return s.Tasks == nil || s.Tasks.Shared.Gates == nil
 }
 
 // wizard holds the answers as the steps fill them in. The hide funcs are
@@ -286,7 +286,7 @@ func (w *wizard) editGates(ctx context.Context, opts []tea.ProgramOption) error 
 	}
 
 	tl := *w.s.Tasks
-	tl.Gates = &after
+	tl.Shared.Gates = &after
 	w.s.Tasks = &tl
 	w.s.GatesEdited = true
 	return nil
@@ -345,20 +345,16 @@ func reviewText(s Settings) string {
 	return strings.Join(lines, "\n")
 }
 
-// reviewFiles shows a -t or -p override next to the folder, because the
-// folder alone would hide that a file comes from elsewhere.
+// reviewFiles shows a -t override next to the folder, because the folder alone
+// would hide that the file comes from elsewhere.
 func reviewFiles(s Settings) []string {
 	if s.Dir == "" {
-		return []string{"Tasks: " + s.TasksPath, "Prompt: " + s.PromptPath}
+		return []string{"Tasks: " + s.TasksPath}
 	}
 
 	lines := []string{"Folder: " + s.Dir}
 	if s.TasksPath != filepath.Join(s.Dir, "tasks.yaml") {
 		lines = append(lines, "Tasks: "+s.TasksPath)
-	}
-
-	if s.PromptPath != filepath.Join(s.Dir, "prompt.md") {
-		lines = append(lines, "Prompt: "+s.PromptPath)
 	}
 
 	return lines

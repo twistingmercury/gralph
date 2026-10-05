@@ -34,28 +34,17 @@ func ignoreAndCommit(t *testing.T, dir string, patterns ...string) {
 func TestCheckFolder(t *testing.T) {
 	good := t.TempDir()
 	writeFileIn(t, good, "tasks.yaml", validTasks)
-	writeFileIn(t, good, "prompt.md", "do the work")
 	noTasks := t.TempDir()
-	writeFileIn(t, noTasks, "prompt.md", "do the work")
-	noPrompt := t.TempDir()
-	writeFileIn(t, noPrompt, "tasks.yaml", validTasks)
 	badYAML := t.TempDir()
 	writeFileIn(t, badYAML, "tasks.yaml", "tasks: [\n")
-	writeFileIn(t, badYAML, "prompt.md", "do the work")
 	failed := t.TempDir()
-	writeFileIn(t, failed, "tasks.yaml", "tasks:\n  - id: 1\n    name: First\n    prompt: do it\n    state: failed\n")
-	writeFileIn(t, failed, "prompt.md", "do the work")
-	blankPrompt := t.TempDir()
-	writeFileIn(t, blankPrompt, "tasks.yaml", validTasks)
-	writeFileIn(t, blankPrompt, "prompt.md", " \n")
+	writeFileIn(t, failed, "tasks.yaml", "shared:\n  prompt: shared prompt\ntasks:\n  - id: 1\n    name: First\n    prompt: do it\n    state: failed\n")
 
 	cases := map[string]struct{ dir, wantErr string }{
 		"good folder":   {good, ""},
 		"no tasks.yaml": {noTasks, "no tasks.yaml in " + noTasks},
-		"no prompt.md":  {noPrompt, "no prompt.md in " + noPrompt},
 		"bad yaml":      {badYAML, "failed to parse tasks yaml"},
 		"failed task":   {failed, "gralph -d " + failed + " --dry-run"},
-		"blank prompt":  {blankPrompt, "just whitespace"},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -64,11 +53,8 @@ func TestCheckFolder(t *testing.T) {
 			if tc.wantErr == "" {
 				require.NoError(t, err)
 				wantTasks := filepath.Join(tc.dir, "tasks.yaml")
-				wantPrompt := filepath.Join(tc.dir, "prompt.md")
 				assert.Equal(t, wantTasks, w.s.TasksPath)
-				assert.Equal(t, wantPrompt, w.s.PromptPath)
 				assert.Equal(t, tc.dir, w.s.Dir)
-				assert.Equal(t, "do the work", w.s.Prompt)
 				assert.NotNil(t, w.s.Tasks)
 				return
 			}
@@ -76,7 +62,6 @@ func TestCheckFolder(t *testing.T) {
 			assert.ErrorContains(t, err, tc.wantErr)
 			assert.Empty(t, w.s.Dir, "a rejected folder must leave the settings as they were")
 			assert.Empty(t, w.s.TasksPath)
-			assert.Empty(t, w.s.PromptPath)
 			assert.Nil(t, w.s.Tasks)
 		})
 	}
@@ -89,30 +74,14 @@ func TestCheckFolder_FlagFileWins(t *testing.T) {
 	// The folder's own tasks.yaml would fail to parse, so a pass proves it was
 	// never loaded.
 	writeFileIn(t, dir, "tasks.yaml", "tasks: [\n")
-	writeFileIn(t, dir, "prompt.md", "do the work")
 
 	w := newWizard(Settings{TasksPath: flagTasks}, Given{})
 	err := w.checkFolder(dir)
 	require.NoError(t, err)
-	wantPrompt := filepath.Join(dir, "prompt.md")
 	assert.Equal(t, flagTasks, w.s.TasksPath)
-	assert.Equal(t, wantPrompt, w.s.PromptPath)
 	assert.Equal(t, dir, w.s.Dir)
 	require.NotNil(t, w.s.Tasks)
 	assert.Equal(t, "First", w.s.Tasks.Tasks[0].Name)
-}
-
-func TestCheckFolder_FlagFileNeedNotBeInTheFolder(t *testing.T) {
-	flagPrompt := filepath.Join(t.TempDir(), "p.md")
-	require.NoError(t, os.WriteFile(flagPrompt, []byte("flag prompt"), 0o600))
-	dir := t.TempDir()
-	writeFileIn(t, dir, "tasks.yaml", validTasks)
-
-	w := newWizard(Settings{PromptPath: flagPrompt}, Given{})
-	err := w.checkFolder(dir)
-	require.NoError(t, err)
-	assert.Equal(t, flagPrompt, w.s.PromptPath)
-	assert.Equal(t, "flag prompt", w.s.Prompt)
 }
 
 func TestCheckPermission(t *testing.T) {

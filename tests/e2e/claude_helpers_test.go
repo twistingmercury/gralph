@@ -193,17 +193,26 @@ func writeTasksYAML(t *testing.T, dir, content string) string {
 	return path
 }
 
-// writePrompt writes a prompt.md fixture with the given body and returns its path.
-func writePrompt(t *testing.T, dir, body string) string {
-	t.Helper()
+// withShared returns a task file: a shared block holding prompt (and the
+// gates YAML, indented by the caller as "    - cmd: ...", or "" for none)
+// followed by tasksYAML, which starts with "tasks:".
+func withShared(prompt, gatesYAML, tasksYAML string) string {
+	var b strings.Builder
+	b.WriteString("shared:\n  prompt: |\n")
+	for _, line := range strings.Split(prompt, "\n") {
+		b.WriteString("    " + line + "\n")
+	}
 
-	path := filepath.Join(dir, "prompt.md")
-	require.NoError(t, os.WriteFile(path, []byte(body), 0o600))
-	return path
+	if gatesYAML != "" {
+		b.WriteString("  gates:\n" + gatesYAML)
+	}
+
+	b.WriteString(tasksYAML)
+	return b.String()
 }
 
 // expectedStdin reproduces the exact wire format runLoop sends to claude on
-// stdin: sharedPrompt is the already-trimmed prompt file content, and id,
+// stdin: sharedPrompt is the already-trimmed shared.prompt, and id,
 // name, prompt describe the task being run. It mirrors
 // fmt.Sprintf("%s\n\n%s\n", p, task.String()) in internal/looper/looper.go
 // and Task.String() in internal/tasks/task.go exactly, so tests can
@@ -307,9 +316,14 @@ type taskFixture struct {
 	Error  string `yaml:"error,omitempty"`
 }
 
+type sharedFixture struct {
+	Prompt string        `yaml:"prompt"`
+	Gates  []gateFixture `yaml:"gates,omitempty"`
+}
+
 type taskListFixture struct {
-	Gates []gateFixture `yaml:"gates,omitempty"`
-	Tasks []taskFixture `yaml:"tasks"`
+	Shared sharedFixture `yaml:"shared"`
+	Tasks  []taskFixture `yaml:"tasks"`
 }
 
 // readTasksYAML reads and parses a tasks.yaml file's current on-disk state.

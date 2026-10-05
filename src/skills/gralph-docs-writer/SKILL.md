@@ -1,23 +1,23 @@
 ---
 name: gralph-docs-writer
 description: >-
-  Use when creating or updating the tasks.yaml task list and shared prompt.md
-  that Gralph feeds to Claude Code, or when breaking a build plan or PRD into
-  Gralph loop tasks.
+  Use when creating or updating the tasks.yaml task list, with its shared
+  prompt, that Gralph feeds to Claude Code, or when breaking a build plan or
+  PRD into Gralph loop tasks.
 ---
 
 # Ralph Loop Docs
 
-Generate the two files a Gralph run needs: `tasks.yaml`, an ordered task list,
-and `prompt.md`, the shared prompt. Respect the user's destination, project
+Generate the one file a Gralph run needs: `tasks.yaml`, holding a `shared`
+block (the shared prompt) and an ordered task list. Respect the user's destination, project
 scope, verification, and commit policies.
 
-## How Gralph uses the pair
+## How Gralph uses the file
 
 Gralph works through `tasks.yaml` in file order. It skips `completed` tasks; for
-each `pending` task it combines the shared prompt with that task's
+each `pending` task it combines `shared.prompt` with that task's
 `prompt` and hands the result to a new Claude Code session. Every session starts
-with no memory of earlier tasks, so the pair must carry everything the session
+with no memory of earlier tasks, so the file must carry everything the session
 needs.
 
 Each task gets one session. There is no retry and no `--iterations` flag, so
@@ -36,8 +36,8 @@ With the `--commit` flag, Gralph also commits each task itself: once a task is
 `name` as the commit message. A failed task is not committed; its changes stay
 in the work tree for a person to sort out. For a `--commit` run the task file
 must be ignored by Git or kept outside the repository; Gralph refuses to start
-otherwise. The shared prompt file and any sandbox settings file should also be
-ignored or kept outside, so they do not show up as uncommitted changes. Without
+otherwise. A sandbox settings file should also be ignored or kept outside, so it does
+not show up as an uncommitted change. Without
 the flag, Gralph never touches Git.
 
 A `tasks.yaml` that does not match the rules below is invalid and Gralph
@@ -49,27 +49,30 @@ Inspect Git history and remote-tracking refs before editing generated
 supporting documents. Preserve published standalone documents by creating the
 next snake_case version with synchronized `Version`, `Date`, and `Notes`
 metadata. Treat committed documents as published when publication is uncertain.
-`tasks.yaml` and `prompt.md` are canonical living workflow files; update them
-in place when authorized.
+`tasks.yaml` is a canonical living workflow file; update it in place when
+authorized.
 
-## Generate the pair
+## Generate the file
 
 1. Read repository instructions and relevant design/build documents. Establish
    scope, output destination, actual document paths, and project verification
    and Git policies. Do not add automatic commits where none are required.
-2. Read [the YAML task template](templates/tasks_template.yaml) and
-   [the prompt template](templates/prompt_template.md).
+2. Read [the YAML task template](templates/tasks_template.yaml).
 3. Ask the user whether the run will use `gralph --commit`. If it will, the
-   session must not commit: the `Commits` line in `prompt.md` reads "Do not
+   session must not commit: the `Commits` line in `shared.prompt` reads "Do not
    commit. Leave your changes in the work tree.", task names are written as
    commit subjects (imperative, under about 70 characters), and no task prompt
    mentions committing.
 4. Draft the task list and show the user a summary, one line per task:
    `<id>: <name> - <one short sentence>`. Nothing else goes in the summary.
    Ask whether they approve it or want changes. Revise and show the summary
-   again until they approve. Write neither file before approval.
-5. Write `tasks.yaml` with a top-level `tasks` sequence holding at least one
-   task. Each task has a stable positive integer `id` (at most 32767), a
+   again until they approve. Write nothing before approval.
+5. Write `tasks.yaml` with two top-level keys, `shared` and `tasks`, and no
+   others: Gralph rejects any other top-level key. `shared` is a mapping with a
+   required nonblank block-scalar `prompt` (the shared prompt, step 7) and an
+   optional `gates`, which you never write; a top-level `gates` key is an error.
+   `tasks` is a sequence holding at least one task. Unknown keys inside `shared`
+   are rejected too. Each task has a stable positive integer `id` (at most 32767), a
    nonblank `name`, a nonblank block-scalar `prompt`, and an optional `state`.
    IDs are unique and independent of order; Gralph runs tasks in file order.
    Names are unique ignoring case and surrounding whitespace. `state` is
@@ -77,7 +80,7 @@ in place when authorized.
    Gralph reads as `pending`. The optional `error` field is gralph-only: never
    write it; preserve it if present when updating an existing file. Write no
    other task keys: Gralph ignores them when reading and drops them the first
-   time it saves the file. Never write a `gates:` key anywhere in the file;
+   time it saves the file. Never write `shared.gates`;
    Gralph asks for the run's gates itself the first time the file runs in the
    full-screen view.
 6. Put scope, steps, the project's own checks (tests, linters, the build),
@@ -92,27 +95,27 @@ in place when authorized.
    and hosts outside the sandbox's network list are out of reach. Give the
    session an equivalent it can run. A check it cannot run belongs only in the
    run's gates, which Gralph runs itself; tell the user to add it there.
-7. Write `prompt.md` from the prompt template. Replace every `GENERATE_*` token
+7. Write `shared.prompt` from the template. Replace every `GENERATE_*` token
    with project content and actual paths: full build/test commands and the
    project's commit policy, since the session sees only this prompt and one
    task. For a `--commit` run the `Commits` line tells the session not to
    commit; otherwise keep commits conditional on the project's authorization.
-   Keep the Rules and Finish sections as written so the pair works without
-   this skill installed. Apart from the project's own checks, keep generic
-   rules out of task prompts; they live once, in `prompt.md`.
+   Keep the `tasks.yaml` rule and the Finish section as written so the file
+   works without this skill installed. Apart from the project's own checks,
+   keep generic rules out of task prompts; they live once, in `shared.prompt`.
 8. Validate `tasks.yaml` with `gralph -t <tasks.yaml> --dry-run`: it applies
    the same rules a real run does and exits non-zero on an invalid file. If
    `gralph` is not installed, check YAML syntax and the field rules in step 5
    by hand. Also check paths, runnable verification commands, safe cleanup
    instructions, and preservation of project policies, and confirm no
-   `GENERATE_*` token remains in either file.
-9. Report both output paths and the checks performed. Do not launch the loop
+   `GENERATE_*` token remains in the file.
+9. Report the output path and the checks performed. Do not launch the loop
    merely to validate generated files.
    For a `--commit` run, also tell the user the `.gitignore` line that keeps
-   the files out of Git (the output directory, or `tasks.yaml` and `prompt.md`).
+   the files out of Git (the output directory, or `tasks.yaml`).
    For a `--commit` run this is required for `tasks.yaml`, not just advice; the
-   same for `prompt.md` and any sandbox settings file, so they do not show up
-   as uncommitted changes. Do not edit `.gitignore` yourself unless asked.
+   same for any sandbox settings file, so it does not show up as an
+   uncommitted change. Do not edit `.gitignore` yourself unless asked.
 
 ## Task scope
 

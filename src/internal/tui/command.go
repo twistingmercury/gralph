@@ -14,8 +14,6 @@ import (
 type Settings struct {
 	Dir             string
 	TasksPath       string
-	PromptPath      string
-	Prompt          string
 	Tasks           *tasks.TaskList
 	SandboxSettings string
 	SkipPermissions bool
@@ -62,12 +60,12 @@ func CommandLine(s Settings) string {
 	return strings.Join(parts, " ")
 }
 
-// appendPaths writes -d when there is a folder, plus -t or -p only for a file
-// the folder would not supply by its fixed name.
+// appendPaths writes -d when there is a folder, plus -t only when the task file
+// is not the one the folder would supply by its fixed name.
 func appendPaths(parts []string, s Settings) []string {
 	if s.Dir == "" {
-		tasksQuoted, promptQuoted := shellQuote(s.TasksPath), shellQuote(s.PromptPath)
-		return append(parts, "-t", tasksQuoted, "-p", promptQuoted)
+		tasksQuoted := shellQuote(s.TasksPath)
+		return append(parts, "-t", tasksQuoted)
 	}
 
 	dirQuoted := shellQuote(s.Dir)
@@ -76,12 +74,6 @@ func appendPaths(parts []string, s Settings) []string {
 	if s.TasksPath != defaultTasks {
 		quoted := shellQuote(s.TasksPath)
 		parts = append(parts, "-t", quoted)
-	}
-
-	defaultPrompt := filepath.Join(s.Dir, "prompt.md")
-	if s.PromptPath != defaultPrompt {
-		quoted := shellQuote(s.PromptPath)
-		parts = append(parts, "-p", quoted)
 	}
 
 	return parts

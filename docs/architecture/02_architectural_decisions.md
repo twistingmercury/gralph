@@ -1,8 +1,8 @@
 # Gralph — Architectural Decisions
 
-> **Version**: v21
+> **Version**: v24
 > **Date**: 2026-10-05
-> **Notes**: ADR-011, ADR-016, and ADR-018 consequences now say which full-screen behaviour the pty e2e tests pin (wizard happy path, `--log-dir` record of a stopped run) instead of saying the suite has no terminal.
+> **Notes**: ADR-020 accepted: the shared prompt moves into `tasks.yaml` under a `shared` block with the gates, and `-p/--prompt` and `prompt.md` are removed. ADR-002, ADR-015, ADR-016, ADR-018, and ADR-019 carry notes of what it changed. The template's shared prompt is trimmed to the project block and the result line.
 
 [Back to Overview](00_overview.md) | [Back to Project README](../../README.md)
 
@@ -45,6 +45,7 @@ Each architectural decision is recorded as an ADR with the following structure:
 | ADR-017 | Release archives, built by a workflow started by hand         | Accepted | 2026-10-02 |
 | ADR-018 | A run folder and a setup wizard                               | Accepted | 2026-10-02 |
 | ADR-019 | One gate list per task file                                   | Accepted | 2026-10-02 |
+| ADR-020 | The shared prompt and gates live in the task file             | Accepted | 2026-10-05 |
 
 ## Decisions
 
@@ -96,6 +97,8 @@ Early designs considered PR Markdown checklists, JSON, and config-file overrides
 **Decision:**
 
 Tasks are defined in a single tasks.yaml file with fields: id (positive int16), name, prompt, state (optional), and error (written by gralph only). Parsing is strict: any invalid element (bad id, empty name/prompt, unknown state, non-core YAML tags, duplicate id/name) rejects the whole file at parse time. There is no migration from other formats; tasks.yaml must be valid on first parse. No `state` means `pending`.
+
+_Changed by ADR-020:_ the file also holds the shared prompt, in a required `shared.prompt`, so there is no `prompt.md`; strict parsing gains the `shared` rules (a missing `shared` or `shared.prompt`, a blank prompt, an unknown key at the top level or under `shared`, and an old top-level `gates` are all errors).
 
 **Consequences:**
 
@@ -605,8 +608,10 @@ A new `--commit` flag makes gralph commit each task itself. Without the flag gra
 - **Output.** Once something is staged, plain mode prints `commit: <name>` to stdout, and git's output passes straight through. On the TUI path gralph reports an `Activity` event `→ commit <name>` and one `Activity` event per line of git's output. Both show only the name's first line. No new event kinds.
 - **`--dry-run`** with `--commit` runs the same startup check. In a clean repository it prints `commit: <work tree root>` before the final `<tasks path> is valid` line; a dirty tree exits 1 with the error above; outside a repository it prints the not-a-repository line.
 - **The stdin contract is unchanged.** The session is told nothing about `--commit`.
-- **The skill and its prompt template.** The template loses the "commit only after verification passes" rule. The skill asks whether the run will use `--commit`. If it will, the generated `prompt.md` tells the session not to commit and to leave its changes in the work tree; if not, it carries the project's own commit rules, as before.
-- **Keep the run's files out of git.** The task file must be ignored or outside the repository (above). The HOWTO and the skill recommend the same for the shared prompt and a sandbox settings file kept in the project: add them, or the directory that holds them, to the project's `.gitignore`. Ignored files never trip the clean-tree check and are never staged. Gralph does not edit `.gitignore` itself; when the skill writes the pair for a `--commit` run it tells the user which line to add.
+- **The skill and its prompt template.** The template loses the "commit only after verification passes" rule. The skill asks whether the run will use `--commit`. If it will, the generated `shared.prompt` tells the session not to commit and to leave its changes in the work tree; if not, it carries the project's own commit rules, as before.
+- **Keep the run's files out of git.** The task file must be ignored or outside the repository (above). The HOWTO and the skill recommend the same for the shared prompt and a sandbox settings file kept in the project: add them, or the directory that holds them, to the project's `.gitignore`. Ignored files never trip the clean-tree check and are never staged. Gralph does not edit `.gitignore` itself; when the skill writes the file for a `--commit` run it tells the user which line to add.
+
+  _Changed by ADR-020:_ there is no prompt file any more, so the task file is the only run file of the pair to ignore; the advice about the shared prompt now covers a sandbox settings file alone, plus the task file above.
 
 Alternatives not taken: always committing (breaks projects that are not repositories or do not want gralph's commits); a per-task key (grows the task file for a choice that belongs to the run); a commit message field in the task file, or one supplied by the session in its result line (the name already reads as a subject, and the second puts commit knowledge back in the session); requiring a repository when `--commit` is passed (there is simply nothing to commit there); passing git an exclude pathspec for the task file (the first implementation did: `git add` rejects a pathspec that names an ignored path, the answer can change mid-run, a symlinked task file slips past it, and a path list on `git commit` holds the index lock for the whole hook run; a plain `git add -A` plus an ignore rule has none of these problems); gralph discarding a failed task's changes (destroys the evidence, and gralph deleting work unasked); allowing a dirty tree on a rerun (mixes two attempts in one commit and needs gralph to remember which changes were leftovers).
 
@@ -621,7 +626,7 @@ _Positive:_
 
 _Negative:_
 
-- A run with `--commit` needs a clean work tree, so the prompt file, a sandbox settings file, and anything else kept in the repository must be committed or ignored first; the task file must be ignored or outside the repository
+- A run with `--commit` needs a clean work tree, so a sandbox settings file and anything else kept in the repository must be committed or ignored first; the task file must be ignored or outside the repository
 - After a failed task a person has to clean the work tree by hand before the next `--commit` run
 - A task file tracked by git cannot be used with `--commit`
 - The commit message is only the task name; there is no body describing the change
@@ -651,7 +656,7 @@ The looper already tells the view what happens through `Event`s (`TaskStarted`, 
 A new `--log-dir <path>` flag makes gralph write a record of the run. Without the flag gralph writes nothing but the task file, as before this ADR. Gralph writes the record itself from what it observes; the session is told nothing and the stdin contract is unchanged.
 
 - **Opt-in per run.** `--log-dir` takes the directory to write under. There is no default location and no task-file key. An empty `--log-dir=` counts as not passed.
-- **Full-screen view only.** With `--no-tui`, or when stdin or stdout is not a terminal, a run given `--log-dir` exits 1 with `error: --log-dir only works with the full-screen view` before anything loads or runs. `--dry-run` ignores the flag completely, as it ignores `--prompt`: no check, no output line, nothing created.
+- **Full-screen view only.** With `--no-tui`, or when stdin or stdout is not a terminal, a run given `--log-dir` exits 1 with `error: --log-dir only works with the full-screen view` before anything loads or runs. `--dry-run` ignores the flag completely: no check, no output line, nothing created.
 - **One folder per run.** At startup gralph creates `<log-dir>` if needed and, inside it, a folder named after the run's start time in local time, `YYYYMMDDTHHMMSS` (for example `20261001T140211`). Folders are created with mode `0700` and files with `0600`: the record holds Claude's text and whatever a gate or git printed. If the run folder already exists, or anything cannot be created, gralph exits 1 with an error starting `--log-dir:` after the setup screen and before the view opens or any session starts. Gralph never rotates or deletes old run folders.
 
   _Amended by ADR-018:_ the setup screen is now the setup wizard, so these errors come after it. With a run folder, the wizard offers `<folder>/logs`, used only when the user says yes; with no yes and no flag, nothing is logged. An explicit `--log-dir` wins and hides the question.
@@ -660,13 +665,15 @@ A new `--log-dir <path>` flag makes gralph write a record of the run. Without th
 
   | `event`            | Other fields                                                                                                                                                          |
   | ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-  | `run_started`      | `version`, `tasks_file`, `prompt_file`, `permissions` (`sandbox` or `skip`), `sandbox_settings` (the path, when given), `gate_timeout` (when passed), `commit` (bool) |
+  | `run_started`      | `version`, `tasks_file`, `permissions` (`sandbox` or `skip`), `sandbox_settings` (the path, when given), `gate_timeout` (when passed), `commit` (bool) |
   | `task_started`     | `task` (the id), `name`                                                                                                                                               |
   | `session_finished` | `task`, `state`, `error` (when not empty), `duration`                                                                                                                 |
   | `gate_finished`    | `task`, `cmd` (first line), `result` (`passed`, `failed`, or `timed_out`), `timeout`, `duration`                                                                      |
   | `committed`        | `task`, `hash`                                                                                                                                                        |
   | `task_finished`    | `task`, `state`, `error` (when not empty), `duration`                                                                                                                 |
   | `run_finished`     | `result` (`completed`, `failed`, or `stopped`), `error` (when not empty), `duration`                                                                                  |
+
+  _Changed by ADR-020:_ `run_started` no longer has `prompt_file`; the shared prompt is in the task file, whose path `tasks_file` already gives.
 
   Durations are strings as Go prints them (`41.2s`). A task skipped because it is already `completed` writes no line. `committed` is written only when a commit was made; nothing staged writes nothing. A stopped run writes `run_finished` with `stopped` and no `task_finished` for the task that was running, which matches the task file: that task stays as it was. `run_finished` says `failed` when the last `task_finished` was a failed task, and `stopped` when the run ended with any other error: the looper's error does not say which it was, but a stopped task never gets a `task_finished`. The ledger does not tell a stop by the user from a stop by signal. The sandbox settings file's path is recorded, never its contents.
 
@@ -761,6 +768,7 @@ A full run names every input on the command line: `gralph -p .local/feat/prompt.
 Two additions: a `-d/--dir` flag that names a run folder, and a setup wizard in the full-screen view that asks for whatever the flags and the task file leave open, then shows a review screen before the run starts.
 
 - **The run folder.** `-d/--dir <folder>` means `<folder>/tasks.yaml` and `<folder>/prompt.md`. The names are fixed; `-t` and `-p` override either file, so `-d foo -t foo/tasks-v2.yaml` works and every command line that works today keeps working. A file the folder lacks and no flag supplies is an error in plain mode, `--dir: no tasks.yaml in <folder>` (or `prompt.md`), exit 1. In plain mode `-d` is shorthand for `-t`/`-p` and changes nothing else. `-d` is resolved into the two paths before any other startup check, so the fixed order after it (`--gate-timeout`, plain mode's required flags, `--log-dir`, the session flags, the skill check) is unchanged.
+  _Changed by ADR-020:_ `-p` and `prompt.md` are gone. `-d <folder>` means `<folder>/tasks.yaml` alone, `-t` is the only override, the "no prompt.md" error is removed, and the folder step is hidden by `-d` or `-t`. The wizard has no prompt path, and its review screen lists only `Tasks:` when `-t` overrides the folder. The "later change" in the build-order note below is this.
 - **Logs in the folder.** With a folder, saying yes to logging in the wizard means `--log-dir <folder>/logs`. An explicit `--log-dir` wins. This is an opt-in made in the wizard, not a default: with no wizard answer and no flag, nothing is logged, and plain mode still refuses `--log-dir` (ADR-016).
 - **When the wizard opens.** Full-screen mode only, and only when the folder, permissions, or gates step is still open. Commit, logging, and the gate timeout ride along when it opens and never open it alone; otherwise every run without `--commit` would stop to ask. When flags and the task file answer those three, there is no wizard and no review screen; the run starts as it does today. Plain mode never opens it; a missing input there is an error, as today. A dry run is always plain mode, so it never opens the wizard either. The wizard replaces the setup screen.
 - **The steps, in order, each hidden when something already answers it:**
@@ -772,7 +780,7 @@ Two additions: a `-d/--dir` flag that names a run folder, and a setup wizard in 
   | Commit       | Yes or no, "No" pre-selected (the same as no flag)                      | `--commit`                                                    |
   | Logging      | Yes or no, "No" pre-selected; yes means `<folder>/logs`                 | `--log-dir`, or no folder                                     |
   | Gate timeout | "Default (each gate's own timeout, else 10m)", pre-selected, or a value | `--gate-timeout`                                              |
-  | Gates        | The file's shared gate list (ADR-019): add, edit, delete                | The task file has a top-level `gates:` key, even an empty one |
+  | Gates        | The file's shared gate list (ADR-019): add, edit, delete                | The task file has a `shared.gates` key, even an empty one     |
 
 - **Pickers.** The folder picker starts in the current working directory (not limited to it) and shows hidden entries, because run folders usually live under `.local/`. It selects folders only: with just one of `-t` or `-p` passed, the user still picks a folder, which supplies the other file. Chosen paths are shown relative to the working directory when possible. There is no picker for the task or prompt file. The sandbox picker selects `.json` files and also starts in the working directory with paths shown relative to it.
 - **Checked where they are asked.** Each step validates its answer with the same functions a run uses and keeps the user on the step with the error shown: the folder step loads both files (a missing file, a parse error, or a `failed` task, the last pointing at `gralph -d <folder> --dry-run` for the table); the sandbox picker loads the settings file; the commit step, on yes, opens the repository as a `--commit` run does (`looper.OpenRepo`), so a dirty work tree or a task file git does not ignore is refused there (ADR-015); the logging step refuses yes when the run commits (by flag or the commit step) and `<folder>/logs` is inside the work tree but not ignored by git (ADR-015, ADR-016); the timeout step parses the value with `time.ParseDuration` and requires it greater than zero.
@@ -835,6 +843,8 @@ Gates move from each task to one top-level list in the task file, and per-task g
 - **The skill.** gralph-docs-writer drops its gate interview and never writes a `gates:` key, so a freshly generated file opens the wizard's gates step on its first run. The prompt template gains a generic instruction to run the project's own checks (tests, linters, the build) before reporting `completed`. In its generated files, the skill guides the person writing and editing them to check each task against every run-level gate, and to add to the run's gates any check the session cannot run itself. The stale-skill check (ADR-010) makes anyone with the old skill reinstall it.
 - **The wire contract is unchanged.** Gates are still never sent to Claude.
 
+_Changed by ADR-020:_ the list sits under a `shared` block, as `shared.gates`, with the same entry rules, and errors now read `shared.gates[<j>]`. A top-level `gates:` key is an error, and the per-task error text says `shared.gates`.
+
 **Changes to earlier ADRs on acceptance:** ADR-013 is amended: its "Per-task only" rule, its example, its dry-run line, and its skill paragraph give way to this ADR; the rest of its rules apply to the file's list.
 
 Alternatives not taken: keeping per-task gates beside the shared list (two places to look for one check, and the skill only ever wrote one list); the skill writing the shared list and the wizard only reviewing it (keeps a model-written check as the default); sending the gates to Claude so the session knows what it will be checked against (breaks the wire contract and puts gralph knowledge in the session); a separate `gates.yaml` in the run folder (a second file to load, and a `--gates` flag for runs without a folder); gates held only in the wizard for one run (not repeatable).
@@ -856,11 +866,71 @@ _Negative:_
 
 ---
 
+### ADR-020: The shared prompt and gates live in the task file
+
+**Status:** Accepted
+
+**Context:**
+
+A run has needed two files: `tasks.yaml` for the list and `prompt.md` for the shared prompt. That split came from the original bash script, where a prompt was a file handed to a loop. It buys nothing now. The two files always travel together (ADR-018 gives them fixed names in one folder), the skill writes both in one pass, and every consumer has to find, load, and report two paths: the `-p` flag, `--dir`'s second file and its error, the wizard, the review screen's reproducing command, and the run log's `prompt_file`. Gates (ADR-019) already moved into the task file as a top-level key, so the run's shared settings are split three ways: a file, a key, and a flag.
+
+**Decision:**
+
+The shared prompt moves into `tasks.yaml`. It joins the gates under one top-level `shared` block, and `-p/--prompt` and `prompt.md` are removed with no compatibility path.
+
+- **Format.**
+
+  ```yaml
+  shared:
+    prompt: |
+      You are working on the widget service...
+      End your output with a JSON result line...
+    gates:
+      - cmd: go test ./...
+        timeout: 10m
+  tasks:
+    - id: 1
+      name: Add the widget repository
+      prompt: |
+        Objective: ...
+  ```
+
+- **`shared.prompt` is required.** A missing `shared` block, or a `shared.prompt` that is missing, empty, or only whitespace, fails parsing, as a missing or empty `prompt.md` did. The text is trimmed on load, as `LoadPrompt` trimmed the file.
+- **`shared.gates` is optional, with ADR-019's rules unchanged.** Absent means not decided (the wizard's gates step opens), `[]` means no gates, and a save keeps whichever the file had. The entry shape, validation, and `gates[<j>]` error names are the same; they now read `shared.gates[<j>]`.
+- **A top-level `gates` key is an error**, as is a task-level `gates`, with a message that says where gates live now. Quietly ignoring an old top-level list would leave a run with no checks, the same reason ADR-019 rejects per-task gates. Other unknown top-level keys are rejected too, so a typo in `shared` or a leftover old key cannot hide.
+- **`-p/--prompt` is removed.** Passing it is the unknown-flag error, as `--iterations` is (a pinned e2e test). `LoadPrompt`, the `promptFile` parameter of `looper.Start`, and the prompt path in the wizard's settings, summary, and reproducing command go away. `--dry-run` no longer has a prompt carve-out to describe, since no second file exists to skip.
+- **`-d <folder>` means `<folder>/tasks.yaml`.** Its "no prompt.md" error goes. `-t` stays as the override for a folder holding two task files, so `-d foo -t foo/tasks-v2.yaml` still works. In plain mode the required-flags check loses `--prompt`; the startup check order is otherwise unchanged. The wizard's folder step is hidden by `-d` or by `-t` alone, since one file now supplies everything.
+- **The run log drops `prompt_file`** from `run_started` and the ledger. `tasks_file` stays. The record's format changes, with no migration, since a log is written once per run and never read back by gralph (ADR-016).
+- **The wire contract is unchanged.** Claude gets `shared.prompt`, a blank line, then the task, then a newline. Gates and the `error` field are still never sent. The golden assertions in both suites keep their expected bytes; only their fixtures change.
+- **A cancel changes nothing on disk, and a save keeps `shared`.** `SaveTasks` writes `shared` above `tasks`, with the prompt intact, so a state update never drops or reorders it.
+- **The skill.** `prompt_template.md` is deleted. Its content moves into `tasks_template.yaml` as `shared.prompt`, trimmed to the project block (documents, build and test, commit rules, and never editing or committing `tasks.yaml`) and the result line; the template's field rules and `SKILL.md` describe one file. The stale-skill check (ADR-010) makes anyone with the old skill reinstall it. The advice to keep the shared prompt out of git (ADR-015) now covers only the task file, which it already named.
+
+**Changes to earlier ADRs on acceptance:** ADR-002's "YAML task file + shared prompt" becomes one file holding both; its strict-parsing rules gain the `shared` ones above. ADR-018's `-d` means `tasks.yaml` alone, the wizard has no prompt path, and its "later change" note is fulfilled. ADR-019's top-level `gates:` becomes `shared.gates`, and its generic "run the project's own checks" line is dropped from the prompt, since every task lists its own verification. ADR-015's two-file ignore advice shrinks to one. ADR-016's `run_started` loses `prompt_file`.
+
+Alternatives not taken: keeping `-p` as an override or fallback (keeps the two-file code path this removes, and the version is young enough for a clean break); a top-level `prompt:` key beside `gates:` (two meanings of `prompt` at different levels, and the shared settings stay scattered); `shared_prompt` as a flat key (clunkier than a block, and gates would still sit apart); an optional `shared.prompt` (a file could forget the result-line contract that ADR-005 depends on); migrating old pairs automatically (ADR-002 already says no migration, and gralph never edits files it was not asked to).
+
+**Consequences:**
+
+_Positive:_
+
+- One file is the whole run: prompt, gates, and tasks; one path to name, load, and report
+- A fixed set of shared settings has one home, with room to grow without new flags
+- The `-p` flag, the second-file errors, and the prompt halves of the wizard, review command, and log go away
+
+_Negative:_
+
+- A breaking change: every existing `tasks.yaml` and `prompt.md` pair must be merged by hand, and any top-level `gates` moved under `shared`, before it runs again
+- The shared prompt is YAML now: indentation matters, and it loses Markdown editor support
+- A save rewrites the file, which already loses comments and custom formatting (ADR-004); that now includes the shared prompt's own formatting
+- One file to ignore or keep out of git, where there were two; a prompt kept for reuse across runs must be copied between files
+
+---
+
 ### Build order and future work for ADR-018 and ADR-019
 
 ADR-019 goes first: the wizard's gates step needs the top-level list. Then `-d`, then the wizard. The breaking task-file change suggests v0.10.0; the owner picks the version at release.
 
-A later change may fold the shared prompt into `tasks.yaml` and then deprecate `-t` and `-p`. The run folder survives it: `-d` would then name a folder holding `tasks.yaml` and `logs/`, and the wizard still starts by picking it. Nothing in either ADR depends on there being two files, and the wizard has no code that serves only `-t` or `-p`: they stay in this round as overrides, which is path resolution alone.
+ADR-020 is that later change: it folds the shared prompt into `tasks.yaml`, removes `-p`, and keeps `-t` as the override for a folder holding two task files.
 
 ---
 

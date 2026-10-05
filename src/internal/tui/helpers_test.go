@@ -15,4 +15,4 @@ func writeFile(t *testing.T, name, content string) string {
 	return path
 }
 
-const validTasks = "tasks:\n  - id: 1\n    name: First\n    prompt: do it\n"
+const validTasks = "shared:\n  prompt: shared prompt\ntasks:\n  - id: 1\n    name: First\n    prompt: do it\n"

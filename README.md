@@ -10,7 +10,7 @@
 ---
 
 Gralph runs "Ralph loops" with Claude Code. You give it a list of tasks in a
-YAML file and one shared prompt. It works through the list one task at a time,
+YAML file, along with the prompt every task shares. It works through the list one task at a time,
 starting a fresh `claude --print` session for each, so every task gets a clean
 context instead of one long session that drifts.
 
@@ -49,7 +49,7 @@ fixing your `PATH`, macOS notes, and upgrading are in
 ```bash
 gralph --install-skill   # once: installs the gralph-docs-writer skill for Claude Code
 gralph -t path/to/tasks.yaml --dry-run
-gralph --prompt path/to/prompt.md --tasks path/to/tasks.yaml --sandbox-settings path/to/sandbox.json
+gralph --tasks path/to/tasks.yaml --sandbox-settings path/to/sandbox.json
 gralph -d path/to/folder --sandbox-settings path/to/sandbox.json
 ```
 
@@ -73,7 +73,7 @@ Got a question or an idea? Ask in
 
 ## How it works
 
-For each task, gralph glues the shared prompt and the task together and hands
+For each task, gralph glues `shared.prompt` and the task together and hands
 the result to a new `claude --print` session on stdin. Tasks already marked
 `completed` are skipped.
 

@@ -33,12 +33,11 @@ func TestWizardPty(t *testing.T) {
 	runDir := filepath.Join(workDir, "run")
 	require.NoError(t, os.MkdirAll(runDir, 0o755))
 
-	writePrompt(t, runDir, "Body.\n")
-	tasksPath := writeTasksYAML(t, runDir, `tasks:
+	tasksPath := writeTasksYAML(t, runDir, withShared("Body.", "", `tasks:
   - id: 1
     name: First task
     prompt: Do the thing.
-`)
+`))
 	attemptLog := filepath.Join(workDir, "attempts.log")
 
 	// The full-screen view runs claude with stream-json output, which the e2e

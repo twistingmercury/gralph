@@ -101,9 +101,9 @@ func TestRunLoop_ResultLineOutcomes(t *testing.T) {
 				t.Setenv("FAKE_CLAUDE_OUTPUT", tt.output)
 			}
 
-			tl := &tasks.TaskList{Tasks: []tasks.Task{{ID: 1, Name: "Only", Prompt: "p"}}}
+			tl := &tasks.TaskList{Shared: tasks.Shared{Prompt: "shared prompt"}, Tasks: []tasks.Task{{ID: 1, Name: "Only", Prompt: "p"}}}
 
-			err := runLoop(context.Background(), "prompt", tl, tasksPath, "", bypass, nil, nil)
+			err := runLoop(context.Background(), tl, tasksPath, "", bypass, nil, nil)
 
 			if tt.wantErrText == "" {
 				require.NoError(t, err)
@@ -132,9 +132,9 @@ func TestRunLoop_NonZeroExitUsesJSONErrorNotExitStatus(t *testing.T) {
 	t.Setenv("FAKE_CLAUDE_EXIT", "5")
 	t.Setenv("FAKE_CLAUDE_OUTPUT", "{\"state\":\"failed\",\"error\":\"boom\"}\n")
 
-	tl := &tasks.TaskList{Tasks: []tasks.Task{{ID: 1, Name: "First task", Prompt: "p"}}}
+	tl := &tasks.TaskList{Shared: tasks.Shared{Prompt: "shared prompt"}, Tasks: []tasks.Task{{ID: 1, Name: "First task", Prompt: "p"}}}
 
-	err := runLoop(context.Background(), "prompt", tl, tasksPath, "", bypass, nil, nil)
+	err := runLoop(context.Background(), tl, tasksPath, "", bypass, nil, nil)
 	require.Error(t, err)
 	assert.Equal(t, "task 1: First task failed: boom", err.Error())
 	assert.NotContains(t, err.Error(), "exit status", "the JSON error must replace the generic exit status text")
@@ -155,11 +155,11 @@ func TestRunLoop_ClearsStaleErrorWhenTaskCompletes(t *testing.T) {
 	tasksPath := filepath.Join(dir, "tasks.yaml")
 	t.Setenv("FAKE_CLAUDE_RECORD", filepath.Join(dir, "record.log"))
 
-	tl := &tasks.TaskList{Tasks: []tasks.Task{
+	tl := &tasks.TaskList{Shared: tasks.Shared{Prompt: "shared prompt"}, Tasks: []tasks.Task{
 		{ID: 1, Name: "Only", Prompt: "p", State: tasks.PendingState, Error: "exit status 1"},
 	}}
 
-	err := runLoop(context.Background(), "prompt", tl, tasksPath, "", bypass, nil, nil)
+	err := runLoop(context.Background(), tl, tasksPath, "", bypass, nil, nil)
 	require.NoError(t, err)
 
 	data, readErr := os.ReadFile(tasksPath)
@@ -183,12 +183,12 @@ func TestRunLoop_ResultLineFailureStopsLaterTasks(t *testing.T) {
 	t.Setenv("FAKE_CLAUDE_RECORD", recordPath)
 	t.Setenv("FAKE_CLAUDE_OUTPUT", "{\"state\":\"failed\",\"error\":\"tests failed\"}\n")
 
-	tl := &tasks.TaskList{Tasks: []tasks.Task{
+	tl := &tasks.TaskList{Shared: tasks.Shared{Prompt: "shared prompt"}, Tasks: []tasks.Task{
 		{ID: 1, Name: "First", Prompt: "p1"},
 		{ID: 2, Name: "Second", Prompt: "p2"},
 	}}
 
-	err := runLoop(context.Background(), "prompt", tl, tasksPath, "", bypass, nil, nil)
+	err := runLoop(context.Background(), tl, tasksPath, "", bypass, nil, nil)
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "tests failed")
 

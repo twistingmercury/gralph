@@ -11,6 +11,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+const sharedYAML = "shared:\n  prompt: shared prompt\n"
+
+// testShared is what sharedYAML parses to.
+var testShared = Shared{Prompt: "shared prompt"}
+
 func TestTaskString(t *testing.T) {
 	tests := []struct {
 		name string
@@ -47,7 +52,7 @@ func TestTaskString(t *testing.T) {
 }
 
 func TestParseTasks_Valid(t *testing.T) {
-	yml := []byte(`tasks:
+	yml := []byte(sharedYAML + `tasks:
   - id: 1
     name: First task
     prompt: |
@@ -66,7 +71,7 @@ func TestParseTasks_Valid(t *testing.T) {
 	got, err := ParseTasks(yml)
 	require.NoError(t, err)
 
-	want := TaskList{Tasks: []Task{
+	want := TaskList{Shared: testShared, Tasks: []Task{
 		{
 			ID:     1,
 			Name:   "First task",
@@ -79,7 +84,7 @@ func TestParseTasks_Valid(t *testing.T) {
 }
 
 func TestParseTasks_PreservesFileOrder(t *testing.T) {
-	yml := []byte(`tasks:
+	yml := []byte(sharedYAML + `tasks:
   - {id: 30, name: c, prompt: p, state: pending}
   - {id: 10, name: a, prompt: p, state: completed}
   - {id: 20, name: b, prompt: p, state: failed}
@@ -96,7 +101,7 @@ func TestParseTasks_PreservesFileOrder(t *testing.T) {
 }
 
 func TestParseTasks_IgnoresUnknownFields(t *testing.T) {
-	yml := []byte(`tasks:
+	yml := []byte(sharedYAML + `tasks:
   - id: 1
     name: Only task
     agent: go software engineer
@@ -107,11 +112,11 @@ func TestParseTasks_IgnoresUnknownFields(t *testing.T) {
 
 	got, err := ParseTasks(yml)
 	require.NoError(t, err)
-	assert.Equal(t, TaskList{Tasks: []Task{{ID: 1, Name: "Only task", Prompt: "Do it.", State: PendingState}}}, got)
+	assert.Equal(t, TaskList{Shared: testShared, Tasks: []Task{{ID: 1, Name: "Only task", Prompt: "Do it.", State: PendingState}}}, got)
 }
 
 func TestParseTasks_MaxID(t *testing.T) {
-	got, err := ParseTasks([]byte("tasks:\n  - {id: 32767, name: a, prompt: p, state: pending}\n"))
+	got, err := ParseTasks([]byte(sharedYAML + "tasks:\n  - {id: 32767, name: a, prompt: p, state: pending}\n"))
 	require.NoError(t, err)
 	require.Len(t, got.Tasks, 1)
 	assert.Equal(t, int16(32767), got.Tasks[0].ID)
@@ -128,7 +133,7 @@ func TestStateConstants(t *testing.T) {
 func TestParseTasks_AcceptsEveryValidState(t *testing.T) {
 	for _, state := range []string{PendingState, CompletedState, FailedState} {
 		t.Run(state, func(t *testing.T) {
-			got, err := ParseTasks([]byte("tasks:\n  - {id: 1, name: a, prompt: p, state: " + state + "}\n"))
+			got, err := ParseTasks([]byte(sharedYAML + "tasks:\n  - {id: 1, name: a, prompt: p, state: " + state + "}\n"))
 			require.NoError(t, err)
 			require.Len(t, got.Tasks, 1)
 			assert.Equal(t, state, got.Tasks[0].State)
@@ -142,8 +147,8 @@ func TestParseTasks_EmptyStateDefaultsToPending(t *testing.T) {
 		name string
 		yml  string
 	}{
-		{name: "state omitted", yml: "tasks:\n  - {id: 1, name: a, prompt: p}\n"},
-		{name: "state empty string", yml: "tasks:\n  - {id: 1, name: a, prompt: p, state: \"\"}\n"},
+		{name: "state omitted", yml: sharedYAML + "tasks:\n  - {id: 1, name: a, prompt: p}\n"},
+		{name: "state empty string", yml: sharedYAML + "tasks:\n  - {id: 1, name: a, prompt: p, state: \"\"}\n"},
 	}
 
 	for _, tt := range tests {
@@ -157,7 +162,7 @@ func TestParseTasks_EmptyStateDefaultsToPending(t *testing.T) {
 }
 
 func TestParseTasks_DefaultsOnlyTheEmptyStates(t *testing.T) {
-	yml := []byte(`tasks:
+	yml := []byte(sharedYAML + `tasks:
   - {id: 1, name: a, prompt: p, state: completed}
   - {id: 2, name: b, prompt: p}
   - {id: 3, name: c, prompt: p, state: failed}
@@ -176,7 +181,7 @@ func TestParseTasks_DefaultsOnlyTheEmptyStates(t *testing.T) {
 
 func TestParseTasks_DoesNotAlterNameOrPrompt(t *testing.T) {
 	// Trimming is for validation only; the stored values stay as written.
-	got, err := ParseTasks([]byte("tasks:\n  - {id: 1, name: \" Build \", prompt: \"  do it  \", state: pending}\n"))
+	got, err := ParseTasks([]byte(sharedYAML + "tasks:\n  - {id: 1, name: \" Build \", prompt: \"  do it  \", state: pending}\n"))
 	require.NoError(t, err)
 	require.Len(t, got.Tasks, 1)
 	assert.Equal(t, " Build ", got.Tasks[0].Name)
@@ -184,7 +189,7 @@ func TestParseTasks_DoesNotAlterNameOrPrompt(t *testing.T) {
 }
 
 func TestParseTasks_Errors(t *testing.T) {
-	const valid = "tasks:\n  - {id: 1, name: a, prompt: p}\n"
+	const valid = sharedYAML + "tasks:\n  - {id: 1, name: a, prompt: p}\n"
 
 	tests := []struct {
 		name    string
@@ -192,24 +197,25 @@ func TestParseTasks_Errors(t *testing.T) {
 		wantErr string
 	}{
 		// File-level errors never name a task index or id.
-		{name: "malformed yaml", yml: "tasks:\n  - id: 1\n   name: bad indent\n", wantErr: "failed to parse yaml tasks"},
-		{name: "empty input", yml: "", wantErr: "tasks: is required"},
-		{name: "comment-only input", yml: "# nothing\n", wantErr: "tasks: is required"},
-		{name: "missing tasks key", yml: "items:\n  - {id: 1, name: a, prompt: p}\n", wantErr: "tasks: is required"},
-		{name: "root is a sequence", yml: "- {id: 1, name: a, prompt: p}\n", wantErr: "tasks: is required"},
-		{name: "null tasks", yml: "tasks:\n", wantErr: "tasks: must be a sequence"},
-		{name: "tilde tasks", yml: "tasks: ~\n", wantErr: "tasks: must be a sequence"},
-		{name: "scalar tasks", yml: "tasks: nope\n", wantErr: "tasks: must be a sequence"},
-		{name: "mapping tasks", yml: "tasks: {id: 1, name: a, prompt: p}\n", wantErr: "tasks: must be a sequence"},
-		{name: "empty tasks sequence", yml: "tasks: []\n", wantErr: "tasks: must contain at least one task"},
+		{name: "malformed yaml", yml: sharedYAML + "tasks:\n  - id: 1\n   name: bad indent\n", wantErr: "failed to parse yaml tasks"},
+		{name: "empty input", yml: "", wantErr: "shared: is required"},
+		{name: "comment-only input", yml: "# nothing\n", wantErr: "shared: is required"},
+		{name: "missing tasks key", yml: sharedYAML, wantErr: "tasks: is required"},
+		{name: "unknown top-level key", yml: sharedYAML + "items:\n  - {id: 1, name: a, prompt: p}\n", wantErr: "items: unknown key; a task file has only shared and tasks"},
+		{name: "root is a sequence", yml: "- {id: 1, name: a, prompt: p}\n", wantErr: "shared: is required"},
+		{name: "null tasks", yml: sharedYAML + "tasks:\n", wantErr: "tasks: must be a sequence"},
+		{name: "tilde tasks", yml: sharedYAML + "tasks: ~\n", wantErr: "tasks: must be a sequence"},
+		{name: "scalar tasks", yml: sharedYAML + "tasks: nope\n", wantErr: "tasks: must be a sequence"},
+		{name: "mapping tasks", yml: sharedYAML + "tasks: {id: 1, name: a, prompt: p}\n", wantErr: "tasks: must be a sequence"},
+		{name: "empty tasks sequence", yml: sharedYAML + "tasks: []\n", wantErr: "tasks: must contain at least one task"},
 		{name: "duplicate tasks key", yml: valid + "tasks:\n  - {id: 2, name: b, prompt: p}\n", wantErr: "tasks: duplicate key"},
 
 		// Tags outside the core set are rejected anywhere in the document.
-		{name: "python object tag", yml: "tasks:\n  - {id: 1, name: !!python/object:os.system a, prompt: p}\n", wantErr: "line 2: tag !!python/object:os.system is not allowed"},
-		{name: "custom tag on an element", yml: valid + "  - !foo {id: 2, name: b, prompt: p}\n", wantErr: "line 3: tag !foo is not allowed"},
-		{name: "custom tag on an unknown key", yml: "tasks:\n  - {id: 1, name: a, prompt: p, extra: !foo x}\n", wantErr: "tag !foo is not allowed"},
+		{name: "python object tag", yml: sharedYAML + "tasks:\n  - {id: 1, name: !!python/object:os.system a, prompt: p}\n", wantErr: "line 4: tag !!python/object:os.system is not allowed"},
+		{name: "custom tag on an element", yml: valid + "  - !foo {id: 2, name: b, prompt: p}\n", wantErr: "line 5: tag !foo is not allowed"},
+		{name: "custom tag on an unknown key", yml: sharedYAML + "tasks:\n  - {id: 1, name: a, prompt: p, extra: !foo x}\n", wantErr: "tag !foo is not allowed"},
 		{name: "custom tag outside tasks", yml: valid + "meta: !foo x\n", wantErr: "tag !foo is not allowed"},
-		{name: "explicit binary tag", yml: "tasks:\n  - {id: 1, name: !!binary YQ==, prompt: p}\n", wantErr: "tag !!binary is not allowed"},
+		{name: "explicit binary tag", yml: sharedYAML + "tasks:\n  - {id: 1, name: !!binary YQ==, prompt: p}\n", wantErr: "tag !!binary is not allowed"},
 
 		// Every element must be a mapping, even among valid tasks.
 		{name: "bare dash element", yml: valid + "  -\n", wantErr: "tasks[1]: must be a mapping"},
@@ -219,54 +225,54 @@ func TestParseTasks_Errors(t *testing.T) {
 		{name: "empty sequence element", yml: valid + "  - []\n", wantErr: "tasks[1]: must be a mapping"},
 		{name: "empty string element", yml: valid + "  - \"\"\n", wantErr: "tasks[1]: must be a mapping"},
 		{name: "scalar element", yml: valid + "  - just a string\n", wantErr: "tasks[1]: must be a mapping"},
-		{name: "invalid first element before a valid one", yml: "tasks:\n  - ~\n  - {id: 1, name: a, prompt: p}\n", wantErr: "tasks[0]: must be a mapping"},
+		{name: "invalid first element before a valid one", yml: sharedYAML + "tasks:\n  - ~\n  - {id: 1, name: a, prompt: p}\n", wantErr: "tasks[0]: must be a mapping"},
 
 		// id
-		{name: "missing id", yml: "tasks:\n  - {name: a, prompt: p}\n", wantErr: "tasks[0]: id: is required"},
-		{name: "null id", yml: "tasks:\n  - {id: ~, name: a, prompt: p}\n", wantErr: "tasks[0]: id: must be a positive integer no greater than 32767"},
-		{name: "float id", yml: "tasks:\n  - {id: 1.5, name: a, prompt: p}\n", wantErr: "tasks[0]: id: must be a positive integer"},
-		{name: "quoted id", yml: "tasks:\n  - {id: \"1\", name: a, prompt: p}\n", wantErr: "tasks[0]: id: must be a positive integer"},
-		{name: "word id", yml: "tasks:\n  - {id: one, name: a, prompt: p}\n", wantErr: "tasks[0]: id: must be a positive integer"},
-		{name: "zero id", yml: "tasks:\n  - {id: 0, name: a, prompt: p}\n", wantErr: "tasks[0]: id: must be a positive integer"},
-		{name: "negative id", yml: "tasks:\n  - {id: -3, name: a, prompt: p}\n", wantErr: "tasks[0]: id: must be a positive integer"},
-		{name: "id overflows int16", yml: "tasks:\n  - {id: 32768, name: a, prompt: p}\n", wantErr: "tasks[0]: id: must be a positive integer no greater than 32767"},
+		{name: "missing id", yml: sharedYAML + "tasks:\n  - {name: a, prompt: p}\n", wantErr: "tasks[0]: id: is required"},
+		{name: "null id", yml: sharedYAML + "tasks:\n  - {id: ~, name: a, prompt: p}\n", wantErr: "tasks[0]: id: must be a positive integer no greater than 32767"},
+		{name: "float id", yml: sharedYAML + "tasks:\n  - {id: 1.5, name: a, prompt: p}\n", wantErr: "tasks[0]: id: must be a positive integer"},
+		{name: "quoted id", yml: sharedYAML + "tasks:\n  - {id: \"1\", name: a, prompt: p}\n", wantErr: "tasks[0]: id: must be a positive integer"},
+		{name: "word id", yml: sharedYAML + "tasks:\n  - {id: one, name: a, prompt: p}\n", wantErr: "tasks[0]: id: must be a positive integer"},
+		{name: "zero id", yml: sharedYAML + "tasks:\n  - {id: 0, name: a, prompt: p}\n", wantErr: "tasks[0]: id: must be a positive integer"},
+		{name: "negative id", yml: sharedYAML + "tasks:\n  - {id: -3, name: a, prompt: p}\n", wantErr: "tasks[0]: id: must be a positive integer"},
+		{name: "id overflows int16", yml: sharedYAML + "tasks:\n  - {id: 32768, name: a, prompt: p}\n", wantErr: "tasks[0]: id: must be a positive integer no greater than 32767"},
 		{name: "duplicate id", yml: valid + "  - {id: 1, name: b, prompt: p}\n", wantErr: "tasks[1] (id 1): id: duplicates tasks[0]"},
-		{name: "aliased task repeats its id", yml: "tasks:\n  - &t {id: 1, name: a, prompt: p}\n  - *t\n", wantErr: "tasks[1] (id 1): id: duplicates tasks[0]"},
-		{name: "duplicate id key within a task", yml: "tasks:\n  - {id: 1, id: 2, name: a, prompt: p}\n", wantErr: "tasks[0]: id: duplicate key"},
+		{name: "aliased task repeats its id", yml: sharedYAML + "tasks:\n  - &t {id: 1, name: a, prompt: p}\n  - *t\n", wantErr: "tasks[1] (id 1): id: duplicates tasks[0]"},
+		{name: "duplicate id key within a task", yml: sharedYAML + "tasks:\n  - {id: 1, id: 2, name: a, prompt: p}\n", wantErr: "tasks[0]: id: duplicate key"},
 
 		// name
-		{name: "missing name", yml: "tasks:\n  - {id: 1, prompt: p}\n", wantErr: "tasks[0] (id 1): name: is required"},
-		{name: "null name", yml: "tasks:\n  - {id: 1, name: ~, prompt: p}\n", wantErr: "tasks[0] (id 1): name: must be a string"},
-		{name: "integer name", yml: "tasks:\n  - {id: 1, name: 42, prompt: p}\n", wantErr: "tasks[0] (id 1): name: must be a string"},
-		{name: "sequence name", yml: "tasks:\n  - {id: 1, name: [a], prompt: p}\n", wantErr: "tasks[0] (id 1): name: must be a string"},
-		{name: "empty name", yml: "tasks:\n  - {id: 1, name: \"\", prompt: p}\n", wantErr: "tasks[0] (id 1): name: must not be empty or whitespace"},
-		{name: "whitespace-only name", yml: "tasks:\n  - {id: 1, name: \" \\t \", prompt: p}\n", wantErr: "tasks[0] (id 1): name: must not be empty or whitespace"},
+		{name: "missing name", yml: sharedYAML + "tasks:\n  - {id: 1, prompt: p}\n", wantErr: "tasks[0] (id 1): name: is required"},
+		{name: "null name", yml: sharedYAML + "tasks:\n  - {id: 1, name: ~, prompt: p}\n", wantErr: "tasks[0] (id 1): name: must be a string"},
+		{name: "integer name", yml: sharedYAML + "tasks:\n  - {id: 1, name: 42, prompt: p}\n", wantErr: "tasks[0] (id 1): name: must be a string"},
+		{name: "sequence name", yml: sharedYAML + "tasks:\n  - {id: 1, name: [a], prompt: p}\n", wantErr: "tasks[0] (id 1): name: must be a string"},
+		{name: "empty name", yml: sharedYAML + "tasks:\n  - {id: 1, name: \"\", prompt: p}\n", wantErr: "tasks[0] (id 1): name: must not be empty or whitespace"},
+		{name: "whitespace-only name", yml: sharedYAML + "tasks:\n  - {id: 1, name: \" \\t \", prompt: p}\n", wantErr: "tasks[0] (id 1): name: must not be empty or whitespace"},
 		{name: "duplicate name", yml: valid + "  - {id: 2, name: a, prompt: p}\n", wantErr: "tasks[1] (id 2): name: duplicates the name of tasks[0]"},
-		{name: "duplicate name differing only by case", yml: "tasks:\n  - {id: 1, name: Build, prompt: p}\n  - {id: 2, name: bUILD, prompt: p}\n", wantErr: "tasks[1] (id 2): name: duplicates the name of tasks[0]"},
-		{name: "duplicate name differing only by surrounding whitespace", yml: "tasks:\n  - {id: 1, name: Build, prompt: p}\n  - {id: 2, name: \"  build\\t\", prompt: p}\n", wantErr: "tasks[1] (id 2): name: duplicates the name of tasks[0]"},
+		{name: "duplicate name differing only by case", yml: sharedYAML + "tasks:\n  - {id: 1, name: Build, prompt: p}\n  - {id: 2, name: bUILD, prompt: p}\n", wantErr: "tasks[1] (id 2): name: duplicates the name of tasks[0]"},
+		{name: "duplicate name differing only by surrounding whitespace", yml: sharedYAML + "tasks:\n  - {id: 1, name: Build, prompt: p}\n  - {id: 2, name: \"  build\\t\", prompt: p}\n", wantErr: "tasks[1] (id 2): name: duplicates the name of tasks[0]"},
 
 		// prompt
-		{name: "missing prompt", yml: "tasks:\n  - {id: 1, name: a}\n", wantErr: "tasks[0] (id 1): prompt: is required"},
-		{name: "null prompt", yml: "tasks:\n  - {id: 1, name: a, prompt: ~}\n", wantErr: "tasks[0] (id 1): prompt: must be a string"},
-		{name: "mapping prompt", yml: "tasks:\n  - {id: 1, name: a, prompt: {x: y}}\n", wantErr: "tasks[0] (id 1): prompt: must be a string"},
-		{name: "empty prompt", yml: "tasks:\n  - {id: 1, name: a, prompt: \"\"}\n", wantErr: "tasks[0] (id 1): prompt: must not be empty or whitespace"},
-		{name: "whitespace-only prompt", yml: "tasks:\n  - {id: 1, name: a, prompt: \" \\t\\n \"}\n", wantErr: "tasks[0] (id 1): prompt: must not be empty or whitespace"},
+		{name: "missing prompt", yml: sharedYAML + "tasks:\n  - {id: 1, name: a}\n", wantErr: "tasks[0] (id 1): prompt: is required"},
+		{name: "null prompt", yml: sharedYAML + "tasks:\n  - {id: 1, name: a, prompt: ~}\n", wantErr: "tasks[0] (id 1): prompt: must be a string"},
+		{name: "mapping prompt", yml: sharedYAML + "tasks:\n  - {id: 1, name: a, prompt: {x: y}}\n", wantErr: "tasks[0] (id 1): prompt: must be a string"},
+		{name: "empty prompt", yml: sharedYAML + "tasks:\n  - {id: 1, name: a, prompt: \"\"}\n", wantErr: "tasks[0] (id 1): prompt: must not be empty or whitespace"},
+		{name: "whitespace-only prompt", yml: sharedYAML + "tasks:\n  - {id: 1, name: a, prompt: \" \\t\\n \"}\n", wantErr: "tasks[0] (id 1): prompt: must not be empty or whitespace"},
 		{name: "blank prompt on a later task", yml: valid + "  - {id: 2, name: b, prompt: \"  \"}\n", wantErr: "tasks[1] (id 2): prompt: must not be empty or whitespace"},
 
 		// state
-		{name: "null state", yml: "tasks:\n  - {id: 1, name: a, prompt: p, state: ~}\n", wantErr: "tasks[0] (id 1): state: must be a string"},
-		{name: "state key with no value", yml: "tasks:\n  - id: 1\n    name: a\n    prompt: p\n    state:\n", wantErr: "tasks[0] (id 1): state: must be a string"},
-		{name: "whitespace-only state", yml: "tasks:\n  - {id: 1, name: a, prompt: p, state: \" \"}\n", wantErr: `tasks[0] (id 1): state: must be pending, completed, or failed, got " "`},
-		{name: "padded state", yml: "tasks:\n  - {id: 1, name: a, prompt: p, state: \" pending \"}\n", wantErr: `state: must be pending, completed, or failed, got " pending "`},
-		{name: "capitalized state", yml: "tasks:\n  - {id: 1, name: a, prompt: p, state: Completed}\n", wantErr: `tasks[0] (id 1): state: must be pending, completed, or failed, got "Completed"`},
-		{name: "upper-case state", yml: "tasks:\n  - {id: 1, name: a, prompt: p, state: PENDING}\n", wantErr: `got "PENDING"`},
-		{name: "abandoned state", yml: "tasks:\n  - {id: 1, name: a, prompt: p, state: abandoned}\n", wantErr: `tasks[0] (id 1): state: must be pending, completed, or failed, got "abandoned"`},
-		{name: "state typo", yml: "tasks:\n  - {id: 1, name: a, prompt: p, state: complete}\n", wantErr: `got "complete"`},
-		{name: "boolean state", yml: "tasks:\n  - {id: 1, name: a, prompt: p, state: true}\n", wantErr: "tasks[0] (id 1): state: must be a string"},
+		{name: "null state", yml: sharedYAML + "tasks:\n  - {id: 1, name: a, prompt: p, state: ~}\n", wantErr: "tasks[0] (id 1): state: must be a string"},
+		{name: "state key with no value", yml: sharedYAML + "tasks:\n  - id: 1\n    name: a\n    prompt: p\n    state:\n", wantErr: "tasks[0] (id 1): state: must be a string"},
+		{name: "whitespace-only state", yml: sharedYAML + "tasks:\n  - {id: 1, name: a, prompt: p, state: \" \"}\n", wantErr: `tasks[0] (id 1): state: must be pending, completed, or failed, got " "`},
+		{name: "padded state", yml: sharedYAML + "tasks:\n  - {id: 1, name: a, prompt: p, state: \" pending \"}\n", wantErr: `state: must be pending, completed, or failed, got " pending "`},
+		{name: "capitalized state", yml: sharedYAML + "tasks:\n  - {id: 1, name: a, prompt: p, state: Completed}\n", wantErr: `tasks[0] (id 1): state: must be pending, completed, or failed, got "Completed"`},
+		{name: "upper-case state", yml: sharedYAML + "tasks:\n  - {id: 1, name: a, prompt: p, state: PENDING}\n", wantErr: `got "PENDING"`},
+		{name: "abandoned state", yml: sharedYAML + "tasks:\n  - {id: 1, name: a, prompt: p, state: abandoned}\n", wantErr: `tasks[0] (id 1): state: must be pending, completed, or failed, got "abandoned"`},
+		{name: "state typo", yml: sharedYAML + "tasks:\n  - {id: 1, name: a, prompt: p, state: complete}\n", wantErr: `got "complete"`},
+		{name: "boolean state", yml: sharedYAML + "tasks:\n  - {id: 1, name: a, prompt: p, state: true}\n", wantErr: "tasks[0] (id 1): state: must be a string"},
 		{name: "invalid state on a later task", yml: valid + "  - {id: 2, name: b, prompt: p, state: done}\n", wantErr: `tasks[1] (id 2): state: must be pending, completed, or failed, got "done"`},
 
 		// error
-		{name: "non-string error", yml: "tasks:\n  - {id: 1, name: a, prompt: p, state: failed, error: [x]}\n", wantErr: "tasks[0] (id 1): error: must be a string"},
+		{name: "non-string error", yml: sharedYAML + "tasks:\n  - {id: 1, name: a, prompt: p, state: failed, error: [x]}\n", wantErr: "tasks[0] (id 1): error: must be a string"},
 	}
 
 	for _, tt := range tests {
@@ -283,10 +289,10 @@ func TestParseTasks_Errors(t *testing.T) {
 // errors do not invent a task index or id.
 func TestParseTasks_FileErrorsNameNoTask(t *testing.T) {
 	for _, yml := range []string{
-		"tasks:\n  - id: 1\n   name: bad indent\n",
-		"tasks:\n  - {id: 1, name: !foo a, prompt: p}\n",
-		"tasks: nope\n",
-		"tasks: []\n",
+		sharedYAML + "tasks:\n  - id: 1\n   name: bad indent\n",
+		sharedYAML + "tasks:\n  - {id: 1, name: !foo a, prompt: p}\n",
+		sharedYAML + "tasks: nope\n",
+		sharedYAML + "tasks: []\n",
 	} {
 		_, err := ParseTasks([]byte(yml))
 		require.Error(t, err)
@@ -305,22 +311,22 @@ func TestParseTasks_ReportsFirstInvalidTask(t *testing.T) {
 	}{
 		{
 			name:    "earlier element wins",
-			yml:     "tasks:\n  - {id: 1, name: a, prompt: p, state: bogus}\n  - {id: 2, name: \"\", prompt: p}\n",
+			yml:     sharedYAML + "tasks:\n  - {id: 1, name: a, prompt: p, state: bogus}\n  - {id: 2, name: \"\", prompt: p}\n",
 			wantErr: "tasks[0] (id 1): state:",
 		},
 		{
 			name:    "id before name",
-			yml:     "tasks:\n  - {id: 0, name: \"\", prompt: p}\n",
+			yml:     sharedYAML + "tasks:\n  - {id: 0, name: \"\", prompt: p}\n",
 			wantErr: "tasks[0]: id:",
 		},
 		{
 			name:    "name before prompt",
-			yml:     "tasks:\n  - {id: 1, name: \"\", prompt: \"\"}\n",
+			yml:     sharedYAML + "tasks:\n  - {id: 1, name: \"\", prompt: \"\"}\n",
 			wantErr: "tasks[0] (id 1): name:",
 		},
 		{
 			name:    "prompt before state",
-			yml:     "tasks:\n  - {id: 1, name: a, prompt: \"\", state: bogus}\n",
+			yml:     sharedYAML + "tasks:\n  - {id: 1, name: a, prompt: \"\", state: bogus}\n",
 			wantErr: "tasks[0] (id 1): prompt:",
 		},
 	}
@@ -335,14 +341,14 @@ func TestParseTasks_ReportsFirstInvalidTask(t *testing.T) {
 }
 
 func TestParseTasks_AcceptsExplicitCoreTags(t *testing.T) {
-	got, err := ParseTasks([]byte("tasks:\n  - {id: !!int 1, name: !!str 42, prompt: p}\n"))
+	got, err := ParseTasks([]byte(sharedYAML + "tasks:\n  - {id: !!int 1, name: !!str 42, prompt: p}\n"))
 	require.NoError(t, err)
 	require.Len(t, got.Tasks, 1)
 	assert.Equal(t, "42", got.Tasks[0].Name)
 }
 
 func TestParseTasks_ReadsErrorField(t *testing.T) {
-	got, err := ParseTasks([]byte("tasks:\n  - {id: 1, name: a, prompt: p, state: failed, error: boom}\n"))
+	got, err := ParseTasks([]byte(sharedYAML + "tasks:\n  - {id: 1, name: a, prompt: p, state: failed, error: boom}\n"))
 	require.NoError(t, err)
 	require.Len(t, got.Tasks, 1)
 	assert.Equal(t, "boom", got.Tasks[0].Error)
@@ -352,7 +358,7 @@ func TestSaveTasks_ErrorRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "tasks.yaml")
 
-	want := TaskList{Tasks: []Task{
+	want := TaskList{Shared: testShared, Tasks: []Task{
 		{ID: 1, Name: "First", Prompt: "p", State: FailedState, Error: "exit status 1"},
 	}}
 
@@ -370,7 +376,7 @@ func TestSaveTasks_OmitsEmptyError(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "tasks.yaml")
 
-	want := TaskList{Tasks: []Task{
+	want := TaskList{Shared: testShared, Tasks: []Task{
 		{ID: 1, Name: "First", Prompt: "p", State: CompletedState, Error: ""},
 	}}
 	require.NoError(t, SaveTasks(path, want))
@@ -388,7 +394,7 @@ func TestSaveTasks_RoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "tasks.yaml")
 
-	want := TaskList{Tasks: []Task{
+	want := TaskList{Shared: testShared, Tasks: []Task{
 		{ID: 3, Name: "Third", Prompt: "Do the third thing.\nAcross\nmultiple lines.\n", State: FailedState},
 		{ID: 1, Name: "First", Prompt: "Do the first thing.", State: PendingState},
 		{ID: 2, Name: "Second", Prompt: "Do the second thing.", State: CompletedState},
@@ -412,7 +418,7 @@ func TestSaveTasks_OverwritesExistingFile(t *testing.T) {
 	path := filepath.Join(dir, "tasks.yaml")
 	require.NoError(t, os.WriteFile(path, []byte("stale contents"), 0o600))
 
-	want := TaskList{Tasks: []Task{{ID: 1, Name: "Only", Prompt: "p", State: CompletedState}}}
+	want := TaskList{Shared: testShared, Tasks: []Task{{ID: 1, Name: "Only", Prompt: "p", State: CompletedState}}}
 	require.NoError(t, SaveTasks(path, want))
 
 	data, err := os.ReadFile(path)
@@ -428,7 +434,7 @@ func TestSaveTasks_PathIsDirectory(t *testing.T) {
 	target := filepath.Join(dir, "tasks.yaml")
 	require.NoError(t, os.Mkdir(target, 0o700))
 
-	err := SaveTasks(target, TaskList{Tasks: []Task{{ID: 1, Name: "a", Prompt: "p", State: PendingState}}})
+	err := SaveTasks(target, TaskList{Shared: testShared, Tasks: []Task{{ID: 1, Name: "a", Prompt: "p", State: PendingState}}})
 	require.Error(t, err)
 
 	_, statErr := os.Stat(target + ".tmp")
@@ -446,7 +452,7 @@ func TestSaveTasks_TargetDirNotWritable(t *testing.T) {
 	t.Cleanup(func() { _ = os.Chmod(roDir, 0o700) })
 
 	path := filepath.Join(roDir, "tasks.yaml")
-	err := SaveTasks(path, TaskList{Tasks: []Task{{ID: 1, Name: "a", Prompt: "p", State: PendingState}}})
+	err := SaveTasks(path, TaskList{Shared: testShared, Tasks: []Task{{ID: 1, Name: "a", Prompt: "p", State: PendingState}}})
 	require.Error(t, err)
 
 	_, statErr := os.Stat(path + ".tmp")
@@ -460,7 +466,7 @@ func TestSaveTasks_TargetDirNotWritable(t *testing.T) {
 // runs the tests as root, which ignores directory permissions.
 func TestSaveTasks_FailedSaveLeavesExistingFileUntouched(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "tasks.yaml")
-	original := TaskList{Tasks: []Task{{ID: 1, Name: "Original", Prompt: "p", State: PendingState}}}
+	original := TaskList{Shared: testShared, Tasks: []Task{{ID: 1, Name: "Original", Prompt: "p", State: PendingState}}}
 	require.NoError(t, SaveTasks(path, original))
 
 	before, err := os.ReadFile(path)
@@ -468,7 +474,7 @@ func TestSaveTasks_FailedSaveLeavesExistingFileUntouched(t *testing.T) {
 
 	require.NoError(t, os.Mkdir(path+".tmp", 0o700))
 
-	changed := TaskList{Tasks: []Task{{ID: 1, Name: "Changed", Prompt: "p", State: FailedState, Error: "boom"}}}
+	changed := TaskList{Shared: testShared, Tasks: []Task{{ID: 1, Name: "Changed", Prompt: "p", State: FailedState, Error: "boom"}}}
 	err = SaveTasks(path, changed)
 	require.Error(t, err)
 
@@ -483,10 +489,10 @@ func TestSaveTasks_WritesTwoSpaceIndent(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "tasks.yaml")
 
 	tl := TaskList{
-		Gates: &[]Gate{
+		Shared: Shared{Prompt: "shared prompt", Gates: &[]Gate{
 			{Cmd: "go test ./...", Timeout: "90s"},
 			{Cmd: "echo one"},
-		},
+		}},
 		Tasks: []Task{
 			{ID: 1, Name: "First", Prompt: "p", State: PendingState},
 			{ID: 2, Name: "Second", Prompt: "q", State: FailedState, Error: "boom"},
@@ -497,10 +503,12 @@ func TestSaveTasks_WritesTwoSpaceIndent(t *testing.T) {
 	data, err := os.ReadFile(path)
 	require.NoError(t, err)
 
-	want := `gates:
-  - cmd: go test ./...
-    timeout: 90s
-  - cmd: echo one
+	want := `shared:
+  prompt: shared prompt
+  gates:
+    - cmd: go test ./...
+      timeout: 90s
+    - cmd: echo one
 tasks:
   - id: 1
     name: First
@@ -515,19 +523,75 @@ tasks:
 	assert.Equal(t, want, string(data), "the saved file must use a 2-space indent at every level")
 }
 
-func TestParseTasks_TopLevelGates(t *testing.T) {
-	yml := "gates:\n  - cmd: make test\n    timeout: 10m\n  - cmd: go vet ./...\ntasks:\n  - id: 1\n    name: First\n    prompt: do it\n"
+func TestParseTasks_SharedGates(t *testing.T) {
+	yml := "shared:\n  prompt: p\n  gates:\n    - cmd: make test\n      timeout: 10m\n    - cmd: go vet ./...\ntasks:\n  - id: 1\n    name: First\n    prompt: do it\n"
 	tl, err := ParseTasks([]byte(yml))
 	require.NoError(t, err)
-	require.NotNil(t, tl.Gates)
-	assert.Equal(t, []Gate{{Cmd: "make test", Timeout: "10m"}, {Cmd: "go vet ./..."}}, *tl.Gates)
+	require.NotNil(t, tl.Shared.Gates)
+	assert.Equal(t, []Gate{{Cmd: "make test", Timeout: "10m"}, {Cmd: "go vet ./..."}}, *tl.Shared.Gates)
+}
+
+func TestParseTasks_Shared(t *testing.T) {
+	tl, err := ParseTasks([]byte("shared:\n  prompt: |\n    one\n\n    two\n\ntasks:\n  - id: 1\n    name: a\n    prompt: p\n"))
+	require.NoError(t, err)
+	assert.Equal(t, "one\n\ntwo", tl.Shared.Prompt)
+	assert.Nil(t, tl.Shared.Gates)
+}
+
+func TestParseTasks_SharedErrors(t *testing.T) {
+	task := "tasks:\n  - id: 1\n    name: a\n    prompt: p\n"
+	cases := map[string]struct{ yml, want string }{
+		"no shared":         {task, "shared: is required"},
+		"shared not map":    {"shared: x\n" + task, "shared: must be a mapping"},
+		"no prompt":         {"shared:\n  gates: []\n" + task, "shared.prompt: is required"},
+		"blank prompt":      {"shared:\n  prompt: |\n    \n\n" + task, "shared.prompt: must not be empty or whitespace"},
+		"prompt not string": {"shared:\n  prompt: 5\n" + task, "shared.prompt: must be a string"},
+		"typo in shared":    {"shared:\n  prompt: p\n  promt: x\n" + task, "shared.promt: unknown key"},
+		"unknown top level": {sharedYAML + "shard: x\n" + task, "shard: unknown key"},
+		"old top gates":     {sharedYAML + "gates:\n  - cmd: x\n" + task, "gates: gates are set under shared now"},
+		"bad gate":          {sharedYAML + "  gates:\n    - cmd: ''\n" + task, "shared.gates[0]: cmd: must not be empty or whitespace"},
+		"duplicate shared":  {sharedYAML + sharedYAML + task, "shared: duplicate key"},
+		"duplicate tasks":   {sharedYAML + task + task, "tasks: duplicate key"},
+		"no tasks":          {sharedYAML, "tasks: is required"},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			got, err := ParseTasks([]byte(c.yml))
+			require.Error(t, err)
+			assert.ErrorContains(t, err, c.want)
+			assert.Equal(t, TaskList{}, got, "an error must return the zero TaskList, never a partial one")
+		})
+	}
+}
+
+func TestSaveTasks_KeepsShared(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "tasks.yaml")
+	empty := []Gate{}
+	in := TaskList{
+		Shared: Shared{Prompt: "line one\n\nline two", Gates: &empty},
+		Tasks:  []Task{{ID: 1, Name: "a", Prompt: "p", State: CompletedState}},
+	}
+	require.NoError(t, SaveTasks(path, in))
+
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.Less(t, strings.Index(string(data), "shared:"), strings.Index(string(data), "tasks:"))
+	assert.Contains(t, string(data), "gates: []")
+
+	out, err := ParseTasks(data)
+	require.NoError(t, err)
+	assert.Equal(t, in.Shared.Prompt, out.Shared.Prompt)
+	require.NotNil(t, out.Shared.Gates)
+	assert.Empty(t, out.GateList())
 }
 
 func TestParseTasks_ReadsGates(t *testing.T) {
-	yml := []byte(`gates:
-  - cmd: go test ./...
-  - cmd: |
-      test -z "$(gofmt -l .)"
+	yml := []byte(`shared:
+  prompt: p
+  gates:
+    - cmd: go test ./...
+    - cmd: |
+        test -z "$(gofmt -l .)"
 tasks:
   - id: 1
     name: First
@@ -546,12 +610,14 @@ tasks:
 }
 
 func TestParseTasks_ReadsGateTimeout(t *testing.T) {
-	yml := []byte(`gates:
-  - cmd: go test ./...
-    timeout: 10m
-  - cmd: echo hi
-  - cmd: sleep 1
-    timeout: 1h30m
+	yml := []byte(`shared:
+  prompt: p
+  gates:
+    - cmd: go test ./...
+      timeout: 10m
+    - cmd: echo hi
+    - cmd: sleep 1
+      timeout: 1h30m
 tasks:
   - id: 1
     name: Gated
@@ -567,15 +633,15 @@ tasks:
 }
 
 func TestParseTasks_GatesAbsentVersusEmpty(t *testing.T) {
-	absent, err := ParseTasks([]byte("tasks:\n  - id: 1\n    name: First\n    prompt: do it\n"))
+	absent, err := ParseTasks([]byte(sharedYAML + "tasks:\n  - id: 1\n    name: First\n    prompt: do it\n"))
 	require.NoError(t, err)
-	assert.Nil(t, absent.Gates, "no gates key means not decided")
+	assert.Nil(t, absent.Shared.Gates, "no gates key means not decided")
 	assert.Empty(t, absent.GateList())
 
-	empty, err := ParseTasks([]byte("gates: []\ntasks:\n  - id: 1\n    name: First\n    prompt: do it\n"))
+	empty, err := ParseTasks([]byte("shared:\n  prompt: p\n  gates: []\ntasks:\n  - id: 1\n    name: First\n    prompt: do it\n"))
 	require.NoError(t, err)
-	require.NotNil(t, empty.Gates, "gates: [] means decided: none")
-	assert.Empty(t, *empty.Gates)
+	require.NotNil(t, empty.Shared.Gates, "gates: [] means decided: none")
+	assert.Empty(t, *empty.Shared.Gates)
 	assert.Empty(t, empty.GateList())
 }
 
@@ -583,14 +649,14 @@ func TestParseTasks_GatesAbsentVersusEmpty(t *testing.T) {
 // dropping them would run every task with no checks at all.
 func TestParseTasks_TaskLevelGatesAreAnError(t *testing.T) {
 	cases := map[string]string{
-		"list":  "tasks:\n  - id: 3\n    name: First\n    prompt: do it\n    gates:\n      - cmd: make test\n",
-		"empty": "tasks:\n  - id: 3\n    name: First\n    prompt: do it\n    gates: []\n",
+		"list":  sharedYAML + "tasks:\n  - id: 3\n    name: First\n    prompt: do it\n    gates:\n      - cmd: make test\n",
+		"empty": sharedYAML + "tasks:\n  - id: 3\n    name: First\n    prompt: do it\n    gates: []\n",
 	}
 	for name, yml := range cases {
 		t.Run(name, func(t *testing.T) {
 			got, err := ParseTasks([]byte(yml))
 			require.Error(t, err)
-			assert.EqualError(t, err, "tasks[0] (id 3): gates: gates are set once for the whole file now, as a top-level gates: list; see the HOWTO")
+			assert.EqualError(t, err, "tasks[0] (id 3): gates: gates are set once for the whole file, as shared.gates; see the HOWTO")
 			assert.Equal(t, TaskList{}, got, "an error must return the zero TaskList, never a partial one")
 		})
 	}
@@ -607,34 +673,35 @@ func TestParseTasks_GateErrors(t *testing.T) {
 		gates   string
 		wantErr string
 	}{
-		{name: "null gates", gates: "gates:", wantErr: "gates: must be a sequence"},
-		{name: "scalar gates", gates: "gates: go test ./...", wantErr: "gates: must be a sequence"},
-		{name: "mapping gates", gates: "gates: {cmd: go test ./...}", wantErr: "gates: must be a sequence"},
-		{name: "duplicate gates key", gates: "gates: []\ngates: []", wantErr: "gates: duplicate key"},
-		{name: "string element", gates: "gates: [go test ./...]", wantErr: "gates[0]: must be a mapping"},
-		{name: "missing cmd", gates: "gates: [{}]", wantErr: "gates[0]: cmd: is required"},
-		{name: "timeout without cmd", gates: "gates:\n  - timeout: 5m", wantErr: "gates[0]: cmd: is required"},
-		{name: "misspelled key", gates: "gates: [{command: a}]", wantErr: "gates[0]: command: unknown key; a gate has only cmd and timeout"},
-		{name: "extra key", gates: "gates: [{cmd: a, retries: 3}]", wantErr: "gates[0]: retries: unknown key; a gate has only cmd and timeout"},
-		{name: "duplicate cmd", gates: "gates: [{cmd: a, cmd: b}]", wantErr: "gates[0]: cmd: duplicate key"},
-		{name: "integer cmd", gates: "gates: [{cmd: 5}]", wantErr: "gates[0]: cmd: must be a string"},
-		{name: "null cmd", gates: "gates: [{cmd: }]", wantErr: "gates[0]: cmd: must be a string"},
-		{name: "blank cmd", gates: `gates: [{cmd: "  "}]`, wantErr: "gates[0]: cmd: must not be empty or whitespace"},
-		{name: "integer timeout", gates: "gates: [{cmd: a, timeout: 30}]", wantErr: "gates[0]: timeout: must be a duration string such as 90s or 10m"},
-		{name: "null timeout", gates: "gates: [{cmd: a, timeout: }]", wantErr: "gates[0]: timeout: must be a duration string such as 90s or 10m"},
-		{name: "sequence timeout", gates: "gates: [{cmd: a, timeout: [10m]}]", wantErr: "gates[0]: timeout: must be a duration string such as 90s or 10m"},
-		{name: "unparseable timeout", gates: "gates: [{cmd: a, timeout: soon}]", wantErr: "gates[0]: timeout: must be a duration string such as 90s or 10m"},
-		{name: "unitless timeout", gates: `gates: [{cmd: a, timeout: "30"}]`, wantErr: "gates[0]: timeout: must be a duration string such as 90s or 10m"},
-		{name: "blank timeout", gates: `gates: [{cmd: a, timeout: "  "}]`, wantErr: "gates[0]: timeout: must be a duration string such as 90s or 10m"},
-		{name: "zero timeout", gates: "gates: [{cmd: a, timeout: 0s}]", wantErr: "gates[0]: timeout: must be greater than zero"},
-		{name: "negative timeout", gates: "gates: [{cmd: a, timeout: -5m}]", wantErr: "gates[0]: timeout: must be greater than zero"},
-		{name: "duplicate timeout", gates: "gates: [{cmd: a, timeout: 1s, timeout: 2s}]", wantErr: "gates[0]: timeout: duplicate key"},
-		{name: "second gate invalid", gates: "gates: [{cmd: a}, {cmd: ''}]", wantErr: "gates[1]: cmd: must not be empty or whitespace"},
+		{name: "null gates", gates: "gates:", wantErr: "shared.gates: must be a sequence"},
+		{name: "scalar gates", gates: "gates: go test ./...", wantErr: "shared.gates: must be a sequence"},
+		{name: "mapping gates", gates: "gates: {cmd: go test ./...}", wantErr: "shared.gates: must be a sequence"},
+		{name: "duplicate gates key", gates: "gates: []\ngates: []", wantErr: "shared: gates: duplicate key"},
+		{name: "string element", gates: "gates: [go test ./...]", wantErr: "shared.gates[0]: must be a mapping"},
+		{name: "missing cmd", gates: "gates: [{}]", wantErr: "shared.gates[0]: cmd: is required"},
+		{name: "timeout without cmd", gates: "gates:\n  - timeout: 5m", wantErr: "shared.gates[0]: cmd: is required"},
+		{name: "misspelled key", gates: "gates: [{command: a}]", wantErr: "shared.gates[0]: command: unknown key; a gate has only cmd and timeout"},
+		{name: "extra key", gates: "gates: [{cmd: a, retries: 3}]", wantErr: "shared.gates[0]: retries: unknown key; a gate has only cmd and timeout"},
+		{name: "duplicate cmd", gates: "gates: [{cmd: a, cmd: b}]", wantErr: "shared.gates[0]: cmd: duplicate key"},
+		{name: "integer cmd", gates: "gates: [{cmd: 5}]", wantErr: "shared.gates[0]: cmd: must be a string"},
+		{name: "null cmd", gates: "gates: [{cmd: }]", wantErr: "shared.gates[0]: cmd: must be a string"},
+		{name: "blank cmd", gates: `gates: [{cmd: "  "}]`, wantErr: "shared.gates[0]: cmd: must not be empty or whitespace"},
+		{name: "integer timeout", gates: "gates: [{cmd: a, timeout: 30}]", wantErr: "shared.gates[0]: timeout: must be a duration string such as 90s or 10m"},
+		{name: "null timeout", gates: "gates: [{cmd: a, timeout: }]", wantErr: "shared.gates[0]: timeout: must be a duration string such as 90s or 10m"},
+		{name: "sequence timeout", gates: "gates: [{cmd: a, timeout: [10m]}]", wantErr: "shared.gates[0]: timeout: must be a duration string such as 90s or 10m"},
+		{name: "unparseable timeout", gates: "gates: [{cmd: a, timeout: soon}]", wantErr: "shared.gates[0]: timeout: must be a duration string such as 90s or 10m"},
+		{name: "unitless timeout", gates: `gates: [{cmd: a, timeout: "30"}]`, wantErr: "shared.gates[0]: timeout: must be a duration string such as 90s or 10m"},
+		{name: "blank timeout", gates: `gates: [{cmd: a, timeout: "  "}]`, wantErr: "shared.gates[0]: timeout: must be a duration string such as 90s or 10m"},
+		{name: "zero timeout", gates: "gates: [{cmd: a, timeout: 0s}]", wantErr: "shared.gates[0]: timeout: must be greater than zero"},
+		{name: "negative timeout", gates: "gates: [{cmd: a, timeout: -5m}]", wantErr: "shared.gates[0]: timeout: must be greater than zero"},
+		{name: "duplicate timeout", gates: "gates: [{cmd: a, timeout: 1s, timeout: 2s}]", wantErr: "shared.gates[0]: timeout: duplicate key"},
+		{name: "second gate invalid", gates: "gates: [{cmd: a}, {cmd: ''}]", wantErr: "shared.gates[1]: cmd: must not be empty or whitespace"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			yml := tt.gates + "\ntasks:\n  - id: 1\n    name: a\n    prompt: p\n"
+			nested := "  " + strings.ReplaceAll(tt.gates, "\n", "\n  ")
+			yml := "shared:\n  prompt: p\n" + nested + "\ntasks:\n  - id: 1\n    name: a\n    prompt: p\n"
 			got, err := ParseTasks([]byte(yml))
 			require.Error(t, err)
 			assert.EqualError(t, err, tt.wantErr)
@@ -646,16 +713,16 @@ func TestParseTasks_GateErrors(t *testing.T) {
 // Gates are checked before the tasks so a file with an error in each always
 // reports the same one, whatever order the keys are in.
 func TestParseTasks_GateErrorReportedBeforeTaskError(t *testing.T) {
-	yml := "tasks:\n  - id: 1\n    prompt: p\ngates: [{}]\n"
+	yml := "shared:\n  prompt: p\n  gates: [{}]\ntasks:\n  - id: 1\n    prompt: p\n"
 	_, err := ParseTasks([]byte(yml))
-	assert.EqualError(t, err, "gates[0]: cmd: is required")
+	assert.EqualError(t, err, "shared.gates[0]: cmd: is required")
 }
 
 func TestSaveTasks_KeepsGatesAbsentEmptyOrSet(t *testing.T) {
 	cases := map[string]string{
-		"absent": "tasks:\n  - id: 1\n    name: First\n    prompt: do it\n    state: pending\n",
-		"empty":  "gates: []\ntasks:\n  - id: 1\n    name: First\n    prompt: do it\n    state: pending\n",
-		"set":    "gates:\n  - cmd: make test\n    timeout: 10m\ntasks:\n  - id: 1\n    name: First\n    prompt: do it\n    state: pending\n",
+		"absent": "shared:\n  prompt: p\ntasks:\n  - id: 1\n    name: First\n    prompt: do it\n    state: pending\n",
+		"empty":  "shared:\n  prompt: p\n  gates: []\ntasks:\n  - id: 1\n    name: First\n    prompt: do it\n    state: pending\n",
+		"set":    "shared:\n  prompt: p\n  gates:\n    - cmd: make test\n      timeout: 10m\ntasks:\n  - id: 1\n    name: First\n    prompt: do it\n    state: pending\n",
 	}
 	for name, yml := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -674,10 +741,10 @@ func TestSaveTasks_GatesRoundTrip(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "tasks.yaml")
 
 	want := TaskList{
-		Gates: &[]Gate{
+		Shared: Shared{Prompt: "shared prompt", Gates: &[]Gate{
 			{Cmd: "go test ./..."},
 			{Cmd: "echo one\necho \"two\"\n"},
-		},
+		}},
 		Tasks: []Task{{ID: 1, Name: "First", Prompt: "p", State: PendingState}},
 	}
 	require.NoError(t, SaveTasks(path, want))
@@ -693,7 +760,7 @@ func TestSaveTasks_GatesRoundTrip(t *testing.T) {
 func TestSaveTasks_OmitsAbsentGates(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "tasks.yaml")
 
-	require.NoError(t, SaveTasks(path, TaskList{Tasks: []Task{{ID: 1, Name: "First", Prompt: "p", State: PendingState}}}))
+	require.NoError(t, SaveTasks(path, TaskList{Shared: testShared, Tasks: []Task{{ID: 1, Name: "First", Prompt: "p", State: PendingState}}}))
 
 	data, err := os.ReadFile(path)
 	require.NoError(t, err)
@@ -704,10 +771,10 @@ func TestSaveTasks_GateTimeoutKeptAsWrittenAndOmittedWhenAbsent(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "tasks.yaml")
 
 	want := TaskList{
-		Gates: &[]Gate{
+		Shared: Shared{Prompt: "shared prompt", Gates: &[]Gate{
 			{Cmd: "go test ./...", Timeout: "90s"},
 			{Cmd: "echo one"},
-		},
+		}},
 		Tasks: []Task{{ID: 1, Name: "First", Prompt: "p", State: PendingState}},
 	}
 	require.NoError(t, SaveTasks(path, want))

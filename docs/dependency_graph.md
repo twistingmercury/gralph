@@ -38,13 +38,13 @@ graph TD
 
 | Edge                     | What's used                                                                                                                                  |
 | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| `main → looper`          | `Start`, `DryRun`, `LoadPrompt`, `LoadTasksReport`, `ErrFailedTasks`, `OpenRepo`/`Repo` (and its `CheckLogDir`), `SandboxArgs`, `BypassArgs` |
+| `main → looper`          | `Start`, `DryRun`, `LoadTasksReport`, `ErrFailedTasks`, `OpenRepo`/`Repo` (and its `CheckLogDir`), `SandboxArgs`, `BypassArgs` |
 | `main → tui`             | `NeedsWizard`, `Wizard`, `ErrCancelled`, `Settings`, `Given`, `Run`                                                                          |
 | `main → runlog`          | `Info`, `RunDir`, `Open`, `Log` (`Record`, `Close`)                                                                                          |
 | `main → tasks`           | `ParseTimeout`, `TaskList`, `SaveTasks`                                                                                                      |
 | `main → skillinstall`    | `Install`, `Check`                                                                                                                           |
 | `main → version`         | `Print`, `Version`                                                                                                                           |
-| `tui → looper`           | `Run`, `Event` and the kinds the view shows (`TaskStarted`, `Activity`, `TaskFinished`, `RunDone`), `Repo`; for the wizard's checks `LoadTasks`, `LoadPrompt`, `ErrFailedTasks`, `SandboxArgs`, `OpenRepo` (and `CheckLogDir`) |
+| `tui → looper`           | `Run`, `Event` and the kinds the view shows (`TaskStarted`, `Activity`, `TaskFinished`, `RunDone`), `Repo`; for the wizard's checks `LoadTasks`, `ErrFailedTasks`, `SandboxArgs`, `OpenRepo` (and `CheckLogDir`) |
 | `tui → tasks`            | `Task`, `TaskList` (and `GateList`), `Gate`, `ParseTimeout`, the three state constants                                                       |
 | `looper → tasks`         | `Task`, `TaskList`, `Gate`, `ParseTasks`, `SaveTasks`, `ParseTimeout`, state constants                                                       |
 | `runlog → looper`        | `Event` and all seven of its kinds                                                                                                           |

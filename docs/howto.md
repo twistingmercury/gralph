@@ -19,7 +19,7 @@
 ## What gralph is
 
 Gralph runs "Ralph loops" with Claude Code. You give it a list of tasks in a
-YAML file and one shared prompt. It works through the list one task at a time,
+YAML file, along with the prompt every task shares. It works through the list one task at a time,
 starting a fresh `claude --print` session for each, so every task gets a clean
 context instead of one long session that drifts.
 
@@ -161,12 +161,12 @@ Here's the quick path from zero to a working run:
 
 1. **Install the skill.** Run `gralph --install-skill` once. It replaces
    `~/.claude/skills/gralph-docs-writer/` with the copy that matches your
-   gralph binary. The skill helps you write task files and prompts. You can
-   also write them by hand.
+   gralph binary. The skill helps you write task files. You can also write
+   them by hand.
 
-2. **Get a task file and shared prompt.** The skill generates both from a
-   plan. Or write them yourself (see [The task file](#the-task-file) for the
-   format).
+2. **Get a task file.** The skill generates one from a plan, shared prompt
+   included. Or write it yourself (see [The task file](#the-task-file) for
+   the format).
 
 3. **Write a sandbox settings file.** This tells Claude's sandbox what your
    project needs to access (see [Writing a settings file](#writing-a-settings-file)).
@@ -182,15 +182,15 @@ Here's the quick path from zero to a working run:
 5. **Run it.** Once validation passes:
 
    ```bash
-   gralph -p prompt.md -t tasks.yaml --sandbox-settings sandbox.json
+   gralph -t tasks.yaml --sandbox-settings sandbox.json
    ```
 
    Or just run `gralph` in a terminal: a setup wizard asks for the folder
-   holding the two files, the permission choice, and the gates, then shows a
+   holding the task file, the permission choice, and the gates, then shows a
    command line that starts the same run without it (see
    [Setup wizard](#setup-wizard)).
 
-   A task file from the skill has no `gates:` key yet, so its first run in a
+   A task file from the skill has no `shared.gates` key yet, so its first run in a
    terminal opens the wizard for the gates even with every flag passed.
 
    You'll see a full-screen view of the run (see
@@ -199,15 +199,21 @@ Here's the quick path from zero to a working run:
 
 ## The task file
 
-A task file is a `tasks` list, plus an optional top-level `gates` list (see
-[Gates](#gates)). Each task needs a unique positive integer `id`, a `name`
-(unique, ignoring case and surrounding spaces), and a `prompt`. `state` is
-optional:
+A task file has two top-level keys: `shared`, which applies to every task, and
+`tasks`, the list. `shared` holds the `prompt` every session starts from and
+an optional `gates` list (see [Gates](#gates)). Each task needs a unique
+positive integer `id`, a `name` (unique, ignoring case and surrounding
+spaces), and a `prompt`. `state` is optional:
 
 ```yaml
-gates:
-  - cmd: go test ./...
-    timeout: 10m
+shared:
+  prompt: |
+    You are running one task. It follows this prompt, starting with a line
+    `<id>: <name>`. Do that task and nothing else. When you finish, end your
+    output with one JSON line: {"state": "completed", "error": ""}
+  gates:
+    - cmd: go test ./...
+      timeout: 10m
 tasks:
   - id: 1
     name: Add the widget repository
@@ -227,34 +233,40 @@ tasks:
 - `state` is `pending`, `completed`, or `failed`. Leave it out for new work;
   it's read as `pending`.
 - Gralph adds an `error` field when a task fails. The session never writes it.
-- `gates` sits at the top level, next to `tasks`, and holds the commands
-  gralph runs itself after every task whose session says it's done (see
-  [Gates](#gates)). A task can't have its own `gates`.
+- `shared.prompt` is required: a missing `shared` block, or a prompt that is
+  missing, empty, or only whitespace, is an error. It is trimmed when the file
+  loads. Claude gets it ahead of every task (see
+  [How a run works](#how-a-run-works)).
+- `shared.gates` is optional. It holds the commands gralph runs itself after
+  every task whose session says it's done (see [Gates](#gates)). Leaving it out
+  and writing `gates: []` mean different things there. A task can't have its
+  own `gates`, and a top-level `gates` key, where older files kept them, is an
+  error that points you to `shared.gates`.
+- Any other key at the top level or under `shared` is an error too, so a typo
+  like `promt:` is caught instead of ignored.
 - Tasks run in file order. The `id` just identifies a task; it doesn't set the
   order.
 
 ### Run folders
 
-The task file and the prompt usually sit together in one folder. Name the
-folder with `-d` (`--dir`) instead of passing both paths:
+A task file usually sits in a folder of its own, with that run's other files
+(a `logs` folder, say). Name the folder with `-d` (`--dir`) instead of the
+file's path:
 
 ```bash
 gralph -d .local/widgets --sandbox-settings sandbox.json
 ```
 
-The names are fixed: `-d` means `<folder>/tasks.yaml` and `<folder>/prompt.md`.
-`-t` or `-p` still wins over the folder's file, so
-`gralph -d .local/widgets -t .local/widgets/tasks-v2.yaml` runs `tasks-v2.yaml`
-with the folder's prompt. If the folder lacks a file and no flag gives it,
-gralph stops with `error: --dir: no tasks.yaml in <folder>` (or `prompt.md`)
-and exits 1. A dry run never reads the prompt, so `gralph -d <folder> --dry-run`
-needs no `prompt.md`.
+The name is fixed: `-d` means `<folder>/tasks.yaml`. `-t` still wins over the
+folder's file, so `gralph -d .local/widgets -t .local/widgets/tasks-v2.yaml`
+runs `tasks-v2.yaml`. If the folder has no `tasks.yaml` and `-t` doesn't give
+one, gralph stops with `error: --dir: no tasks.yaml in <folder>` and exits 1.
 
 ### The gralph-docs-writer skill
 
 Writing a good task file by hand is tedious, so gralph ships a Claude Code
-skill, `gralph-docs-writer`, that turns a plan into a task file and shared
-prompt. It's built into the binary:
+skill, `gralph-docs-writer`, that turns a plan into a task file, shared prompt
+included. It's built into the binary:
 
 ```bash
 gralph --install-skill
@@ -267,11 +279,11 @@ it tells you to run `gralph --install-skill`.
 
 ## How a run works
 
-For each task, gralph glues the shared prompt and the task together and hands
+For each task, gralph glues `shared.prompt` and the task together and hands
 the result to a new `claude --print` session on stdin. Claude sees:
 
 ```text
-<shared prompt>
+<shared.prompt>
 
 <id>: <name>
 
@@ -282,7 +294,7 @@ Tasks already marked `completed` are skipped; in plain mode you'll see
 `task <id>: <name> already completed, skipping`.
 
 Gralph decides how a task went from the **last non-blank line** of Claude's
-output (lines that are just code fences don't count). Your shared prompt should
+output (lines that are just code fences don't count). Your `shared.prompt` should
 ask Claude to end with a JSON line like `{"state": "completed", "error": ""}`.
 
 - If that line is valid JSON with `state: "completed"` **and** the session
@@ -316,8 +328,8 @@ gralph -t tasks.yaml --dry-run
 ```
 
 This uses the same checks as a real run, but never launches Claude or writes
-anything. `--prompt` is ignored, and since nothing runs, you need neither
-`--sandbox-settings` nor `--skip-permissions`. If the file is invalid, you get the error on
+anything. Since nothing runs, you need neither `--sandbox-settings` nor
+`--skip-permissions`. If the file is invalid, you get the error on
 stderr and a non-zero exit. If it's valid, you get a table of each task's id,
 state, and name. If the file has gates, you then get one line per gate showing
 the timeout it would run under and where that came from (`flag`, `gate`, or
@@ -492,17 +504,20 @@ container or a throwaway VM.
 
 ## Gates
 
-Claude saying a task is done isn't proof. A task file can have one top-level
-`gates` list: commands gralph runs itself after every task whose session exits
+Claude saying a task is done isn't proof. A task file can have one `gates`
+list under `shared`: commands gralph runs itself after every task whose session exits
 zero and reports `completed`. Each entry has `cmd` (required) and `timeout`
 (optional, a duration like `90s` or `10m`):
 
 ```yaml
-gates:
-  - cmd: golangci-lint run ./...
-    timeout: 5m
-  - cmd: go test ./...
-    timeout: 20m
+shared:
+  prompt: |
+    Do the task below, run the project's checks, and end with a JSON line.
+  gates:
+    - cmd: golangci-lint run ./...
+      timeout: 5m
+    - cmd: go test ./...
+      timeout: 20m
 tasks:
   - id: 1
     name: Add the widget repository
@@ -520,7 +535,7 @@ tasks:
   failure.
 - Gates don't run when the session itself failed.
 - Claude never sees the gates. If you want Claude to run the same checks
-  before it finishes (you do), say so in the prompt.
+  before it finishes (you do), say so in `shared.prompt`.
 
 In plain mode gralph prints `gate: <cmd>` before each gate, and the gate's
 output passes straight through. In the full-screen view each gate shows up in
@@ -534,8 +549,8 @@ A few things to know:
   marks the task `failed` with `gate "<cmd>" timed out after <timeout>`, skips
   any remaining gates, and stops the run. If you have slow but legitimate
   gates, set `timeout` on them (or use `--gate-timeout` for the whole run).
-- Leaving the `gates` key out and writing `gates: []` aren't the same. With no
-  key, the gates haven't been decided yet, and the full-screen view asks you
+- Leaving the `shared.gates` key out and writing `gates: []` aren't the same.
+  With no key, the gates haven't been decided yet, and the full-screen view asks you
   for them (see [Setup wizard](#setup-wizard)). `gates: []` means you've
   decided: no gates. Either way, a run with no gates is fine.
 - For a multi-line gate, error messages quote only the command's first line, so
@@ -545,20 +560,22 @@ A few things to know:
   it, the task's whole change, including what a gate does, goes into one commit.
 - Resetting a gate-failed task to `pending` runs its whole session again, not
   just the gates. Setting it to `completed` by hand skips them.
-- `--dry-run` checks that `gates` is well formed and lists each gate once,
+- `--dry-run` checks that `shared.gates` is well formed and lists each gate once,
   as `gate: <cmd>: <timeout> (flag|gate|default)`. It never runs a gate.
 
-### Gates on a task
+### Gates in an older place
 
-Older task files put a `gates` list on each task. That's now an error, and
-gralph won't run the file (a dry run reports it too):
+Older task files put a `gates` list on each task, or one at the top level next
+to `tasks`. Both are errors now, and gralph won't run the file (a dry run
+reports it too):
 
 ```text
-tasks[0] (id 1): gates: gates are set once for the whole file now, as a top-level gates: list; see the HOWTO
+tasks[0] (id 1): gates: gates are set once for the whole file, as shared.gates; see the HOWTO
+gates: gates are set under shared now, as shared.gates; see the HOWTO
 ```
 
-To fix an old file, move one copy of the list to the top level, next to
-`tasks`, and delete the per-task copies.
+To fix an old file, move one copy of the list under `shared`, and delete the
+others.
 
 ## Committing tasks
 
@@ -584,15 +601,14 @@ a repository, gralph exits 1 with
 if the file is tracked or not ignored. **The work tree must also be clean when
 the run starts.** Otherwise gralph exits 1 with
 `error: --commit needs a clean work tree; commit, stash, or remove:` and the
-files in the way. The simplest setup is to ignore the run's files. In the
+files in the way. The simplest setup is to ignore the run's task file. In the
 project's `.gitignore`:
 
 ```text
 tasks.yaml
-prompt.md
 ```
 
-or ignore the directory you keep them in. A sandbox settings file kept in the
+or ignore the directory you keep it in. A sandbox settings file kept in the
 project needs the same treatment. So does a `--log-dir` folder inside the
 repository; gralph checks that one for you (see [Logging a run](#logging-a-run)).
 
@@ -625,7 +641,7 @@ A few things to know:
 - A new git repository created inside the work tree by a task is committed as git
   would commit it, as an embedded repository link, not as files.
 
-Tell Claude not to commit in your shared prompt when you use `--commit`. The
+Tell Claude not to commit in `shared.prompt` when you use `--commit`. The
 `gralph-docs-writer` skill does that for you when you say the run will use it.
 
 ## Logging a run
@@ -634,7 +650,7 @@ Once you close the full-screen view, the Claude activity pane is gone. Pass
 `--log-dir <path>` and gralph keeps a record of the run instead:
 
 ```bash
-gralph -p prompt.md -t tasks.yaml --sandbox-settings sandbox.json --log-dir logs
+gralph -t tasks.yaml --sandbox-settings sandbox.json --log-dir logs
 ```
 
 Each run gets its own folder under that path, named after the local time it
@@ -661,7 +677,7 @@ has that task's id as `task`:
 
 | `event`            | What else it holds                                                                                                                                                                        |
 | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `run_started`      | Gralph's `version`, the `tasks_file` and `prompt_file` paths, `permissions` (`sandbox` or `skip`), `sandbox_settings` and `gate_timeout` if passed, and `commit` (`true` or `false`)      |
+| `run_started`      | Gralph's `version`, the `tasks_file` path, `permissions` (`sandbox` or `skip`), `sandbox_settings` and `gate_timeout` if passed, and `commit` (`true` or `false`)      |
 | `task_started`     | The task's `name`                                                                                                                                                                         |
 | `session_finished` | What the session reported (`state`, and `error` if there is one) and how long it took (`duration`)                                                                                        |
 | `gate_finished`    | The gate's command (`cmd`, first line only), its `result` (`passed`, `failed`, or `timed_out`), the `timeout` it ran under, and its `duration`                                            |
@@ -751,10 +767,10 @@ nothing to a running loop.
 
 The wizard opens only when one of these is still open:
 
-- **The files.** No `-d`, and not both `-t` and `-p`.
+- **The task file.** Neither `-d` nor `-t`.
 - **The permission choice.** Neither `--sandbox-settings` nor
   `--skip-permissions`.
-- **The gates.** The task file has no top-level `gates:` key. `gates: []`
+- **The gates.** The task file has no `shared.gates` key. `gates: []`
   counts as decided (see [Gates](#gates)).
 
 When the flags and the task file answer all three, there's no wizard and no
@@ -767,9 +783,9 @@ Its steps, in order. Each is skipped when a flag already answers it:
 1. **Run folder.** A folder picker that starts in your current working
    directory (not limited to it) and shows hidden folders, since run folders
    often live under `.local/`. The picker selects folders only. The folder
-   gives `tasks.yaml` and `prompt.md`, the same as `-d`; paths are shown
-   relative to the working directory when possible. If you passed one of `-t`
-   or `-p`, that file wins and the folder gives the other.
+   gives `tasks.yaml`, the same as `-d`; paths are shown relative to the
+   working directory when possible. This step is skipped when you passed `-d`
+   or `-t`.
 2. **Permissions.** Run sessions in Claude's sandbox or skip permissions.
    Nothing is chosen for you: the step starts on `Choose one`, and pressing
    `enter` there just says `choose how sessions run`. Choosing the sandbox
@@ -780,7 +796,7 @@ Its steps, in order. Each is skipped when a flag already answers it:
    on No.
 4. **Logging.** Whether to keep a record of the run in `<folder>/logs`, like
    `--log-dir <folder>/logs`. Starts on No. Skipped when there's no folder
-   (you passed both `-t` and `-p`). When you say yes and the run commits, the
+   (you passed `-t` without `-d`). When you say yes and the run commits, the
    step opens the repository, so it can also show the commit checks' errors
    (uncommitted changes in the work tree, a task file git can see), not only
    whether the logs folder would be committed.
@@ -800,7 +816,7 @@ come along when it opens for something else.
 Each step checks its answer on the spot, with the same rules a run uses, and
 keeps you there with the problem shown until it's fixed:
 
-- The folder must hold both files, and both must load. A parse error is shown
+- The folder must hold a `tasks.yaml` that loads. A parse error is shown
   as is. A `failed` task points you at `gralph -d <folder> --dry-run` to see
   the table.
 - The sandbox settings file must be one a run would accept.
@@ -822,8 +838,8 @@ such as:
 gralph -d .local/widgets --sandbox-settings sandbox.json --commit
 ```
 
-When you passed `-t` or `-p` to override the folder, the review screen also
-lists `Tasks:` and/or `Prompt:` with the paths you gave. Copy the command line
+When you passed `-t` next to `-d` to override the folder's file, the review screen also
+lists `Tasks:` with the path you gave. Copy the command line
 for next time. Gates aren't on it, because they're in the task file. A path
 with spaces or shell characters comes out in single quotes, so the line pastes
 as is. Then choose:
@@ -852,11 +868,11 @@ prints the task table and exits 1 before the wizard or the view opens.
   `--dry-run`, exits 1, and doesn't touch the file. Fix whatever went wrong,
   set that task's `state` back to `pending` (or `completed`) by hand, and run
   again.
-- **Every session starts from scratch.** A session sees the shared prompt and
+- **Every session starts from scratch.** A session sees `shared.prompt` and
   its own task, nothing else. If a task depends on earlier work, say so in the
-  prompt, or make sure the repository shows it.
+  task's prompt, or make sure the repository shows it.
 - **Only run task files you trust.** The sandbox limits what a session can
-  reach, but the prompt and task files are still code you're about to run. With
+  reach, but the task file's prompts are still code you're about to run. With
   `--skip-permissions` there's no limit at all. Gate commands and, with
   `--commit`, git and the repository's hooks are run by gralph itself, with no
   sandbox either way.
@@ -878,13 +894,12 @@ Still stuck, or got a question or an idea? Ask in
 ## Flag reference
 
 ```bash
-gralph --prompt path/to/prompt.md --tasks path/to/tasks.yaml --sandbox-settings path/to/sandbox.json
+gralph --tasks path/to/tasks.yaml --sandbox-settings path/to/sandbox.json
 ```
 
 | Flag                 | Required                                                                                       | Description                                                                                                                 |
 | -------------------- | ---------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| `--dir` / `-d`       | No; gives `--tasks` and `--prompt` when they are not passed                                    | Run folder holding `tasks.yaml` and `prompt.md` (see [Run folders](#run-folders))                                           |
-| `--prompt` / `-p`    | Yes, unless `--dir` gives it or `--dry-run`; the full-screen view asks for a folder instead    | Path to the shared prompt sent to Claude for every task                                                                     |
+| `--dir` / `-d`       | No; gives `--tasks` when it is not passed                                                      | Run folder holding `tasks.yaml` (see [Run folders](#run-folders))                                                           |
 | `--tasks` / `-t`     | Yes, unless `--dir` gives it; the full-screen view asks for a folder instead                   | Path to the YAML task list that drives the loop                                                                             |
 | `--sandbox-settings` | One of these two for any real run, not both; the full-screen view asks when neither is passed  | Path to a Claude Code settings file; sessions run in Claude's sandbox with it                                               |
 | `--skip-permissions` | One of these two for any real run, not both; the full-screen view asks when neither is passed  | Run sessions with no sandbox and no permission checks. You're on your own (see [Sandboxing sessions](#sandboxing-sessions)) |

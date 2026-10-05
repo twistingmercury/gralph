@@ -182,20 +182,9 @@ func TestHelpFlag(t *testing.T) {
 	t.Parallel()
 	result := runCLI(t, "--help")
 	assert.Equal(t, 0, result.exitCode, "stderr: %s", result.stderr)
-	for _, flag := range []string{"--prompt", "--tasks", "--sandbox-settings", "--skip-permissions", "--gate-timeout", "--commit", "--dry-run", "--no-tui", "--install-skill", "--version"} {
+	for _, flag := range []string{"--tasks", "--sandbox-settings", "--skip-permissions", "--gate-timeout", "--commit", "--dry-run", "--no-tui", "--install-skill", "--version"} {
 		assert.Contains(t, result.stderr, flag)
 	}
-}
-
-// TestMissingPrompt verifies that omitting --prompt exits 1 and names only
-// that flag. Usage follows the error and names every flag, so the error line
-// itself is matched.
-func TestMissingPrompt(t *testing.T) {
-	t.Parallel()
-	result := runCLI(t, "--tasks=/tmp/tasks.yaml")
-	require.Equal(t, 1, result.exitCode, "stderr: %s", result.stderr)
-	assert.Contains(t, result.stderr, "error: required flag --prompt not set\n")
-	assert.NotContains(t, result.stderr, "required flag --tasks not set")
 }
 
 // TestMissingTasks verifies that omitting --tasks exits 1 and names only that
@@ -203,47 +192,43 @@ func TestMissingPrompt(t *testing.T) {
 // itself is matched.
 func TestMissingTasks(t *testing.T) {
 	t.Parallel()
-	result := runCLI(t, "--prompt=/tmp/prompt.md")
+	result := runCLI(t, "--skip-permissions")
 	require.Equal(t, 1, result.exitCode, "stderr: %s", result.stderr)
 	assert.Contains(t, result.stderr, "error: required flag --tasks not set\n")
-	assert.NotContains(t, result.stderr, "required flag --prompt not set")
 }
 
-// TestMissingBothRequiredFlags verifies that omitting both required flags exits non-zero.
-func TestMissingBothRequiredFlags(t *testing.T) {
+// TestPromptFlagIsRemoved pins ADR-020: the shared prompt lives in the task
+// file, so -p and --prompt are unknown flags with pflag's exit code 2, and
+// the missing --tasks is never reached.
+func TestPromptFlagIsRemoved(t *testing.T) {
 	t.Parallel()
-	result := runCLI(t)
-	require.NotEqual(t, 0, result.exitCode, "expected non-zero exit when both --prompt and --tasks are missing")
-	// Usage follows the errors and names every flag, so match the error lines.
-	assert.Contains(t, result.stderr, "required flag --prompt not set")
-	assert.Contains(t, result.stderr, "required flag --tasks not set")
-}
-
-// TestNonexistentFiles verifies that valid flags pointing to missing files
-// exit 1 with an error naming the missing file. The prompt loads first, so the
-// tasks case needs a prompt file that exists to reach the tasks error.
-func TestNonexistentFiles(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	promptPath := writePrompt(t, dir, "Body.\n")
-	missingTasks := filepath.Join(dir, "missing.yaml")
-
 	tests := []struct {
-		name   string
-		prompt string
-		tasks  string
-		want   string
+		name string
+		args []string
+		want string
 	}{
-		{name: "prompt", prompt: "/nonexistent/prompt.md", tasks: "/nonexistent/tasks.yaml", want: `prompt file "/nonexistent/prompt.md" is not accessible`},
-		{name: "tasks", prompt: promptPath, tasks: missingTasks, want: fmt.Sprintf("tasks file %q is not accessible", missingTasks)},
+		{name: "short", args: []string{"-p", "x", "-t", "y", "--skip-permissions"}, want: "unknown shorthand flag: 'p'"},
+		{name: "long", args: []string{"--prompt", "x", "-t", "y", "--skip-permissions"}, want: "unknown flag: --prompt"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			result := runCLI(t, "--skip-permissions", "--prompt="+tt.prompt, "--tasks="+tt.tasks)
-			require.Equal(t, 1, result.exitCode, "stderr: %s", result.stderr)
+			result := runCLI(t, tt.args...)
+			require.Equal(t, 2, result.exitCode, "stdout:\n%s\nstderr:\n%s", result.stdout, result.stderr)
 			assert.Contains(t, result.stderr, tt.want)
+			assert.NotContains(t, result.stderr, "required flag")
 		})
 	}
+}
+
+// TestNonexistentFiles verifies that a valid flag pointing at a missing file
+// exits 1 with an error naming the missing file.
+func TestNonexistentFiles(t *testing.T) {
+	t.Parallel()
+	missingTasks := filepath.Join(t.TempDir(), "missing.yaml")
+
+	result := runCLI(t, "--skip-permissions", "--tasks="+missingTasks)
+	require.Equal(t, 1, result.exitCode, "stderr: %s", result.stderr)
+	assert.Contains(t, result.stderr, fmt.Sprintf("tasks file %q is not accessible", missingTasks))
 }

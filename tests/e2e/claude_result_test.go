@@ -31,7 +31,6 @@ func TestLoop_JSONFailedResult_WritesErrorAndStopsLoop(t *testing.T) {
 	dir := t.TempDir()
 
 	promptBody := "Body.\n"
-	promptPath := writePrompt(t, dir, promptBody)
 	sharedPrompt := strings.TrimSpace(promptBody)
 
 	tasksYAML := `tasks:
@@ -42,7 +41,7 @@ func TestLoop_JSONFailedResult_WritesErrorAndStopsLoop(t *testing.T) {
     name: Second task
     prompt: Do the second thing.
 `
-	tasksPath := writeTasksYAML(t, dir, tasksYAML)
+	tasksPath := writeTasksYAML(t, dir, withShared(promptBody, "", tasksYAML))
 
 	recordFile := filepath.Join(dir, "record.ndjson")
 	resultLine := `{"state":"failed","error":"something broke"}` + "\n"
@@ -51,7 +50,7 @@ func TestLoop_JSONFailedResult_WritesErrorAndStopsLoop(t *testing.T) {
 		"FAKE_CLAUDE_OUTPUT":     resultLine,
 	})
 
-	res := runGralph(t, 15*time.Second, []string{"--skip-permissions", "--prompt=" + promptPath, "--tasks=" + tasksPath}, env)
+	res := runGralph(t, 15*time.Second, []string{"--skip-permissions", "--tasks=" + tasksPath}, env)
 
 	require.NotEqual(t, 0, res.exitCode, "stdout:\n%s\nstderr:\n%s", res.stdout, res.stderr)
 	assert.Contains(t, res.stderr, "task 1: First task failed: something broke")
@@ -84,18 +83,17 @@ func TestLoop_MissingResultLine_TreatedAsFailed(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 
-	promptPath := writePrompt(t, dir, "Body.\n")
-	tasksPath := writeTasksYAML(t, dir, `tasks:
+	tasksPath := writeTasksYAML(t, dir, withShared("Body.", "", `tasks:
   - id: 1
     name: First task
     prompt: Do the first thing.
-`)
+`))
 
 	env := gralphEnv(fakeClaudeDir, map[string]string{
 		"FAKE_CLAUDE_OUTPUT": "some text\n",
 	})
 
-	res := runGralph(t, 15*time.Second, []string{"--skip-permissions", "--prompt=" + promptPath, "--tasks=" + tasksPath}, env)
+	res := runGralph(t, 15*time.Second, []string{"--skip-permissions", "--tasks=" + tasksPath}, env)
 
 	require.NotEqual(t, 0, res.exitCode, "stdout:\n%s\nstderr:\n%s", res.stdout, res.stderr)
 	assert.Contains(t, res.stderr, "task 1: First task failed: no valid result line in session output")
@@ -115,18 +113,17 @@ func TestLoop_UnknownResultState_TreatedAsFailed(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 
-	promptPath := writePrompt(t, dir, "Body.\n")
-	tasksPath := writeTasksYAML(t, dir, `tasks:
+	tasksPath := writeTasksYAML(t, dir, withShared("Body.", "", `tasks:
   - id: 1
     name: First task
     prompt: Do the first thing.
-`)
+`))
 
 	env := gralphEnv(fakeClaudeDir, map[string]string{
 		"FAKE_CLAUDE_OUTPUT": "{\"state\":\"done\"}\n",
 	})
 
-	res := runGralph(t, 15*time.Second, []string{"--skip-permissions", "--prompt=" + promptPath, "--tasks=" + tasksPath}, env)
+	res := runGralph(t, 15*time.Second, []string{"--skip-permissions", "--tasks=" + tasksPath}, env)
 
 	require.NotEqual(t, 0, res.exitCode, "stdout:\n%s\nstderr:\n%s", res.stdout, res.stderr)
 	assert.Contains(t, res.stderr, "task 1: First task failed: no valid result line in session output")
@@ -146,19 +143,18 @@ func TestLoop_NonZeroExitWithFailedJSON_UsesJSONError(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 
-	promptPath := writePrompt(t, dir, "Body.\n")
-	tasksPath := writeTasksYAML(t, dir, `tasks:
+	tasksPath := writeTasksYAML(t, dir, withShared("Body.", "", `tasks:
   - id: 1
     name: First task
     prompt: Do the first thing.
-`)
+`))
 
 	env := gralphEnv(fakeClaudeDir, map[string]string{
 		"FAKECLAUDE_EXIT_CODE": "5",
 		"FAKE_CLAUDE_OUTPUT":   `{"state":"failed","error":"boom"}` + "\n",
 	})
 
-	res := runGralph(t, 15*time.Second, []string{"--skip-permissions", "--prompt=" + promptPath, "--tasks=" + tasksPath}, env)
+	res := runGralph(t, 15*time.Second, []string{"--skip-permissions", "--tasks=" + tasksPath}, env)
 
 	require.NotEqual(t, 0, res.exitCode, "stdout:\n%s\nstderr:\n%s", res.stdout, res.stderr)
 	assert.Contains(t, res.stderr, "task 1: First task failed: boom")
@@ -179,18 +175,17 @@ func TestLoop_NonZeroExitWithNoResultLine_UsesExitError(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 
-	promptPath := writePrompt(t, dir, "Body.\n")
-	tasksPath := writeTasksYAML(t, dir, `tasks:
+	tasksPath := writeTasksYAML(t, dir, withShared("Body.", "", `tasks:
   - id: 1
     name: First task
     prompt: Do the first thing.
-`)
+`))
 
 	env := gralphEnv(fakeClaudeDir, map[string]string{
 		"FAKECLAUDE_EXIT_CODE": "1",
 	})
 
-	res := runGralph(t, 15*time.Second, []string{"--skip-permissions", "--prompt=" + promptPath, "--tasks=" + tasksPath}, env)
+	res := runGralph(t, 15*time.Second, []string{"--skip-permissions", "--tasks=" + tasksPath}, env)
 
 	require.NotEqual(t, 0, res.exitCode, "stdout:\n%s\nstderr:\n%s", res.stdout, res.stderr)
 	assert.Contains(t, res.stderr, "task 1: First task failed: exit status 1")
@@ -209,19 +204,18 @@ func TestLoop_NonZeroExitWithCompletedJSON_Fails(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 
-	promptPath := writePrompt(t, dir, "Body.\n")
-	tasksPath := writeTasksYAML(t, dir, `tasks:
+	tasksPath := writeTasksYAML(t, dir, withShared("Body.", "", `tasks:
   - id: 1
     name: First task
     prompt: Do the first thing.
-`)
+`))
 
 	env := gralphEnv(fakeClaudeDir, map[string]string{
 		"FAKECLAUDE_EXIT_CODE": "2",
 		"FAKE_CLAUDE_OUTPUT":   `{"state":"completed","error":""}` + "\n",
 	})
 
-	res := runGralph(t, 15*time.Second, []string{"--skip-permissions", "--prompt=" + promptPath, "--tasks=" + tasksPath}, env)
+	res := runGralph(t, 15*time.Second, []string{"--skip-permissions", "--tasks=" + tasksPath}, env)
 
 	require.Equal(t, 1, res.exitCode, "stdout:\n%s\nstderr:\n%s", res.stdout, res.stderr)
 	assert.Contains(t, res.stderr, "task 1: First task failed: exit status 2")
@@ -241,19 +235,18 @@ func TestLoop_FencedResultLine_Completes(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 
-	promptPath := writePrompt(t, dir, "Body.\n")
-	tasksPath := writeTasksYAML(t, dir, `tasks:
+	tasksPath := writeTasksYAML(t, dir, withShared("Body.", "", `tasks:
   - id: 1
     name: First task
     prompt: Do the first thing.
-`)
+`))
 
 	fencedOutput := "{\"state\":\"failed\",\"error\":\"stale\"}\n```json\n{\"state\":\"completed\",\"error\":\"\"}\n```\n"
 	env := gralphEnv(fakeClaudeDir, map[string]string{
 		"FAKE_CLAUDE_OUTPUT": fencedOutput,
 	})
 
-	res := runGralph(t, 15*time.Second, []string{"--skip-permissions", "--prompt=" + promptPath, "--tasks=" + tasksPath}, env)
+	res := runGralph(t, 15*time.Second, []string{"--skip-permissions", "--tasks=" + tasksPath}, env)
 
 	require.Equal(t, 0, res.exitCode, "stdout:\n%s\nstderr:\n%s", res.stdout, res.stderr)
 	assert.Contains(t, res.stdout, fencedOutput, "expected claude's fenced output to still be streamed to gralph's stdout")
@@ -272,7 +265,6 @@ func TestLoop_StaleErrorClearedWhenTaskCompletes(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 
-	promptPath := writePrompt(t, dir, "Body.\n")
 	tasksYAML := `tasks:
   - id: 1
     name: First task
@@ -280,14 +272,14 @@ func TestLoop_StaleErrorClearedWhenTaskCompletes(t *testing.T) {
     state: pending
     error: boom old
 `
-	tasksPath := writeTasksYAML(t, dir, tasksYAML)
+	tasksPath := writeTasksYAML(t, dir, withShared("Body.", "", tasksYAML))
 
 	recordFile := filepath.Join(dir, "record.ndjson")
 	env := gralphEnv(fakeClaudeDir, map[string]string{
 		"FAKECLAUDE_RECORD_FILE": recordFile,
 	})
 
-	res := runGralph(t, 15*time.Second, []string{"--skip-permissions", "--prompt=" + promptPath, "--tasks=" + tasksPath}, env)
+	res := runGralph(t, 15*time.Second, []string{"--skip-permissions", "--tasks=" + tasksPath}, env)
 
 	require.Equal(t, 0, res.exitCode, "stdout:\n%s\nstderr:\n%s", res.stdout, res.stderr)
 
