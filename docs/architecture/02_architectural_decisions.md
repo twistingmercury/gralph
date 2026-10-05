@@ -1,8 +1,8 @@
 # Gralph — Architectural Decisions
 
-> **Version**: v24
+> **Version**: v25
 > **Date**: 2026-10-05
-> **Notes**: ADR-020 accepted: the shared prompt moves into `tasks.yaml` under a `shared` block with the gates, and `-p/--prompt` and `prompt.md` are removed. ADR-002, ADR-015, ADR-016, ADR-018, and ADR-019 carry notes of what it changed. The template's shared prompt is trimmed to the project block and the result line.
+> **Notes**: ADR-021 accepted: `-d <folder>` also resolves `<folder>/sandbox.json` as `--sandbox-settings`, and `--skip-permissions` opts out of it. ADR-014 and ADR-018 carry notes of what it changed. Earlier: ADR-020 moved the shared prompt and gates into `tasks.yaml` under `shared`.
 
 [Back to Overview](00_overview.md) | [Back to Project README](../../README.md)
 
@@ -46,6 +46,7 @@ Each architectural decision is recorded as an ADR with the following structure:
 | ADR-018 | A run folder and a setup wizard                               | Accepted | 2026-10-02 |
 | ADR-019 | One gate list per task file                                   | Accepted | 2026-10-02 |
 | ADR-020 | The shared prompt and gates live in the task file             | Accepted | 2026-10-05 |
+| ADR-021 | The run folder's sandbox.json answers the permission choice   | Accepted | 2026-10-05 |
 
 ## Decisions
 
@@ -541,6 +542,8 @@ The rules:
 - **Neither flag, or both, is an error.** A real run (plain or TUI) with neither exits 1 with `error: pass --sandbox-settings <path>, or --skip-permissions to run without a sandbox`. Both together exits 1 with `error: --sandbox-settings and --skip-permissions cannot be used together`. Both checks happen in every mode, after the `--gate-timeout` check and plain mode's missing `--tasks`/`--prompt` check, and before the skill check and any task or prompt file loads. An empty `--sandbox-settings=` counts as not passed. The setup screen does not ask for either; it only asks for paths that have a safe meaning when missing.
 
   _Amended by ADR-018:_ in the TUI, passing neither flag is no longer an error at startup: the setup wizard asks for the permission choice, with nothing pre-selected, so there is still no default. Its answer then goes through the same check, strict, before anything runs. Plain mode and the both-flags error are unchanged.
+
+  _Amended by ADR-021:_ a regular file named `sandbox.json` in a `-d` run folder counts as `--sandbox-settings` when neither flag was passed, so that run needs no flag and the wizard does not ask. This is still a choice, never a default for going without a sandbox: it only ever picks the sandboxed path, a missing file changes nothing, and `--skip-permissions` still opts out. A bad found file is the same `--sandbox-settings:` error, not a fallback.
 - **The settings file is validated before anything runs.** It must be readable and hold a JSON object; `sandbox`, when present, must be an object. Errors read `--sandbox-settings: <problem>` and exit 1. Gralph does not check the rest: unknown keys and bad values are Claude Code's to reject.
 - **Gralph forces three keys and leaves the rest alone.** On top of the user's file it sets `sandbox.enabled: true`, `sandbox.allowUnsandboxedCommands: false`, and `sandbox.failIfUnavailable: true`. The first turns the sandbox on. The second closes the escape hatch the spike showed. The third stops a file from asking Claude to carry on unsandboxed when the sandbox cannot start. Paths, domains, and every other settings key pass through untouched. The file on disk is never written.
 - **The argv.** Sandboxed sessions run as `claude --print --permission-mode acceptEdits --settings <merged JSON>`; the TUI path still inserts `--output-format stream-json --verbose` right after `--print`. With `--skip-permissions` the argv is today's, unchanged. The merged settings travel inline as one compact JSON argument, so there is no temporary file to clean up. Both paths still build the command in `claudeCmd` (ADR-011).
@@ -768,6 +771,8 @@ A full run names every input on the command line: `gralph -p .local/feat/prompt.
 Two additions: a `-d/--dir` flag that names a run folder, and a setup wizard in the full-screen view that asks for whatever the flags and the task file leave open, then shows a review screen before the run starts.
 
 - **The run folder.** `-d/--dir <folder>` means `<folder>/tasks.yaml` and `<folder>/prompt.md`. The names are fixed; `-t` and `-p` override either file, so `-d foo -t foo/tasks-v2.yaml` works and every command line that works today keeps working. A file the folder lacks and no flag supplies is an error in plain mode, `--dir: no tasks.yaml in <folder>` (or `prompt.md`), exit 1. In plain mode `-d` is shorthand for `-t`/`-p` and changes nothing else. `-d` is resolved into the two paths before any other startup check, so the fixed order after it (`--gate-timeout`, plain mode's required flags, `--log-dir`, the session flags, the skill check) is unchanged.
+
+  _Amended by ADR-021:_ `-d` also means `<folder>/sandbox.json` as the sandbox settings when the file exists and no permission flag was passed, and the wizard's Permissions step is then hidden, for a folder given with `-d` or picked in the wizard. The review screen's command line leaves `--sandbox-settings` out when the file is the folder's own.
   _Changed by ADR-020:_ `-p` and `prompt.md` are gone. `-d <folder>` means `<folder>/tasks.yaml` alone, `-t` is the only override, the "no prompt.md" error is removed, and the folder step is hidden by `-d` or `-t`. The wizard has no prompt path, and its review screen lists only `Tasks:` when `-t` overrides the folder. The "later change" in the build-order note below is this.
 - **Logs in the folder.** With a folder, saying yes to logging in the wizard means `--log-dir <folder>/logs`. An explicit `--log-dir` wins. This is an opt-in made in the wizard, not a default: with no wizard answer and no flag, nothing is logged, and plain mode still refuses `--log-dir` (ADR-016).
 - **When the wizard opens.** Full-screen mode only, and only when the folder, permissions, or gates step is still open. Commit, logging, and the gate timeout ride along when it opens and never open it alone; otherwise every run without `--commit` would stop to ask. When flags and the task file answer those three, there is no wizard and no review screen; the run starts as it does today. Plain mode never opens it; a missing input there is an error, as today. A dry run is always plain mode, so it never opens the wizard either. The wizard replaces the setup screen.
@@ -923,6 +928,46 @@ _Negative:_
 - The shared prompt is YAML now: indentation matters, and it loses Markdown editor support
 - A save rewrites the file, which already loses comments and custom formatting (ADR-004); that now includes the shared prompt's own formatting
 - One file to ignore or keep out of git, where there were two; a prompt kept for reuse across runs must be copied between files
+
+---
+
+### ADR-021: The run folder's sandbox.json answers the permission choice
+
+**Status:** Accepted
+
+**Context:**
+
+ADR-018 made a run folder hold the task file under a fixed name, so `gralph -d .local/feat` finds `tasks.yaml` by itself. The sandbox settings file (ADR-014) lives in the same folder in practice: a project's loop keeps `tasks.yaml` and `sandbox.json` side by side. But the run still has to be told about it. Either the command repeats `--sandbox-settings .local/feat/sandbox.json`, or the full-screen view opens its wizard and asks "How should sessions run?", although the answer is a file sitting in the folder just chosen. For a task file that already has its gates, that one question is the only thing the wizard would ask, so the file is read from one place and named again in another.
+
+**Decision:**
+
+A `sandbox.json` in a `-d` run folder is the run's `--sandbox-settings`, found by its fixed name as `tasks.yaml` is.
+
+- **When it applies.** `-d <folder>` was given (or the wizard picked a folder), `<folder>/sandbox.json` is a regular file, and neither `--sandbox-settings` nor `--skip-permissions` was passed. A directory of that name is ignored. The path is `<folder>/sandbox.json` as `-d` was given, not made absolute. Only `-d` and the wizard's folder step look: `-t` alone never does, and `-d` with `-t` still uses the folder's file. It is resolved with the task file, before any other startup check, so every later check sees the final value (ADR-018).
+- **Precedence.** An explicit `--sandbox-settings` wins. An explicit `--skip-permissions` also wins, with no error: it is how a run opts out of a folder's sandbox, so it keeps working in any folder. The "both flags" error (ADR-014) is for the two explicit flags only.
+- **It never leads to an unsandboxed run.** It only supplies the sandboxed choice. With no file, nothing changes: plain mode still exits 1 with the neither-flag error and the wizard still asks. A found file that is unreadable or not a JSON object fails through the existing validation as `--sandbox-settings: <problem>`, exit 1, and never falls back to going without a sandbox.
+- **Plain mode.** Nothing new is printed (ADR-011). `--dry-run -d <folder>` names and validates the file on its existing `sandbox settings:` line, and the run log already records `permissions` and `sandbox_settings` (ADR-016).
+- **The wizard.** The Permissions step is hidden once a folder, from `-d` or picked in the step, holds the file. The folder step's check sets the settings, and the form evaluates the step's hide function when it moves on, so no other plumbing is needed. The review screen reads `Permissions: sandbox, settings in <folder>/sandbox.json`, and its command line is `gralph -d <folder> ...` with no `--sandbox-settings`, since `-d` implies the file; a settings file anywhere else still prints the flag. A folder holding the file gives the wizard no way to pick "skip permissions": pass `--skip-permissions`.
+- **Nothing left to ask.** With a folder, its `sandbox.json`, and a task file that already has `shared.gates`, no step is open, so there is no wizard and the run starts in the full-screen view.
+- **One helper.** `looper.FolderSandbox(dir)` returns the path and whether the file exists. `cmd/main` calls it from `resolveSandbox` and the wizard from `findSandbox`; `looper` already owns the sandbox file's validation and the session arguments, so no new package or import edge is needed.
+
+**Changes to earlier ADRs on acceptance:** ADR-014's "exactly one flag, no default" gains the found file as one way to make the choice, with its safety rules unchanged. ADR-018's `-d` means the settings file too, and its Permissions step has a second reason to be hidden.
+
+Alternatives not taken: an error when the folder holds a `sandbox.json` and `--skip-permissions` is passed (a folder could then never be run unsandboxed without moving the file, and the flag is the explicit request); looking for `sandbox.json` next to a `-t` task file or in the working directory (the folder is the one place a run's files are promised to sit; anywhere else is a guess); the wizard showing the step with the file pre-selected (ADR-014 allows nothing pre-selected, and the file already is the answer); a one-line notice in plain mode (changes ADR-011's output contract, and the dry run and the run log already say which file was used); remembering the last choice (a stored default for the permission choice, against ADR-014).
+
+**Consequences:**
+
+_Positive:_
+
+- `gralph -d .local/feat` is a whole command for a folder that holds its task file and sandbox settings, and a file with gates goes straight to the run view
+- The wizard's session question stops asking what the folder already says
+- A command line that names the folder reproduces the run
+
+_Negative:_
+
+- A settings file in a run folder is applied without being named on the command line, so it is as trusted as the folder's `tasks.yaml`, which is already code the run executes. Plain mode says nothing about it; the dry run and the run log do.
+- The wizard cannot pick "skip permissions" for a folder holding the file; the flag is the only way
+- Going back in the wizard and picking a different folder keeps the first folder's sandbox file, the same way it already keeps the first folder's task file; the wizard's folder step is built to be answered once
 
 ---
 
