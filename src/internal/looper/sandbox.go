@@ -14,6 +14,20 @@ func BypassArgs() []string {
 	return []string{"--dangerously-skip-permissions"}
 }
 
+// FolderSandbox finds the settings file a run folder carries by its fixed
+// name, as tasks.yaml is found, so a folder written by the skill needs no
+// flag. A directory of that name does not count. The path is not made
+// absolute: it is shown and recorded as -d was given.
+func FolderSandbox(dir string) (string, bool) {
+	path := filepath.Join(dir, "sandbox.json")
+	info, err := os.Stat(path)
+	if err != nil || !info.Mode().IsRegular() {
+		return "", false
+	}
+
+	return path, true
+}
+
 // SandboxArgs reads the Claude Code settings file at path and returns the
 // claude flags for a sandboxed session. The settings travel inline, so there
 // is no temporary file to clean up, and the file at path is never written.

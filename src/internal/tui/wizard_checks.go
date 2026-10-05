@@ -41,7 +41,23 @@ func (w *wizard) checkFolder(dir string) error {
 	}
 
 	w.s.Dir, w.s.TasksPath, w.s.Tasks = dir, tasksPath, tl
+	w.findSandbox(dir)
 	return nil
+}
+
+// findSandbox lets a picked folder's sandbox.json answer the permission step,
+// as -d does on the command line. A permission flag already given wins.
+func (w *wizard) findSandbox(dir string) {
+	if w.s.SkipPermissions || w.s.SandboxSettings != "" {
+		return
+	}
+
+	found, ok := looper.FolderSandbox(dir)
+	if !ok {
+		return
+	}
+
+	w.s.SandboxSettings = found
 }
 
 // requireIn names the folder rather than the path, because the user picked a

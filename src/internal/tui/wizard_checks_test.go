@@ -84,6 +84,56 @@ func TestCheckFolder_FlagFileWins(t *testing.T) {
 	assert.Equal(t, "First", w.s.Tasks.Tasks[0].Name)
 }
 
+func TestCheckFolder_FindsSandboxFile(t *testing.T) {
+	dir := t.TempDir()
+	writeFileIn(t, dir, "tasks.yaml", validTasks)
+	writeFileIn(t, dir, "sandbox.json", "{}")
+	want := filepath.Join(dir, "sandbox.json")
+
+	w := newWizard(Settings{}, Given{})
+	require.False(t, w.hidePermissions())
+	require.NoError(t, w.checkFolder(dir))
+
+	assert.Equal(t, want, w.s.SandboxSettings)
+	assert.False(t, permissionsOpen(w.s))
+	assert.True(t, w.hidePermissions())
+}
+
+func TestCheckFolder_SkipPermissionsKeepsSandboxFileUnset(t *testing.T) {
+	dir := t.TempDir()
+	writeFileIn(t, dir, "tasks.yaml", validTasks)
+	writeFileIn(t, dir, "sandbox.json", "{}")
+
+	w := newWizard(Settings{SkipPermissions: true}, Given{})
+	require.NoError(t, w.checkFolder(dir))
+
+	assert.Empty(t, w.s.SandboxSettings)
+	assert.True(t, w.hidePermissions())
+}
+
+func TestCheckFolder_ExplicitSandboxFlagWins(t *testing.T) {
+	dir := t.TempDir()
+	writeFileIn(t, dir, "tasks.yaml", validTasks)
+	writeFileIn(t, dir, "sandbox.json", "{}")
+
+	w := newWizard(Settings{SandboxSettings: "mine.json"}, Given{})
+	require.NoError(t, w.checkFolder(dir))
+
+	assert.Equal(t, "mine.json", w.s.SandboxSettings)
+}
+
+func TestCheckFolder_NoSandboxFileLeavesPermissionsOpen(t *testing.T) {
+	dir := t.TempDir()
+	writeFileIn(t, dir, "tasks.yaml", validTasks)
+	require.NoError(t, os.Mkdir(filepath.Join(dir, "sandbox.json"), 0o700))
+
+	w := newWizard(Settings{}, Given{})
+	require.NoError(t, w.checkFolder(dir))
+
+	assert.Empty(t, w.s.SandboxSettings)
+	assert.False(t, w.hidePermissions())
+}
+
 func TestCheckPermission(t *testing.T) {
 	assert.EqualError(t, checkPermission(""), "choose how sessions run")
 	assert.NoError(t, checkPermission(permSandbox))

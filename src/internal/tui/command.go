@@ -38,8 +38,7 @@ func CommandLine(s Settings) string {
 	parts = appendPaths(parts, s)
 	switch {
 	case s.SandboxSettings != "":
-		quoted := shellQuote(s.SandboxSettings)
-		parts = append(parts, "--sandbox-settings", quoted)
+		parts = appendSandbox(parts, s)
 	case s.SkipPermissions:
 		parts = append(parts, "--skip-permissions")
 	}
@@ -77,6 +76,18 @@ func appendPaths(parts []string, s Settings) []string {
 	}
 
 	return parts
+}
+
+// appendSandbox leaves out the settings file the folder implies by its fixed
+// name, as appendPaths does for tasks.yaml.
+func appendSandbox(parts []string, s Settings) []string {
+	implied := s.Dir != "" && s.SandboxSettings == filepath.Join(s.Dir, "sandbox.json")
+	if implied {
+		return parts
+	}
+
+	quoted := shellQuote(s.SandboxSettings)
+	return append(parts, "--sandbox-settings", quoted)
 }
 
 // A leading ~ is a home or named-directory lookup and a leading = is zsh's

@@ -231,6 +231,58 @@ func TestResolveDir(t *testing.T) {
 	}
 }
 
+func TestResolveSandbox(t *testing.T) {
+	withFile := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(withFile, "sandbox.json"), []byte("{}"), 0o600))
+	foundPath := filepath.Join(withFile, "sandbox.json")
+	empty := t.TempDir()
+	withDir := t.TempDir()
+	require.NoError(t, os.Mkdir(filepath.Join(withDir, "sandbox.json"), 0o700))
+
+	cases := map[string]struct {
+		dir, sandbox string
+		skip         bool
+		want         string
+	}{
+		// resolveSandbox never sees --tasks, so -d with -t detects like -d alone,
+		// and -t alone leaves dir empty.
+		"found in the folder":           {dir: withFile, want: foundPath},
+		"not found changes nothing":     {dir: empty},
+		"a directory is ignored":        {dir: withDir},
+		"explicit settings win":         {dir: withFile, sandbox: "mine.json", want: "mine.json"},
+		"skip permissions wins":         {dir: withFile, skip: true},
+		"no folder never detects":       {},
+		"explicit settings with no dir": {sandbox: "mine.json", want: "mine.json"},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			assert.Equal(t, tc.want, resolveSandbox(tc.dir, tc.sandbox, tc.skip))
+		})
+	}
+}
+
+func TestSessionArgs_InvalidFoundSandboxFails(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "sandbox.json"), []byte("[1]"), 0o600))
+
+	found := resolveSandbox(dir, "", false)
+	_, err := sessionArgs(found, false, false, false)
+
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "--sandbox-settings:")
+}
+
+func TestSessionArgs_FoundSandboxAndSkipHaveNoConflict(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "sandbox.json"), []byte("[1]"), 0o600))
+
+	found := resolveSandbox(dir, "", true)
+	args, err := sessionArgs(found, true, false, false)
+
+	require.NoError(t, err)
+	assert.Equal(t, []string{"--dangerously-skip-permissions"}, args)
+}
+
 func TestOpenLog_NotPassedOpensNothing(t *testing.T) {
 	runLog, err := openLog("", runlog.Info{})
 
