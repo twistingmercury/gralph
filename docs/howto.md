@@ -250,17 +250,27 @@ tasks:
 ### Run folders
 
 A task file usually sits in a folder of its own, with that run's other files
-(a `logs` folder, say). Name the folder with `-d` (`--dir`) instead of the
-file's path:
+(a `logs` folder, say, or a `sandbox.json`). Name the folder with `-d` (`--dir`)
+instead of the file's path:
 
 ```bash
-gralph -d .local/widgets --sandbox-settings sandbox.json
+gralph -d .local/widgets
 ```
 
-The name is fixed: `-d` means `<folder>/tasks.yaml`. `-t` still wins over the
-folder's file, so `gralph -d .local/widgets -t .local/widgets/tasks-v2.yaml`
-runs `tasks-v2.yaml`. If the folder has no `tasks.yaml` and `-t` doesn't give
-one, gralph stops with `error: --dir: no tasks.yaml in <folder>` and exits 1.
+The name is fixed: `-d` means `<folder>/tasks.yaml`. If the folder also holds a
+`sandbox.json` and neither `--sandbox-settings` nor `--skip-permissions` was
+passed, gralph uses that file exactly as if `--sandbox-settings <folder>/sandbox.json`
+had been passed. An explicit `--sandbox-settings` wins; `--skip-permissions` opts out
+of the folder's file with no error. If there is no `sandbox.json` in the folder,
+nothing changes: a run still needs one of the two permission flags.
+
+`-t` still wins over the folder's file: `gralph -d .local/widgets -t .local/widgets/tasks-v2.yaml`
+runs `tasks-v2.yaml` from the folder, and `gralph -d .local/widgets -t other.yaml` runs
+`other.yaml` from the current directory. If the folder has no `tasks.yaml` and `-t`
+doesn't give one, gralph stops with `error: --dir: no tasks.yaml in <folder>` and exits 1.
+
+When you pass `--dry-run -d <folder>` and the folder holds a `sandbox.json`, the
+validation line prints `sandbox settings: <folder>/sandbox.json`.
 
 ### The gralph-docs-writer skill
 
@@ -368,10 +378,11 @@ A stop exits 1 before anything runs.
 
 ### What `--sandbox-settings` does
 
-The file is a normal Claude Code settings file, in JSON. Gralph reads it once at
-startup and never writes to it. If it can't be read or isn't a JSON object,
-gralph exits 1 with an error starting `--sandbox-settings:`. On top of
-whatever the file says, gralph always sets three keys:
+The file is a normal Claude Code settings file, in JSON. It can be passed by flag
+or found in the run folder as `<folder>/sandbox.json` when using `-d` (see
+[Run folders](#run-folders)). Gralph reads it once at startup and never writes to it.
+If it can't be read or isn't a JSON object, gralph exits 1 with an error starting
+`--sandbox-settings:`. On top of whatever the file says, gralph always sets three keys:
 
 | Key                                | Forced to | Why                                                                   |
 | ---------------------------------- | --------- | --------------------------------------------------------------------- |
@@ -389,8 +400,9 @@ Everything else in the file reaches Claude as you wrote it. Sessions then run as
 
 ### Writing a settings file
 
-1. **Start from this file.** It's for a Go project. Save it anywhere, for
-   example next to the task file as `sandbox.json`.
+1. **Start from this file.** It's for a Go project. Save it next to the task file
+   as `sandbox.json` in the run folder, or elsewhere. A file in the run folder is
+   picked up automatically by `-d` (see [Run folders](#run-folders)).
 
    ```json
    {
@@ -496,7 +508,8 @@ With `--skip-permissions`, sessions run as
 `claude --print --dangerously-skip-permissions`, as gralph always did before
 these flags existed. A session can then run any command, read, change, or
 delete anything your user can, and reach anything on the network, with nobody
-watching.
+watching. The flag also opts out of a `sandbox.json` in the run folder if one
+exists (see [Run folders](#run-folders)).
 
 **If you pass this flag, you are on your own: you are responsible for whatever
 the sessions do.** Use it only somewhere you wouldn't mind losing, such as a
@@ -787,11 +800,13 @@ Its steps, in order. Each is skipped when a flag already answers it:
    working directory when possible. This step is skipped when you passed `-d`
    or `-t`.
 2. **Permissions.** Run sessions in Claude's sandbox or skip permissions.
-   Nothing is chosen for you: the step starts on `Choose one`, and pressing
-   `enter` there just says `choose how sessions run`. Choosing the sandbox
-   then asks you to pick its settings file. The file picker starts in your
-   current working directory (not limited to it) and selects `.json` files
-   only; paths are shown relative to the working directory when possible.
+   This step is skipped when the run folder holds a `sandbox.json` (see
+   [Run folders](#run-folders)) and neither `--sandbox-settings` nor
+   `--skip-permissions` was passed. Nothing is chosen for you: the step starts
+   on `Choose one`, and pressing `enter` there just says `choose how sessions run`.
+   Choosing the sandbox then asks you to pick its settings file. The file picker
+   starts in your current working directory (not limited to it) and selects `.json`
+   files only; paths are shown relative to the working directory when possible.
 3. **Commit.** Whether to commit each completed task, like `--commit`. Starts
    on No.
 4. **Logging.** Whether to keep a record of the run in `<folder>/logs`, like
@@ -835,9 +850,12 @@ gates"), then the command line that starts the same run without the wizard,
 such as:
 
 ```bash
-gralph -d .local/widgets --sandbox-settings sandbox.json --commit
+gralph -d .local/widgets --commit
 ```
 
+When the run folder holds a `sandbox.json` and the wizard didn't ask for the
+permission choice, the review shows `Permissions: sandbox, settings in <folder>/sandbox.json`,
+and the command line omits the `--sandbox-settings` flag because `-d` implies it.
 When you passed `-t` next to `-d` to override the folder's file, the review screen also
 lists `Tasks:` with the path you gave. Copy the command line
 for next time. Gates aren't on it, because they're in the task file. A path
@@ -899,10 +917,10 @@ gralph --tasks path/to/tasks.yaml --sandbox-settings path/to/sandbox.json
 
 | Flag                 | Required                                                                                       | Description                                                                                                                 |
 | -------------------- | ---------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| `--dir` / `-d`       | No; gives `--tasks` when it is not passed                                                      | Run folder holding `tasks.yaml` (see [Run folders](#run-folders))                                                           |
+| `--dir` / `-d`       | No; gives `--tasks` when it is not passed; may also give `--sandbox-settings` when the folder holds `sandbox.json` | Run folder holding `tasks.yaml` and optionally `sandbox.json` (see [Run folders](#run-folders)) |
 | `--tasks` / `-t`     | Yes, unless `--dir` gives it; the full-screen view asks for a folder instead                   | Path to the YAML task list that drives the loop                                                                             |
-| `--sandbox-settings` | One of these two for any real run, not both; the full-screen view asks when neither is passed  | Path to a Claude Code settings file; sessions run in Claude's sandbox with it                                               |
-| `--skip-permissions` | One of these two for any real run, not both; the full-screen view asks when neither is passed  | Run sessions with no sandbox and no permission checks. You're on your own (see [Sandboxing sessions](#sandboxing-sessions)) |
+| `--sandbox-settings` | One of these two for any real run, not both; the full-screen view asks when neither is passed  | Path to a Claude Code settings file; sessions run in Claude's sandbox with it. A file at `<folder>/sandbox.json` when using `-d` is picked up automatically (see [Run folders](#run-folders)) |
+| `--skip-permissions` | One of these two for any real run, not both; the full-screen view asks when neither is passed  | Run sessions with no sandbox and no permission checks. You're on your own (see [Sandboxing sessions](#sandboxing-sessions)). Also opts out of a `sandbox.json` in the run folder (see [Run folders](#run-folders)) |
 | `--gate-timeout`     | No                                                                                             | Time limit for every gate, like `90s`; overrides the task file's                                                            |
 | `--commit`           | No                                                                                             | Commit each completed task with git, after the gates pass                                                                   |
 | `--log-dir`          | No                                                                                             | Directory to keep a record of the run in; full-screen view only                                                             |

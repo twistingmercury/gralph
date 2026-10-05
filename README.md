@@ -50,7 +50,7 @@ fixing your `PATH`, macOS notes, and upgrading are in
 gralph --install-skill   # once: installs the gralph-docs-writer skill for Claude Code
 gralph -t path/to/tasks.yaml --dry-run
 gralph --tasks path/to/tasks.yaml --sandbox-settings path/to/sandbox.json
-gralph -d path/to/folder --sandbox-settings path/to/sandbox.json
+gralph -d path/to/folder
 ```
 
 Run it in a terminal and you get a full-screen view of the run. Pipe it,
@@ -96,7 +96,8 @@ Want the background? The idea behind gralph is in
   a subprocess, so run it from a normal terminal.
 - **You need the `claude` CLI on your `PATH`.** Gralph calls it directly.
 - **Only run task files you trust.** The prompt and task files are code you're
-  about to run. Gate commands and, with `--commit`, git and the repository's
+  about to run. A sandbox settings file in the run folder (named `sandbox.json`)
+  is treated the same way. Gate commands and, with `--commit`, git and the repository's
   hooks are run by gralph itself, with no sandbox.
 - **A failed task stops everything until you deal with it.** There's no retry.
   Fix whatever went wrong, set that task's `state` back to `pending` (or
