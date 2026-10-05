@@ -1,8 +1,8 @@
 # Gralph — Requirements
 
-> **Version**: v13
-> **Date**: 2026-10-02
-> **Notes**: A run folder and a setup wizard (ADR-018): secondary goal 6, `huh/v2` in the TUI constraint. Gates are one list per file (ADR-019): goal 8 and the non-goals follow.
+> **Version**: v14
+> **Date**: 2026-10-05
+> **Notes**: One task file holds the shared prompt and the gates under `shared` (ADR-020): the skill constraint and the path non-goal follow.
 
 [Back to Overview](00_overview.md) | [Back to Project README](../../README.md)
 
@@ -40,7 +40,7 @@ Claude Code users need a way to:
 5. Exit non-zero if any task fails, so automation scripts can detect failure
 6. Be Claude Code only: no agent abstraction, no multi-provider support
 7. Run only on Unix (Linux, macOS, BSDs)
-8. Check a completed task independently: run the file's `gates` commands after the session and mark the task completed only when every one exits zero
+8. Check a completed task independently: run the file's `shared.gates` commands after the session and mark the task completed only when every one exits zero
 9. Run sessions in Claude Code's sandbox, set up by the user's `--sandbox-settings` file; run without one only when the user asks by name with `--skip-permissions`. There is no default
 10. Commit a completed task's work itself, on request (`--commit`), only after its gates pass, one commit per task
 
@@ -59,7 +59,7 @@ Claude Code users need a way to:
 - Multi-session context sharing (each task is independent)
 - Agent abstraction layer; Claude Code is the only runtime
 - Windows support beyond an untested, build-it-yourself `windows/amd64` binary
-- Configuration files or environment variable override of task/prompt paths
+- Configuration files or environment variable override of the task file's path
 - A TUI for `--dry-run`; it always prints plain text
 - Writing the TUI's `in progress` state to tasks.yaml
 - Sending a task's gates to Claude; they are gralph's check, and the stdin prompt does not include them
@@ -105,7 +105,7 @@ Claude Code users need a way to:
 
 - **Basic maturity** — Ready for real work and still evolving; planned changes are conveniences that leave existing behaviour alone, but a breaking change can still land before 1.0
 - **No CHANGELOG** — Versions are SemVer git tags only; no maintained changelog document
-- **Skill-driven task generation** — The gralph-docs-writer skill generates tasks.yaml + prompt.md; field rules must stay in sync with internal/tasks
+- **Skill-driven task generation** — The gralph-docs-writer skill generates the one tasks.yaml, shared prompt included; field rules must stay in sync with internal/tasks
 
 ### Organizational Constraints
 

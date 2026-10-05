@@ -41,7 +41,7 @@ Package paths are relative to `src/`. Doc 03 has a section per package; this is 
 
 Imports: `cmd/main` → `internal/tui` → `internal/looper` → `internal/tasks` (`cmd/main` also calls `looper` directly), and `cmd/main` → `internal/runlog` → `internal/looper`. `looper` never imports `tui`, `runlog`, or any Bubble Tea module; `tui` never imports `runlog`; `tasks` imports none of them. Bubble Tea is v2 only (`charm.land/bubbletea/v2`, `bubbles/v2`, `lipgloss/v2`, and `huh/v2` for the wizard), imported only by `internal/tui`; never import the `github.com/charmbracelet` v1 modules.
 
-- **`cmd/main`** — flag checks and mode selection (`looper.Start`/`looper.DryRun` for plain mode, `runTUI` otherwise). Startup checks run in a fixed order, so keep it: `--dir`, `--gate-timeout`, plain mode's required flags, `--log-dir`, the session flags, the skill check. In the full-screen view the session check lets a missing choice through for the wizard, and `recheck` runs the checks again, strict and in the same order, on the wizard's answers; never skip it because the wizard already checked.
+- **`cmd/main`** — flag checks and mode selection (`looper.Start`/`looper.DryRun` for plain mode, `runTUI` otherwise). `--dir` means `<folder>/tasks.yaml` and nothing else; the shared prompt and the gates live in the task file's `shared` block (ADR-020). Startup checks run in a fixed order, so keep it: `--dir`, `--gate-timeout`, plain mode's required flags, `--log-dir`, the session flags, the skill check. In the full-screen view the session check lets a missing choice through for the wizard, and `recheck` runs the checks again, strict and in the same order, on the wizard's answers; never skip it because the wizard already checked.
 - **`internal/looper`** — the loop, session flags (ADR-014), gates (ADR-013), commit (ADR-015), process groups, and the `Event`s it reports. The `report func(Event)` hook picks the path: `nil` is plain, non-nil is the stream path.
 - **`internal/tui`** — the setup wizard and the run view (ADR-011, ADR-012, ADR-018).
 - **`internal/runlog`** — the `--log-dir` record (ADR-016). Standard library only.
@@ -50,7 +50,7 @@ Imports: `cmd/main` → `internal/tui` → `internal/looper` → `internal/tasks
 
 Invariants that are easy to break:
 
-- **Wire contract.** Claude gets `fmt.Sprintf("%s\n\n%s\n", prompt, task.String())` on stdin, the same on both paths; both test suites golden-assert it. Gates, the `error` field, and anything about gralph are never sent to Claude. A task's `name` and `prompt` are stored and sent verbatim.
+- **Wire contract.** Claude gets `fmt.Sprintf("%s\n\n%s\n", prompt, task.String())` on stdin, the same on both paths; both test suites golden-assert it. Gates, the `error` field, and anything about gralph are never sent to Claude. The shared prompt is `shared.prompt` from the task file, trimmed on load. A task's `name` and `prompt` are stored and sent verbatim.
 - **One place for the command and the outcome.** Both runners build the command with `claudeCmd` and resolve the result with `finishTask`. Do not fork either, and never add an exit-code fallback to the outcome rule.
 - **Plain mode's output is a contract (ADR-011).** The stream path writes nothing to gralph's stdout or stderr; the plain path reports no events.
 - **A cancel changes nothing on disk.** Cancelling `ctx` leaves the task's state and the file untouched, whether a session, a gate, or the commit was running. `in progress` is display only and never saved. The `--gate-timeout` value is never written to the task file.
@@ -85,7 +85,7 @@ Code:
 
 Keeping things in step:
 
-- `src/skills/gralph-docs-writer/` field rules must match `internal/tasks`. Its `templates/` are the only task-file and prompt templates; do not add templates elsewhere. `scripts/install_skill.sh` is a development shortcut that copies the working tree's skill into `~/.claude/skills`.
+- `src/skills/gralph-docs-writer/` field rules must match `internal/tasks`. Its `templates/` are the only task-file template; do not add templates elsewhere. `scripts/install_skill.sh` is a development shortcut that copies the working tree's skill into `~/.claude/skills`.
 - A change to user-visible behaviour (a flag, an error message, output) updates `docs/howto.md` in the same change; the README keeps only a summary that links there.
 - A change to how a package works updates `03_system_architecture.md` in the same change, and a design change updates the ADRs. Do not grow this file with that detail.
 - A new or removed package or import edge updates `docs/dependency_graph.md` in the same change.
