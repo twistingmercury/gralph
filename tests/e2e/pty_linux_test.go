@@ -37,6 +37,9 @@ func (b *syncBuffer) String() string {
 	return b.buf.String()
 }
 
+// drainCeiling bounds how long an exit waits for the pty drain to finish.
+const drainCeiling = 2 * time.Second
+
 // ptyRun is a gralph process running under a pty.
 type ptyRun struct {
 	cmd *exec.Cmd
@@ -71,13 +74,26 @@ func startPty(t *testing.T, dir string, env []string, args ...string) *ptyRun {
 	// The drain must outlive any signal: if nothing reads the pty, gralph
 	// blocks writing its exit output and looks hung.
 	out := &syncBuffer{}
+	drained := make(chan struct{})
 	go func() {
+		defer close(drained)
+
 		_, _ = io.Copy(out, ptmx)
 	}()
 
+	// Wait does not wait for the drain, since the pty is not cmd.Stdout.
+	// Report the exit only after the drain has flushed the last bytes, so a
+	// test that reads out after <-exited sees everything. A child that
+	// outlives gralph can hold the slave open, so the wait has a ceiling.
 	exited := make(chan int, 1)
 	go func() {
 		_ = cmd.Wait()
+
+		select {
+		case <-drained:
+		case <-time.After(drainCeiling):
+		}
+
 		exited <- cmd.ProcessState.ExitCode()
 	}()
 
