@@ -384,7 +384,7 @@ func TestRun_CommitsOneCommitPerCompletedTask(t *testing.T) {
 			dir := initRepo(t)
 			tasksPath := taskFile(dir)
 			tl := &tasks.TaskList{
-				Gates: &[]tasks.Gate{numberedWorkGate()},
+				Shared: tasks.Shared{Prompt: "shared prompt", Gates: &[]tasks.Gate{numberedWorkGate()}},
 				Tasks: []tasks.Task{
 					{ID: 1, Name: "First", Prompt: "p1"},
 					{ID: 2, Name: "Second", Prompt: "p2"},
@@ -485,7 +485,7 @@ func TestRun_CommitFailureFailsTaskAndStopsRun(t *testing.T) {
 	t.Setenv("FAKE_CLAUDE_RECORD", recordPath)
 	tasksPath := taskFile(dir)
 	tl := &tasks.TaskList{
-		Gates: &[]tasks.Gate{workGate("one.txt")},
+		Shared: tasks.Shared{Prompt: "shared prompt", Gates: &[]tasks.Gate{workGate("one.txt")}},
 		Tasks: []tasks.Task{
 			{ID: 1, Name: "First", Prompt: "p1"},
 			{ID: 2, Name: "Second", Prompt: "p2"},
@@ -602,7 +602,7 @@ func TestRun_CommitOddTaskNames(t *testing.T) {
 			useFakeClaude(t)
 			dir := initRepo(t)
 			tasksPath := taskFile(dir)
-			tl := &tasks.TaskList{Gates: &[]tasks.Gate{workGate("one.txt")}, Tasks: []tasks.Task{{ID: 1, Name: tt.taskName, Prompt: "p"}}}
+			tl := &tasks.TaskList{Shared: tasks.Shared{Prompt: "shared prompt", Gates: &[]tasks.Gate{workGate("one.txt")}}, Tasks: []tasks.Task{{ID: 1, Name: tt.taskName, Prompt: "p"}}}
 
 			var rec recorder
 			require.NoError(t, Run(context.Background(), "prompt", tl, tasksPath, "", bypass, openRepo(t, tasksPath), rec.report))
@@ -746,7 +746,7 @@ func TestRun_CancelDuringCommitLeavesFileUntouched(t *testing.T) {
 	useFakeClaude(t)
 	dir := initRepo(t)
 	tasksPath := taskFile(dir)
-	tasksYAML := "tasks:\n  - {id: 1, name: First, prompt: p1, state: pending}\n"
+	tasksYAML := "shared:\n  prompt: shared prompt\ntasks:\n  - {id: 1, name: First, prompt: p1, state: pending}\n"
 	writeFile(t, tasksPath, tasksYAML)
 
 	_, err := cancelDuringCommit(t, dir, tasksPath, "touch READY\nsleep 60")
@@ -768,7 +768,7 @@ func TestRun_CancelDuringCommitKillsAHookThatIgnoresSIGTERM(t *testing.T) {
 	useFakeClaude(t)
 	dir := initRepo(t)
 	tasksPath := taskFile(dir)
-	writeFile(t, tasksPath, "tasks:\n  - {id: 1, name: First, prompt: p1, state: pending}\n")
+	writeFile(t, tasksPath, "shared:\n  prompt: shared prompt\ntasks:\n  - {id: 1, name: First, prompt: p1, state: pending}\n")
 
 	took, err := cancelDuringCommit(t, dir, tasksPath, "trap '' TERM\ntouch READY\nsleep 60")
 	require.ErrorContains(t, err, "task 1: First failed: commit")
@@ -778,7 +778,7 @@ func TestRun_CancelDuringCommitKillsAHookThatIgnoresSIGTERM(t *testing.T) {
 	assert.Equal(t, []string{"init"}, subjects(t, dir))
 }
 
-const validTasks = "tasks:\n  - {id: 1, name: First, prompt: p1}\n"
+const validTasks = "shared:\n  prompt: shared prompt\ntasks:\n  - {id: 1, name: First, prompt: p1}\n"
 
 func TestStart_CommitRefusesDirtyTreeBeforeAnySession(t *testing.T) {
 	useFakeClaude(t)
@@ -806,7 +806,7 @@ func TestStart_CommitFlagCommitsTheTask(t *testing.T) {
 	run := tempDir(t)
 	promptPath, tasksPath := filepath.Join(run, "prompt.md"), filepath.Join(run, "tasks.yaml")
 	writeFile(t, promptPath, "prompt\n")
-	writeFile(t, tasksPath, "gates:\n  - cmd: echo work > one.txt\ntasks:\n  - id: 1\n    name: First\n    prompt: p1\n")
+	writeFile(t, tasksPath, "shared:\n  prompt: shared prompt\n  gates:\n    - cmd: echo work > one.txt\ntasks:\n  - id: 1\n    name: First\n    prompt: p1\n")
 
 	require.NoError(t, Start(context.Background(), promptPath, tasksPath, "", bypass, true))
 	assert.Equal(t, []string{"First", "init"}, subjects(t, dir))

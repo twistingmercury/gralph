@@ -18,7 +18,7 @@ import (
 
 func TestNeedsWizard(t *testing.T) {
 	gates := []tasks.Gate{}
-	decided := &tasks.TaskList{Gates: &gates}
+	decided := &tasks.TaskList{Shared: tasks.Shared{Prompt: "shared prompt", Gates: &gates}}
 	undecided := &tasks.TaskList{}
 	full := Settings{TasksPath: "t.yaml", PromptPath: "p.md", Tasks: decided, SkipPermissions: true}
 
@@ -79,7 +79,7 @@ func TestStepVisibility_FollowsAnswers(t *testing.T) {
 
 func TestStepOpen(t *testing.T) {
 	gates := []tasks.Gate{}
-	decided := &tasks.TaskList{Gates: &gates}
+	decided := &tasks.TaskList{Shared: tasks.Shared{Prompt: "shared prompt", Gates: &gates}}
 
 	assert.True(t, folderOpen(Settings{TasksPath: "t.yaml"}))
 	assert.False(t, folderOpen(Settings{TasksPath: "t.yaml", PromptPath: "p.md"}))
@@ -99,10 +99,10 @@ type wizardResult struct {
 // the wizard opens on the permissions step alone.
 func permissionsOnly(t *testing.T) Settings {
 	t.Helper()
-	tasksPath := writeFile(t, "tasks.yaml", "gates: []\n"+validTasks)
+	tasksPath := writeFile(t, "tasks.yaml", "shared:\n  prompt: shared prompt\n  gates: []\ntasks:\n  - id: 1\n    name: First\n    prompt: do it\n")
 	promptPath := writeFile(t, "prompt.md", "do the work")
 	gates := []tasks.Gate{}
-	tl := &tasks.TaskList{Gates: &gates, Tasks: []tasks.Task{{ID: 1, Name: "First", Prompt: "do it"}}}
+	tl := &tasks.TaskList{Shared: tasks.Shared{Prompt: "shared prompt", Gates: &gates}, Tasks: []tasks.Task{{ID: 1, Name: "First", Prompt: "do it"}}}
 	return Settings{TasksPath: tasksPath, PromptPath: promptPath, Prompt: "do the work", Tasks: tl}
 }
 
@@ -306,7 +306,7 @@ func TestReviewText(t *testing.T) {
 	gates := []tasks.Gate{{Cmd: "make test", Timeout: "5m"}}
 	s := Settings{
 		Dir: "my_run", TasksPath: "my_run/tasks.yaml", PromptPath: "my_run/prompt.md",
-		Tasks: &tasks.TaskList{Gates: &gates}, SkipPermissions: true, GateTimeout: "90s",
+		Tasks: &tasks.TaskList{Shared: tasks.Shared{Prompt: "shared prompt", Gates: &gates}}, SkipPermissions: true, GateTimeout: "90s",
 	}
 	text := reviewText(s)
 	assert.Contains(t, text, "Folder: my_run")

@@ -20,7 +20,9 @@ import (
 // testdata/fakeclaude/main.go.
 const recordSeparator = "\x00---FAKE-CLAUDE-RECORD-SEPARATOR---\x00"
 
-const validTasksYAML = `tasks:
+const validTasksYAML = `shared:
+  prompt: shared prompt
+tasks:
   - id: 1
     name: First task
     prompt: Do the first thing.
@@ -167,7 +169,7 @@ func TestStart_WhitespaceOnlyPrompt(t *testing.T) {
 func TestStart_InvalidTasksYAML(t *testing.T) {
 	dir := t.TempDir()
 	promptPath := writePromptFile(t, dir, "Do the task.\n")
-	tasksPath := writeTasksFile(t, dir, "tasks:\n  - {id: 1, name: a, prompt: p, state: bogus}\n")
+	tasksPath := writeTasksFile(t, dir, "shared:\n  prompt: shared prompt\ntasks:\n  - {id: 1, name: a, prompt: p, state: bogus}\n")
 
 	err := Start(context.Background(), promptPath, tasksPath, "", bypass, false)
 	require.Error(t, err)
@@ -284,7 +286,7 @@ func TestLoadTasks_ReadError(t *testing.T) {
 
 func TestLoadTasks_InvalidYAML(t *testing.T) {
 	dir := t.TempDir()
-	path := writeTasksFile(t, dir, "tasks:\n  - {id: 1, name: a, prompt: p, state: bogus}\n")
+	path := writeTasksFile(t, dir, "shared:\n  prompt: shared prompt\ntasks:\n  - {id: 1, name: a, prompt: p, state: bogus}\n")
 
 	_, err := LoadTasks(path)
 	require.Error(t, err)
@@ -308,7 +310,7 @@ func TestLoadTasks_Success(t *testing.T) {
 
 func TestLoadTasks_FailedTaskReturnsListAndErrFailedTasks(t *testing.T) {
 	dir := t.TempDir()
-	path := writeTasksFile(t, dir, "tasks:\n  - {id: 1, name: a, prompt: p}\n  - {id: 2, name: b, prompt: p, state: failed}\n")
+	path := writeTasksFile(t, dir, "shared:\n  prompt: shared prompt\ntasks:\n  - {id: 1, name: a, prompt: p}\n  - {id: 2, name: b, prompt: p, state: failed}\n")
 
 	got, err := LoadTasks(path)
 	require.ErrorIs(t, err, ErrFailedTasks)
@@ -318,7 +320,7 @@ func TestLoadTasks_FailedTaskReturnsListAndErrFailedTasks(t *testing.T) {
 
 func TestLoadTasksReport_FailedTaskWritesNoticeAndTable(t *testing.T) {
 	dir := t.TempDir()
-	path := writeTasksFile(t, dir, "tasks:\n  - {id: 1, name: a, prompt: p}\n  - {id: 2, name: b, prompt: p, state: failed}\n")
+	path := writeTasksFile(t, dir, "shared:\n  prompt: shared prompt\ntasks:\n  - {id: 1, name: a, prompt: p}\n  - {id: 2, name: b, prompt: p, state: failed}\n")
 
 	var got bytes.Buffer
 	tl, err := LoadTasksReport(&got, path)
@@ -344,7 +346,7 @@ func TestLoadTasksReport_CleanFileWritesNothing(t *testing.T) {
 
 func TestLoadTasks_ParseErrorIsNotErrFailedTasks(t *testing.T) {
 	dir := t.TempDir()
-	path := writeTasksFile(t, dir, "tasks:\n  - {id: 1, name: a, prompt: p, state: bogus}\n")
+	path := writeTasksFile(t, dir, "shared:\n  prompt: shared prompt\ntasks:\n  - {id: 1, name: a, prompt: p, state: bogus}\n")
 
 	_, err := LoadTasks(path)
 	require.Error(t, err)
@@ -359,7 +361,7 @@ func TestRunLoop_HappyPathInvokesInOrderWithExactStdin(t *testing.T) {
 	t.Setenv("FAKE_CLAUDE_RECORD", recordPath)
 
 	p := "Follow the runbook."
-	tl := &tasks.TaskList{Tasks: []tasks.Task{
+	tl := &tasks.TaskList{Shared: tasks.Shared{Prompt: "shared prompt"}, Tasks: []tasks.Task{
 		{ID: 1, Name: "First", Prompt: "Do the first thing."},
 		{ID: 2, Name: "Second", Prompt: "Do the second thing."},
 		{ID: 3, Name: "Third", Prompt: "Do the third thing."},
@@ -390,7 +392,7 @@ func TestRunLoop_NonZeroExitStopsAtFirstTask(t *testing.T) {
 	t.Setenv("FAKE_CLAUDE_RECORD", recordPath)
 	t.Setenv("FAKE_CLAUDE_EXIT", "1")
 
-	tl := &tasks.TaskList{Tasks: []tasks.Task{
+	tl := &tasks.TaskList{Shared: tasks.Shared{Prompt: "shared prompt"}, Tasks: []tasks.Task{
 		{ID: 1, Name: "First", Prompt: "p1"},
 		{ID: 2, Name: "Second", Prompt: "p2"},
 	}}
@@ -414,7 +416,7 @@ func TestRunLoop_ClaudeMissingFromPath(t *testing.T) {
 	t.Setenv("PATH", dir)
 	tasksPath := filepath.Join(dir, "tasks.yaml")
 
-	tl := &tasks.TaskList{Tasks: []tasks.Task{{ID: 1, Name: "Only", Prompt: "p"}}}
+	tl := &tasks.TaskList{Shared: tasks.Shared{Prompt: "shared prompt"}, Tasks: []tasks.Task{{ID: 1, Name: "Only", Prompt: "p"}}}
 
 	err := runLoop(context.Background(), "prompt", tl, tasksPath, "", bypass, nil, nil)
 	require.Error(t, err)
@@ -437,7 +439,7 @@ func TestRunLoop_ContextAlreadyCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	tl := &tasks.TaskList{Tasks: []tasks.Task{{ID: 1, Name: "Only", Prompt: "p"}}}
+	tl := &tasks.TaskList{Shared: tasks.Shared{Prompt: "shared prompt"}, Tasks: []tasks.Task{{ID: 1, Name: "Only", Prompt: "p"}}}
 
 	err := runLoop(ctx, "prompt", tl, tasksPath, "", bypass, nil, nil)
 	require.Error(t, err)
@@ -456,7 +458,7 @@ func TestRunLoop_PrintsPromptToStdout(t *testing.T) {
 	tasksPath := filepath.Join(dir, "tasks.yaml")
 	t.Setenv("FAKE_CLAUDE_RECORD", filepath.Join(dir, "record.log"))
 
-	tl := &tasks.TaskList{Tasks: []tasks.Task{
+	tl := &tasks.TaskList{Shared: tasks.Shared{Prompt: "shared prompt"}, Tasks: []tasks.Task{
 		{ID: 1, Name: "First", Prompt: "Do the first thing."},
 		{ID: 2, Name: "Second", Prompt: "Do the second thing."},
 	}}
@@ -505,7 +507,7 @@ func TestRunLoop_SkipsCompletedTasks(t *testing.T) {
 	tasksPath := filepath.Join(dir, "tasks.yaml")
 	t.Setenv("FAKE_CLAUDE_RECORD", recordPath)
 
-	tl := &tasks.TaskList{Tasks: []tasks.Task{
+	tl := &tasks.TaskList{Shared: tasks.Shared{Prompt: "shared prompt"}, Tasks: []tasks.Task{
 		{ID: 1, Name: "First", Prompt: "p1", State: tasks.CompletedState},
 		{ID: 2, Name: "Second", Prompt: "p2", State: tasks.PendingState},
 	}}
@@ -548,7 +550,9 @@ func TestStart_RefusesWhenAnyTaskFailed(t *testing.T) {
 	t.Setenv("FAKE_CLAUDE_RECORD", recordPath)
 
 	promptPath := writePromptFile(t, dir, "Follow the plan.\n")
-	content := `tasks:
+	content := `shared:
+  prompt: shared prompt
+tasks:
   - id: 1
     name: First task
     prompt: Do the first thing.
@@ -593,7 +597,9 @@ func TestDryRun_ValidFile(t *testing.T) {
 // for completed and pending tasks, with a 3-digit id widening the ID column.
 func TestDryRun_NoFailedTasksTable(t *testing.T) {
 	dir := t.TempDir()
-	content := `tasks:
+	content := `shared:
+  prompt: shared prompt
+tasks:
   - id: 1
     name: First task
     prompt: Do the first thing.
@@ -616,7 +622,7 @@ func TestDryRun_NoFailedTasksTable(t *testing.T) {
 
 func TestDryRun_InvalidFile(t *testing.T) {
 	dir := t.TempDir()
-	tasksPath := writeTasksFile(t, dir, "tasks:\n  - {id: 1, name: a, prompt: p, state: bogus}\n")
+	tasksPath := writeTasksFile(t, dir, "shared:\n  prompt: shared prompt\ntasks:\n  - {id: 1, name: a, prompt: p, state: bogus}\n")
 
 	var out bytes.Buffer
 	err := DryRun(&out, tasksPath, "", "", false)
@@ -630,7 +636,9 @@ func TestDryRun_InvalidFile(t *testing.T) {
 // that a file with failed tasks is still accepted.
 func TestDryRun_FlagsFailedTasks(t *testing.T) {
 	dir := t.TempDir()
-	content := `tasks:
+	content := `shared:
+  prompt: shared prompt
+tasks:
   - id: 1
     name: First task
     prompt: Do the first thing.
@@ -663,13 +671,15 @@ func TestDryRun_FlagsFailedTasks(t *testing.T) {
 
 func TestDryRun_ListsEffectiveGateTimeouts(t *testing.T) {
 	tasksPath := filepath.Join(t.TempDir(), "tasks.yaml")
-	yml := `gates:
-  - cmd: go test ./...
-    timeout: 30s
-  - cmd: |
-      echo one
-      echo two
-  - cmd: make lint
+	yml := `shared:
+  prompt: shared prompt
+  gates:
+    - cmd: go test ./...
+      timeout: 30s
+    - cmd: |
+        echo one
+        echo two
+    - cmd: make lint
 tasks:
   - id: 1
     name: First
@@ -711,7 +721,7 @@ tasks:
 
 func TestDryRun_NoGatesPrintsNoGateLines(t *testing.T) {
 	tasksPath := filepath.Join(t.TempDir(), "tasks.yaml")
-	require.NoError(t, os.WriteFile(tasksPath, []byte("tasks:\n  - {id: 1, name: First, prompt: p}\n"), 0o600))
+	require.NoError(t, os.WriteFile(tasksPath, []byte("shared:\n  prompt: shared prompt\ntasks:\n  - {id: 1, name: First, prompt: p}\n"), 0o600))
 
 	var out bytes.Buffer
 	require.NoError(t, DryRun(&out, tasksPath, "2m", "", false))
@@ -727,7 +737,7 @@ func TestRunTaskPlain_ArgvIsPrintThenSessionArgs(t *testing.T) {
 	t.Setenv("FAKE_CLAUDE_ARGS", argsPath)
 
 	sessionArgs := []string{"--permission-mode", "acceptEdits", "--settings", `{"sandbox":{"enabled":true}}`}
-	tl := &tasks.TaskList{Tasks: []tasks.Task{{ID: 1, Name: "First", Prompt: "Do the first thing."}}}
+	tl := &tasks.TaskList{Shared: tasks.Shared{Prompt: "shared prompt"}, Tasks: []tasks.Task{{ID: 1, Name: "First", Prompt: "Do the first thing."}}}
 	require.NoError(t, runLoop(context.Background(), "prompt", tl, filepath.Join(dir, "tasks.yaml"), "", sessionArgs, nil, nil))
 
 	args, err := os.ReadFile(argsPath)

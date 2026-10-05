@@ -17,7 +17,7 @@ import (
 	"github.com/twistingmercury/gralph/internal/tui"
 )
 
-const validTasksYAML = "tasks:\n  - id: 1\n    name: first\n    prompt: do it\n"
+const validTasksYAML = "shared:\n  prompt: shared prompt\ntasks:\n  - id: 1\n    name: first\n    prompt: do it\n"
 
 func TestSessionArgs(t *testing.T) {
 	settings := filepath.Join(t.TempDir(), "sandbox.json")
@@ -67,14 +67,14 @@ func TestSessionArgs_WizardLeavesTheChoiceOpen(t *testing.T) {
 
 func TestSaveGates_OnlyWhenEdited(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "tasks.yaml")
-	original := "# a comment SaveTasks would drop\ntasks:\n  - id: 1\n    name: First\n    prompt: do it\n"
+	original := "# a comment SaveTasks would drop\nshared:\n  prompt: shared prompt\ntasks:\n  - id: 1\n    name: First\n    prompt: do it\n"
 	require.NoError(t, os.WriteFile(path, []byte(original), 0o600))
 	tl, err := looper.LoadTasks(path)
 	require.NoError(t, err)
 
 	gates := []tasks.Gate{{Cmd: "make test"}}
 	edited := *tl
-	edited.Gates = &gates
+	edited.Shared.Gates = &gates
 
 	require.NoError(t, saveGates(tui.Settings{TasksPath: path, Tasks: &edited, GatesEdited: false}))
 	unchanged, err := os.ReadFile(path)
@@ -84,8 +84,8 @@ func TestSaveGates_OnlyWhenEdited(t *testing.T) {
 	require.NoError(t, saveGates(tui.Settings{TasksPath: path, Tasks: &edited, GatesEdited: true}))
 	saved, err := looper.LoadTasks(path)
 	require.NoError(t, err)
-	require.NotNil(t, saved.Gates)
-	assert.Equal(t, gates, *saved.Gates)
+	require.NotNil(t, saved.Shared.Gates)
+	assert.Equal(t, gates, *saved.Shared.Gates)
 }
 
 func TestLoadGiven_BothEmpty(t *testing.T) {
@@ -123,7 +123,7 @@ func TestLoadGiven_BadTasks(t *testing.T) {
 
 func TestLoadGiven_FailedTask(t *testing.T) {
 	tasksPath := filepath.Join(t.TempDir(), "tasks.yaml")
-	failedYAML := "tasks:\n  - id: 1\n    name: first\n    prompt: do it\n    state: failed\n"
+	failedYAML := "shared:\n  prompt: shared prompt\ntasks:\n  - id: 1\n    name: first\n    prompt: do it\n    state: failed\n"
 	require.NoError(t, os.WriteFile(tasksPath, []byte(failedYAML), 0o600))
 
 	_, _, err := loadGiven(tasksPath, "")
@@ -378,7 +378,7 @@ func TestPrepareRun_RefusedRunLeavesTheTaskFileAlone(t *testing.T) {
 	tl, err := looper.LoadTasks(path)
 	require.NoError(t, err)
 	gates := []tasks.Gate{{Cmd: "make test"}}
-	tl.Gates = &gates
+	tl.Shared.Gates = &gates
 	setFlags(t, "", true, true, "", "")
 
 	repo, runDir, err := prepareRun(tui.Settings{TasksPath: path, Tasks: tl, GatesEdited: true})

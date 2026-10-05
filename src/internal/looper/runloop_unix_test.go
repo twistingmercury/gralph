@@ -27,12 +27,12 @@ func TestRunLoop_CancelMidTaskStopsQuickly(t *testing.T) {
 	t.Setenv("FAKE_CLAUDE_BLOCK", "1")
 	t.Setenv("FAKE_CLAUDE_READY", readyPath)
 
-	tl := &tasks.TaskList{Tasks: []tasks.Task{
+	tl := &tasks.TaskList{Shared: tasks.Shared{Prompt: "shared prompt"}, Tasks: []tasks.Task{
 		{ID: 1, Name: "First", Prompt: "p1"},
 		{ID: 2, Name: "Second", Prompt: "p2"},
 	}}
 
-	tasksYAML := "tasks:\n  - {id: 1, name: First, prompt: p1, state: pending}\n  - {id: 2, name: Second, prompt: p2, state: pending}\n"
+	tasksYAML := "shared:\n  prompt: shared prompt\ntasks:\n  - {id: 1, name: First, prompt: p1, state: pending}\n  - {id: 2, name: Second, prompt: p2, state: pending}\n"
 	require.NoError(t, os.WriteFile(tasksPath, []byte(tasksYAML), 0o600))
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -78,7 +78,7 @@ func TestRunLoop_SavesAfterEachCompletedTask(t *testing.T) {
 	t.Setenv("FAKE_CLAUDE_BLOCK_ON", "block-second")
 	t.Setenv("FAKE_CLAUDE_READY", readyPath)
 
-	tasksYAML := "tasks:\n  - {id: 1, name: First, prompt: p1, state: pending}\n  - {id: 2, name: Second, prompt: block-second, state: pending}\n"
+	tasksYAML := "shared:\n  prompt: shared prompt\ntasks:\n  - {id: 1, name: First, prompt: p1, state: pending}\n  - {id: 2, name: Second, prompt: block-second, state: pending}\n"
 	require.NoError(t, os.WriteFile(tasksPath, []byte(tasksYAML), 0o600))
 	tl, err := tasks.ParseTasks([]byte(tasksYAML))
 	require.NoError(t, err)
@@ -122,7 +122,7 @@ func TestRunLoop_SavesAfterEachCompletedTask(t *testing.T) {
 func unsavableTasksFile(t *testing.T) (string, *tasks.TaskList) {
 	t.Helper()
 
-	tasksYAML := "tasks:\n  - {id: 1, name: First, prompt: p1, state: pending}\n  - {id: 2, name: Second, prompt: p2, state: pending}\n"
+	tasksYAML := "shared:\n  prompt: shared prompt\ntasks:\n  - {id: 1, name: First, prompt: p1, state: pending}\n  - {id: 2, name: Second, prompt: p2, state: pending}\n"
 	tl, err := tasks.ParseTasks([]byte(tasksYAML))
 	require.NoError(t, err)
 

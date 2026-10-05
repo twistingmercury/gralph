@@ -45,7 +45,7 @@ func permissionsOpen(s Settings) bool {
 // gatesOpen treats gates: [] as a decision and only an absent key as a gap, so
 // a file that chose no gates is never asked again.
 func gatesOpen(s Settings) bool {
-	return s.Tasks == nil || s.Tasks.Gates == nil
+	return s.Tasks == nil || s.Tasks.Shared.Gates == nil
 }
 
 // wizard holds the answers as the steps fill them in. The hide funcs are
@@ -286,7 +286,7 @@ func (w *wizard) editGates(ctx context.Context, opts []tea.ProgramOption) error 
 	}
 
 	tl := *w.s.Tasks
-	tl.Gates = &after
+	tl.Shared.Gates = &after
 	w.s.Tasks = &tl
 	w.s.GatesEdited = true
 	return nil

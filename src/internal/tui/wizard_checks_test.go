@@ -43,7 +43,7 @@ func TestCheckFolder(t *testing.T) {
 	writeFileIn(t, badYAML, "tasks.yaml", "tasks: [\n")
 	writeFileIn(t, badYAML, "prompt.md", "do the work")
 	failed := t.TempDir()
-	writeFileIn(t, failed, "tasks.yaml", "tasks:\n  - id: 1\n    name: First\n    prompt: do it\n    state: failed\n")
+	writeFileIn(t, failed, "tasks.yaml", "shared:\n  prompt: shared prompt\ntasks:\n  - id: 1\n    name: First\n    prompt: do it\n    state: failed\n")
 	writeFileIn(t, failed, "prompt.md", "do the work")
 	blankPrompt := t.TempDir()
 	writeFileIn(t, blankPrompt, "tasks.yaml", validTasks)

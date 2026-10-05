@@ -17,7 +17,7 @@ import (
 )
 
 func testTasks() *tasks.TaskList {
-	return &tasks.TaskList{Tasks: []tasks.Task{
+	return &tasks.TaskList{Shared: tasks.Shared{Prompt: "shared prompt"}, Tasks: []tasks.Task{
 		{ID: 1, Name: "First", Prompt: "do the first thing", State: tasks.PendingState},
 		{ID: 2, Name: "Second", Prompt: "do the second thing", State: tasks.PendingState},
 	}}
@@ -85,7 +85,7 @@ func TestRenderTasks_RowFormatAndStylePerState(t *testing.T) {
 	}
 	for _, tc := range states {
 		t.Run(tc.state, func(t *testing.T) {
-			m := New(&tasks.TaskList{Tasks: []tasks.Task{{ID: 26, Name: "Name", Prompt: "p", State: tc.state}}}, func() {})
+			m := New(&tasks.TaskList{Shared: tasks.Shared{Prompt: "shared prompt"}, Tasks: []tasks.Task{{ID: 26, Name: "Name", Prompt: "p", State: tc.state}}}, func() {})
 			text := "26: Name: " + tc.state
 			styled := tc.style.Render(text)
 

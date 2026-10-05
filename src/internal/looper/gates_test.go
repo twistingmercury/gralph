@@ -23,7 +23,7 @@ func touchGate(path string) tasks.Gate {
 }
 
 func gatedTask(gates ...tasks.Gate) *tasks.TaskList {
-	return &tasks.TaskList{Gates: &gates, Tasks: []tasks.Task{{ID: 1, Name: "First", Prompt: "p1"}}}
+	return &tasks.TaskList{Shared: tasks.Shared{Prompt: "shared prompt", Gates: &gates}, Tasks: []tasks.Task{{ID: 1, Name: "First", Prompt: "p1"}}}
 }
 
 func TestRunLoop_GatesPassCompletesTask(t *testing.T) {
@@ -55,7 +55,7 @@ func TestRunLoop_FileGatesRunAfterEveryCompletedTask(t *testing.T) {
 	countPath := filepath.Join(dir, "gate-runs")
 
 	tl := &tasks.TaskList{
-		Gates: &[]tasks.Gate{{Cmd: "echo ran >> '" + countPath + "'"}},
+		Shared: tasks.Shared{Prompt: "shared prompt", Gates: &[]tasks.Gate{{Cmd: "echo ran >> '" + countPath + "'"}}},
 		Tasks: []tasks.Task{
 			{ID: 1, Name: "First", Prompt: "p1"},
 			{ID: 2, Name: "Done", Prompt: "p2", State: tasks.CompletedState},
@@ -79,7 +79,7 @@ func TestRunLoop_GateFailureFailsTaskAndStopsRun(t *testing.T) {
 	t.Setenv("FAKE_CLAUDE_RECORD", recordPath)
 
 	tl := &tasks.TaskList{
-		Gates: &[]tasks.Gate{{Cmd: `test "a" = "b"`}, touchGate(never)},
+		Shared: tasks.Shared{Prompt: "shared prompt", Gates: &[]tasks.Gate{{Cmd: `test "a" = "b"`}, touchGate(never)}},
 		Tasks: []tasks.Task{
 			{ID: 1, Name: "First", Prompt: "p1"},
 			{ID: 2, Name: "Second", Prompt: "p2"},
@@ -335,7 +335,7 @@ func cancelDuringGate(t *testing.T, stream bool, timeout string) {
 	readyPath := filepath.Join(dir, "ready")
 	tasksPath := filepath.Join(dir, "tasks.yaml")
 
-	tasksYAML := "tasks:\n  - {id: 1, name: First, prompt: p1, state: pending}\n"
+	tasksYAML := "shared:\n  prompt: shared prompt\ntasks:\n  - {id: 1, name: First, prompt: p1, state: pending}\n"
 	require.NoError(t, os.WriteFile(tasksPath, []byte(tasksYAML), 0o600))
 	tl := gatedTask(tasks.Gate{Cmd: "touch '" + readyPath + "'; sleep 60", Timeout: timeout})
 

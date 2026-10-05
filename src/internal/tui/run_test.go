@@ -112,7 +112,7 @@ func waitRun(t *testing.T, done <-chan runResult) runResult {
 func TestRun_TwoTasksCompleteThenQuit(t *testing.T) {
 	tasksPath := filepath.Join(t.TempDir(), "tasks.yaml")
 	require.NoError(t, os.WriteFile(tasksPath, []byte(
-		"tasks:\n  - {id: 1, name: First, prompt: p1}\n  - {id: 2, name: Second, prompt: p2}\n"), 0o600))
+		"shared:\n  prompt: shared prompt\ntasks:\n  - {id: 1, name: First, prompt: p1}\n  - {id: 2, name: Second, prompt: p2}\n"), 0o600))
 
 	w, done := startRun(t, context.Background(), tasksPath)
 
@@ -150,7 +150,7 @@ func TestRun_OutsideCancelStopsRun(t *testing.T) {
 	tasksPath := filepath.Join(dir, "tasks.yaml")
 	t.Setenv("FAKE_CLAUDE_BLOCK", "1")
 	t.Setenv("FAKE_CLAUDE_READY", readyPath)
-	tasksYAML := "tasks:\n  - {id: 1, name: First, prompt: p1, state: pending}\n"
+	tasksYAML := "shared:\n  prompt: shared prompt\ntasks:\n  - {id: 1, name: First, prompt: p1, state: pending}\n"
 	require.NoError(t, os.WriteFile(tasksPath, []byte(tasksYAML), 0o600))
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -183,7 +183,7 @@ func TestRun_ConfirmedStopCancelsRun(t *testing.T) {
 	tasksPath := filepath.Join(dir, "tasks.yaml")
 	t.Setenv("FAKE_CLAUDE_BLOCK", "1")
 	t.Setenv("FAKE_CLAUDE_READY", readyPath)
-	tasksYAML := "tasks:\n  - {id: 1, name: First, prompt: p1, state: pending}\n"
+	tasksYAML := "shared:\n  prompt: shared prompt\ntasks:\n  - {id: 1, name: First, prompt: p1, state: pending}\n"
 	require.NoError(t, os.WriteFile(tasksPath, []byte(tasksYAML), 0o600))
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -238,7 +238,7 @@ func TestRun_CommitsEachTaskIntoTheRepo(t *testing.T) {
 	dir := initGitRepo(t)
 	tasksPath := filepath.Join(dir, "run", "tasks.yaml")
 	require.NoError(t, os.WriteFile(tasksPath, []byte(
-		"gates:\n  - cmd: echo work > one.txt\ntasks:\n  - id: 1\n    name: First\n    prompt: p1\n"), 0o600))
+		"shared:\n  prompt: shared prompt\n  gates:\n    - cmd: echo work > one.txt\ntasks:\n  - id: 1\n    name: First\n    prompt: p1\n"), 0o600))
 	repo, err := looper.OpenRepo(tasksPath)
 	require.NoError(t, err)
 	require.NotNil(t, repo)
@@ -287,7 +287,7 @@ func (k *kindLog) snapshot() []looper.EventKind {
 
 func TestRun_ObserveSeesTheWholeRun(t *testing.T) {
 	tasksPath := filepath.Join(t.TempDir(), "tasks.yaml")
-	require.NoError(t, os.WriteFile(tasksPath, []byte("tasks:\n  - {id: 1, name: First, prompt: p1}\n"), 0o600))
+	require.NoError(t, os.WriteFile(tasksPath, []byte("shared:\n  prompt: shared prompt\ntasks:\n  - {id: 1, name: First, prompt: p1}\n"), 0o600))
 
 	var seen kindLog
 	w, done := startRunWith(t, context.Background(), tasksPath, nil, seen.observe)
@@ -303,7 +303,7 @@ func TestRun_ObserveSeesTheWholeRun(t *testing.T) {
 
 func TestRun_ObserveErrorStopsTheRun(t *testing.T) {
 	tasksPath := filepath.Join(t.TempDir(), "tasks.yaml")
-	tasksYAML := "tasks:\n  - {id: 1, name: First, prompt: p1, state: pending}\n"
+	tasksYAML := "shared:\n  prompt: shared prompt\ntasks:\n  - {id: 1, name: First, prompt: p1, state: pending}\n"
 	require.NoError(t, os.WriteFile(tasksPath, []byte(tasksYAML), 0o600))
 
 	var calls atomic.Int32

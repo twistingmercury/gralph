@@ -35,7 +35,7 @@ func eventKinds(events []Event) []EventKind {
 
 func TestRun_ReportsTwoTaskSuccess(t *testing.T) {
 	useFakeClaude(t)
-	tl := &tasks.TaskList{Tasks: []tasks.Task{
+	tl := &tasks.TaskList{Shared: tasks.Shared{Prompt: "shared prompt"}, Tasks: []tasks.Task{
 		{ID: 1, Name: "First", Prompt: "p1"},
 		{ID: 2, Name: "Second", Prompt: "p2"},
 	}}
@@ -61,7 +61,7 @@ func TestRun_ReportsTwoTaskSuccess(t *testing.T) {
 func TestRun_ReportsFailedTask(t *testing.T) {
 	useFakeClaude(t)
 	t.Setenv("FAKE_CLAUDE_EXIT", "1")
-	tl := &tasks.TaskList{Tasks: []tasks.Task{
+	tl := &tasks.TaskList{Shared: tasks.Shared{Prompt: "shared prompt"}, Tasks: []tasks.Task{
 		{ID: 1, Name: "First", Prompt: "p1"},
 		{ID: 2, Name: "Second", Prompt: "p2"},
 	}}
@@ -77,7 +77,7 @@ func TestRun_ReportsFailedTask(t *testing.T) {
 
 func TestRun_SkippedCompletedTaskSendsNoEvent(t *testing.T) {
 	useFakeClaude(t)
-	tl := &tasks.TaskList{Tasks: []tasks.Task{
+	tl := &tasks.TaskList{Shared: tasks.Shared{Prompt: "shared prompt"}, Tasks: []tasks.Task{
 		{ID: 1, Name: "Done", Prompt: "p1", State: tasks.CompletedState},
 	}}
 

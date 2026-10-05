@@ -35,21 +35,29 @@ type Task struct {
 	Error  string `yaml:"error,omitempty"`
 }
 
-// TaskList is a whole task file. Gates is a pointer so a save can tell a file
-// with no gates key (not decided yet; the wizard asks) from gates: [] (decided:
-// none). It comes first so the list is written above the tasks.
+// Shared is what applies to every task in the file: the prompt each session
+// starts from, and the gates run after each task. Gates is a pointer so a save
+// can tell a file with no gates key (not decided yet; the wizard asks) from
+// gates: [] (decided: none).
+type Shared struct {
+	Prompt string  `yaml:"prompt"`
+	Gates  *[]Gate `yaml:"gates,omitempty"`
+}
+
+// TaskList is a whole task file. Shared comes first so it is written above the
+// tasks.
 type TaskList struct {
-	Gates *[]Gate `yaml:"gates,omitempty"`
-	Tasks []Task  `yaml:"tasks"`
+	Shared Shared `yaml:"shared"`
+	Tasks  []Task `yaml:"tasks"`
 }
 
 // GateList is the file's gates, empty when the key is absent.
 func (tl TaskList) GateList() []Gate {
-	if tl.Gates == nil {
+	if tl.Shared.Gates == nil {
 		return nil
 	}
 
-	return *tl.Gates
+	return *tl.Shared.Gates
 }
 
 func (t Task) String() string {
@@ -76,19 +84,19 @@ func ParseTasks(yml []byte) (TaskList, error) {
 		return TaskList{}, err
 	}
 
-	seq, gatesNode, err := rootNodes(&doc)
+	sharedNode, seq, err := rootNodes(&doc)
 	if err != nil {
 		return TaskList{}, err
 	}
 
-	// Gates are checked before the tasks so a file with an error in each
+	// Shared is checked before the tasks so a file with an error in each
 	// reports the same one whatever order its keys are in.
-	gates, err := decodeGates(gatesNode)
+	shared, err := decodeShared(sharedNode)
 	if err != nil {
 		return TaskList{}, err
 	}
 
-	taskList := TaskList{Gates: gates}
+	taskList := TaskList{Shared: shared}
 	ids := make(map[int16]int)
 	names := make(map[string]int)
 	for i, el := range seq.Content {
@@ -126,33 +134,54 @@ func checkDuplicate(ids map[int16]int, names map[string]int, i int, task Task, w
 	return nil
 }
 
-// rootNodes walks the document's top-level mapping once and returns the
-// non-empty sequence under its single tasks key and the node under its gates
-// key, nil when the file has none.
-func rootNodes(doc *yaml.Node) (seq, gates *yaml.Node, err error) {
+const gatesMoved = "gates: gates are set under shared now, as shared.gates; see the HOWTO"
+
+// rootNodes walks the document's top-level mapping once and returns the shared
+// mapping and the non-empty tasks sequence. Any other key is an error: a typo
+// or a leftover from the old two-file format must not hide, and an old
+// top-level gates list would otherwise leave a run with no checks (ADR-020).
+func rootNodes(doc *yaml.Node) (shared, seq *yaml.Node, err error) {
 	if len(doc.Content) == 0 || doc.Content[0].Kind != yaml.MappingNode {
-		return nil, nil, errors.New("tasks: is required")
+		return nil, nil, errors.New("shared: is required")
 	}
 
 	root := doc.Content[0].Content
 	for i := 0; i+1 < len(root); i += 2 {
-		switch root[i].Value {
-		case "tasks":
-			if seq != nil {
-				return nil, nil, errors.New("tasks: duplicate key")
-			}
-
-			seq = root[i+1]
-		case "gates":
-			if gates != nil {
-				return nil, nil, errors.New("gates: duplicate key")
-			}
-
-			gates = root[i+1]
+		shared, seq, err = takeRootKey(root[i].Value, root[i+1], shared, seq)
+		if err != nil {
+			return nil, nil, err
 		}
 	}
 
+	return checkRoot(shared, seq)
+}
+
+// takeRootKey files one top-level key under shared or tasks, or rejects it.
+func takeRootKey(key string, node, shared, seq *yaml.Node) (*yaml.Node, *yaml.Node, error) {
+	switch key {
+	case "shared":
+		if shared != nil {
+			return nil, nil, errors.New("shared: duplicate key")
+		}
+
+		return node, seq, nil
+	case "tasks":
+		if seq != nil {
+			return nil, nil, errors.New("tasks: duplicate key")
+		}
+
+		return shared, node, nil
+	case "gates":
+		return nil, nil, errors.New(gatesMoved)
+	}
+
+	return nil, nil, fmt.Errorf("%s: unknown key; a task file has only shared and tasks", key)
+}
+
+func checkRoot(shared, seq *yaml.Node) (*yaml.Node, *yaml.Node, error) {
 	switch {
+	case shared == nil:
+		return nil, nil, errors.New("shared: is required")
 	case seq == nil:
 		return nil, nil, errors.New("tasks: is required")
 	case seq.Kind != yaml.SequenceNode:
@@ -161,7 +190,56 @@ func rootNodes(doc *yaml.Node) (seq, gates *yaml.Node, err error) {
 		return nil, nil, errors.New("tasks: must contain at least one task")
 	}
 
-	return seq, gates, nil
+	return shared, seq, nil
+}
+
+// decodeShared checks the shared mapping and returns it with the prompt
+// trimmed, as the prompt file was.
+func decodeShared(node *yaml.Node) (Shared, error) {
+	if node.Kind == yaml.AliasNode {
+		node = node.Alias
+	}
+
+	if node.Kind != yaml.MappingNode {
+		return Shared{}, errors.New("shared: must be a mapping")
+	}
+
+	fields, err := taskFields("shared", node)
+	if err != nil {
+		return Shared{}, err
+	}
+
+	for key := range fields {
+		if key != "prompt" && key != "gates" {
+			return Shared{}, fmt.Errorf("shared.%s: unknown key; shared has only prompt and gates", key)
+		}
+	}
+
+	if err := checkSharedPrompt(fields["prompt"]); err != nil {
+		return Shared{}, err
+	}
+
+	gates, err := decodeGates(fields["gates"])
+	if err != nil {
+		return Shared{}, err
+	}
+
+	return Shared{Prompt: strings.TrimSpace(fields["prompt"].Value), Gates: gates}, nil
+}
+
+// checkSharedPrompt applies the task prompt's rules and names the field the
+// way the file spells it.
+func checkSharedPrompt(node *yaml.Node) error {
+	switch {
+	case node == nil:
+		return errors.New("shared.prompt: is required")
+	case node.Kind != yaml.ScalarNode || node.Tag != "!!str":
+		return errors.New("shared.prompt: must be a string")
+	case strings.TrimSpace(node.Value) == "":
+		return errors.New("shared.prompt: must not be empty or whitespace")
+	}
+
+	return nil
 }
 
 // decodeGates returns a non-nil slice for gates: [] so a save writes the key
@@ -177,7 +255,7 @@ func decodeGates(node *yaml.Node) (*[]Gate, error) {
 
 	gates := []Gate{}
 	if err := node.Decode(&gates); err != nil {
-		return nil, fmt.Errorf("gates: %w", err)
+		return nil, fmt.Errorf("shared.gates: %w", err)
 	}
 
 	return &gates, nil
@@ -213,7 +291,7 @@ func parseTask(i int, el *yaml.Node) (Task, string, error) {
 	// An error rather than a quietly dropped key: dropping it would leave an
 	// old file running every task with no checks at all (ADR-019).
 	if fields["gates"] != nil {
-		return Task{}, where, fmt.Errorf("%s: gates: gates are set once for the whole file now, as a top-level gates: list; see the HOWTO", where)
+		return Task{}, where, fmt.Errorf("%s: gates: gates are set once for the whole file, as shared.gates; see the HOWTO", where)
 	}
 
 	task, err := decodeTask(where, el)
@@ -295,11 +373,11 @@ func checkGates(node *yaml.Node) error {
 	}
 
 	if node.Kind != yaml.SequenceNode {
-		return errors.New("gates: must be a sequence")
+		return errors.New("shared.gates: must be a sequence")
 	}
 
 	for j, el := range node.Content {
-		gateWhere := fmt.Sprintf("gates[%d]", j)
+		gateWhere := fmt.Sprintf("shared.gates[%d]", j)
 		if err := checkGate(gateWhere, el); err != nil {
 			return err
 		}
