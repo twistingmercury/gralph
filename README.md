@@ -47,7 +47,7 @@ fixing your `PATH`, macOS notes, and upgrading are in
 ## Usage
 
 ```bash
-gralph --install-skill   # once: installs the gralph-docs-writer skill for Claude Code
+gralph --install-skill   # installs the gralph-docs-writer skill for Claude Code
 gralph -t path/to/tasks.yaml --dry-run
 gralph --tasks path/to/tasks.yaml --sandbox-settings path/to/sandbox.json
 gralph -d path/to/folder

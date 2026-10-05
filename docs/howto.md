@@ -146,9 +146,11 @@ refuses to run `gralph`. Clear that with:
 xattr -d com.apple.quarantine ~/.local/bin/gralph
 ```
 
-To upgrade, do the same steps with the new version. Don't skip
-`gralph --install-skill`: gralph won't start a run while the installed skill
-comes from a different version. If `gralph --version` still prints the old
+To upgrade, do the same steps with the new version. After upgrading, run
+`gralph --install-skill` to get the skill that matches your new binary:
+it replaces `~/.claude/skills/gralph-docs-writer/` with the matching copy.
+If you've edited the skill, copy it somewhere safe first, as re-running the
+command replaces the folder. If `gralph --version` still prints the old
 version, an older copy sits earlier on your `PATH` (`~/go/bin/gralph`, if you
 once built from source). `which gralph` shows which one runs; remove it.
 
@@ -159,10 +161,10 @@ If you'd rather build gralph yourself, get the source and run
 
 Here's the quick path from zero to a working run:
 
-1. **Install the skill.** Run `gralph --install-skill` once. It replaces
-   `~/.claude/skills/gralph-docs-writer/` with the copy that matches your
-   gralph binary. The skill helps you write task files. You can also write
-   them by hand.
+1. **Install the skill (optional).** Run `gralph --install-skill` to install
+   the `gralph-docs-writer` skill into `~/.claude/skills/gralph-docs-writer/`.
+   The skill helps you write task files from a plan. You can skip this and
+   write them by hand, or write them later.
 
 2. **Get a task file.** The skill generates one from a plan, shared prompt
    included. Or write it yourself (see [The task file](#the-task-file) for
@@ -286,16 +288,17 @@ validation line prints `sandbox settings: <folder>/sandbox.json`.
 
 Writing a good task file by hand is tedious, so gralph ships a Claude Code
 skill, `gralph-docs-writer`, that turns a plan into a task file, shared prompt
-included. It's built into the binary:
+included. It's built into the binary and can be installed with:
 
 ```bash
 gralph --install-skill
 ```
 
 That replaces `~/.claude/skills/gralph-docs-writer/` with the copy that matches
-your gralph binary and prints the path. A run or `--dry-run` won't start
-(exit 1) while the skill is missing or came from a different gralph version;
-it tells you to run `gralph --install-skill`.
+your gralph binary and prints the path. Gralph runs without the skill, and
+you can write a task file by hand. A stale skill may generate a file your
+current gralph rejects; if so, the parser error names the field, and you can
+fix the file or reinstall the skill.
 
 ## How a run works
 

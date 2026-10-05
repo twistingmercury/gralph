@@ -1,8 +1,8 @@
 # Gralph — System Architecture
 
-> **Version**: v24
+> **Version**: v25
 > **Date**: 2026-10-05
-> **Notes**: `-d` resolves the run folder's `sandbox.json` to `--sandbox-settings` (ADR-021): `resolveSandbox`, `FolderSandbox`, `findSandbox`, and `appendSandbox` are new; the command line printed by the wizard omits `--sandbox-settings` when the file is the folder's fixed name.
+> **Notes**: Gralph no longer checks the installed skill (ADR-022): removed the skill check from the startup order, added the `internal/skillinstall` section describing only the `Install` function; the startup order no longer names the skill check. Earlier: ADR-021 made `-d` resolve the run folder's `sandbox.json`.
 
 [Back to Overview](00_overview.md) | [Back to Project README](../../README.md)
 
@@ -66,9 +66,9 @@ graph TB
 - Parse command-line flags (--dir, --tasks, --sandbox-settings, --skip-permissions, --dry-run, --no-tui, --gate-timeout, --commit, --log-dir, --install-skill, --version)
 - Resolve `--dir` first (ADR-018, ADR-021): `validateDir` calls `resolveDir` (fills an unset `--tasks` with `<folder>/tasks.yaml`, `--tasks` always wins over the folder's file, a folder with no `tasks.yaml` and no `--tasks` exits 1 with `--dir: no tasks.yaml in <folder>`) and `resolveSandbox` (fills an unset `--sandbox-settings` from `<folder>/sandbox.json` if it exists as a regular file and neither permission flag was passed, ADR-021; an explicit flag wins, and `--skip-permissions` opts out with no error). Every later check sees the resolved paths
 - Validate `--gate-timeout` (if set) before any load or run; bad value exits 1. `validateGateTimeout` uses `tasks.ParseTimeout`, the same parser and rules as a gate's `timeout` field
-- Startup order: `--dir`, `--gate-timeout` check, mode selection, plain mode's required flags, `validateLogDir`, `validateSessionFlags`, the skill check, then the dry run, plain run, or TUI. Every startup error in `main` goes through `fatal` (`error: ` prefix, exit 1)
+- Startup order: `--dir`, `--gate-timeout` check, mode selection, plain mode's required flags, `validateLogDir`, `validateSessionFlags`, then the dry run, plain run, or TUI. Every startup error in `main` goes through `fatal` (`error: ` prefix, exit 1)
 - Choose the mode: plain when `--dry-run`, `--no-tui`, or stdin or stdout is not a terminal (`github.com/charmbracelet/x/term`); otherwise the TUI
-- Pick the session flags (`validateSessionFlags`/`sessionArgs`), after the `--gate-timeout` check and plain mode's required flags and before the skill check: `looper.SandboxArgs` for `--sandbox-settings`, `looper.BypassArgs` for `--skip-permissions`. Both flags together exits 1; so does neither on a real run in plain mode. In TUI mode neither passes with no session args (`sessionArgs`'s `wizard` argument), because the wizard asks; `recheck` runs `sessionArgs` again, strict, on its answer. An empty `--sandbox-settings=` counts as not passed. A dry run needs neither, but a settings file it is given is still checked. The result goes to `looper.Start` and `tui.Run`
+- Pick the session flags (`validateSessionFlags`/`sessionArgs`), after the `--gate-timeout` check and plain mode's required flags: `looper.SandboxArgs` for `--sandbox-settings`, `looper.BypassArgs` for `--skip-permissions`. Both flags together exits 1; so does neither on a real run in plain mode. In TUI mode neither passes with no session args (`sessionArgs`'s `wizard` argument), because the wizard asks; `recheck` runs `sessionArgs` again, strict, on its answer. An empty `--sandbox-settings=` counts as not passed. A dry run needs neither, but a settings file it is given is still checked. The result goes to `looper.Start` and `tui.Run`
 - Plain mode: validate required flags and `--gate-timeout`, then route to `looper.Start` (normal run) or `looper.DryRun` (validation only)
 - TUI mode (`runTUI`), split along its seams:
   1. Load the given path with `loadGiven` (`looper.LoadTasksReport`; a failed task prints the `PrintTasks` table and exits 1, as in plain mode) and build a `tui.Settings` from the flags and what loaded
@@ -301,6 +301,22 @@ graph TB
 | Output              | `run.jsonl` (one JSON object per line, each with `time` and `event`) and one `task-<id>.log` per task that ran |
 | Used in             | TUI mode only; plain mode and `--dry-run` never open a log                                                     |
 | Error Handling      | `Open` errors exit 1 before the view opens (`--log-dir: ...`); a `Record` error stops the run                  |
+
+### Skill Installer (internal/skillinstall)
+
+**Responsibilities:**
+
+- `Install()`: copy the embedded `gralph-docs-writer` skill from the binary into `~/.claude/skills/gralph-docs-writer/`, replacing any existing copy (ADR-009). Returns the path, or an error if `os.UserHomeDir`, `RemoveAll`, or `WalkDir` fails. Does not write a version file. Called by `--install-skill` (see `cmd/main`'s `checkInstallSkill`)
+- Gralph does not check for the installed skill: a missing, edited, or stale skill never stops a run or `--dry-run` (ADR-022). The skill is a helper only; if a stale version generates a task file the current parser rejects, the error message names the field, and a user can fix it manually or run `--install-skill` again
+
+**Key Characteristics:**
+
+| Characteristic      | Value                                                           |
+| ------------------- | --------------------------------------------------------------- |
+| Used by             | `cmd/main` only (when `--install-skill` is passed)              |
+| Imports             | `io/fs`, `os`, `path/filepath`, and `internal/skills` (embedded) |
+| Execution           | Runs at startup if `--install-skill` is set; exits 0 on success |
+| Error Handling      | Any I/O error exits 1 with `fatal` prefix                       |
 
 ## Test Seam
 
